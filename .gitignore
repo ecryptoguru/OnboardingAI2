@@ -32,7 +32,7 @@ env/
 ENV/
 env.bak/
 venv.bak/
-
+.env
 # Node / Vite (Frontend)
 frontend/node_modules/
 frontend/dist/
@@ -52,3 +52,5 @@ ehthumbs.db
 Thumbs.db
 
 /docs/
+
+.agent
