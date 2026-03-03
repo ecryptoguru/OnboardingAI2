@@ -1,0 +1,207 @@
+import { defineSchema, defineTable } from "convex/server";
+import { v } from "convex/values";
+import { authTables } from "@convex-dev/auth/server";
+
+export default defineSchema({
+  ...authTables,
+  // ─── Universities ─────────────────────────────────────────────────────────
+  universities: defineTable({
+    university_name: v.string(),
+    state: v.optional(v.string()),
+    city: v.optional(v.string()),
+    website: v.optional(v.string()),
+    website_status: v.union(
+      v.literal("pending"),
+      v.literal("valid"),
+      v.literal("invalid"),
+      v.literal("discovered")
+    ),
+    lead_tier: v.optional(
+      v.union(v.literal("High"), v.literal("Medium"), v.literal("Low"))
+    ),
+    outreach_stage: v.optional(
+      v.union(
+        v.literal("new"),
+        v.literal("enriching"),
+        v.literal("enriched"),
+        v.literal("sequencing"),
+        v.literal("outreach_active"),
+        v.literal("replied"),
+        v.literal("meeting_booked"),
+        v.literal("proposal_sent"),
+        v.literal("closed"),
+        v.literal("not_interested")
+      )
+    ),
+    address: v.optional(v.string()),
+    zip_code: v.optional(v.string()),
+    ugc_status: v.optional(v.string()), // e.g. "2(f) & 12(B)"
+    vc_name: v.optional(v.string()),
+    registrar_name: v.optional(v.string()),
+    student_count: v.optional(v.number()),
+    type: v.optional(v.string()), // "Private" | "Public" | "Deemed" | "Central" | "State"
+    naac_grade: v.optional(v.string()),
+    established_year: v.optional(v.number()),
+    notes: v.optional(v.string()),
+    demographics: v.optional(
+      v.object({
+        total_students: v.optional(v.number()),
+        total_students_male: v.optional(v.number()),
+        total_students_female: v.optional(v.number()),
+        day_scholars: v.optional(v.number()),
+        day_scholars_male: v.optional(v.number()),
+        day_scholars_female: v.optional(v.number()),
+        hostelites: v.optional(v.number()),
+        hostelites_male: v.optional(v.number()),
+        hostelites_female: v.optional(v.number()),
+        source: v.optional(v.string()), // e.g., "aishe.gov.in"
+      })
+    ),
+    created_at: v.number(), // Unix ms
+    updated_at: v.number(),
+  })
+    .index("by_website_status", ["website_status"])
+    .index("by_lead_tier", ["lead_tier"])
+    .index("by_outreach_stage", ["outreach_stage"])
+    .index("by_created_at", ["created_at"])
+    .index("by_type", ["type"])
+    .searchIndex("search_name", { searchField: "university_name" }),
+
+  // ─── Stakeholders ─────────────────────────────────────────────────────────
+  stakeholders: defineTable({
+    university_id: v.id("universities"),
+    name: v.optional(v.string()),
+    role: v.optional(v.string()), // "Vice Chancellor", "Registrar", etc.
+    email: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    linkedin_url: v.optional(v.string()),
+    is_primary: v.boolean(),
+    source: v.optional(v.string()), // "scraper" | "serper" | "manual"
+    created_at: v.number(),
+  })
+    .index("by_university", ["university_id"])
+    .index("by_email", ["email"]),
+
+  // ─── Priority Scores ──────────────────────────────────────────────────────
+  priorityScores: defineTable({
+    university_id: v.id("universities"),
+    deterministic_score: v.number(), // 0-100
+    ai_score: v.optional(v.number()), // 0-10 from Gemini
+    final_score: v.number(), // weighted composite
+    scoring_factors: v.object({
+      student_count_score: v.number(),
+      naac_score: v.number(),
+      digital_presence_score: v.number(),
+      news_activity_score: v.number(),
+      location_score: v.number(),
+    }),
+    scored_at: v.number(),
+  }).index("by_university", ["university_id"]),
+
+  // ─── University Signals (with vector embeddings for RAG) ──────────────────
+  universitySignals: defineTable({
+    university_id: v.id("universities"),
+    signal_type: v.union(
+      v.literal("news"),
+      v.literal("linkedin"),
+      v.literal("website"),
+      v.literal("manual"),
+      v.literal("image"),
+      v.literal("source")
+    ),
+    content: v.string(),
+    source_url: v.optional(v.string()),
+    embedding: v.array(v.float64()), // 768-dim from text-embedding-004
+    created_at: v.number(),
+  })
+    .index("by_university", ["university_id"])
+    .vectorIndex("by_embedding", {
+      vectorField: "embedding",
+      dimensions: 768,
+      filterFields: ["university_id"],
+    }),
+
+  // ─── Outreach Sequences ───────────────────────────────────────────────────
+  outreachSequences: defineTable({
+    university_id: v.id("universities"),
+    stakeholder_id: v.id("stakeholders"),
+    status: v.union(
+      v.literal("active"),
+      v.literal("paused"),
+      v.literal("completed"),
+      v.literal("opted_out")
+    ),
+    current_step: v.number(), // 1-based step index
+    total_steps: v.number(),
+    next_send_at: v.optional(v.number()), // Unix ms
+    created_at: v.number(),
+    updated_at: v.number(),
+  })
+    .index("by_university", ["university_id"])
+    .index("by_status_next_send", ["status", "next_send_at"]),
+
+  // ─── Emails Sent ──────────────────────────────────────────────────────────
+  emailsSent: defineTable({
+    sequence_id: v.optional(v.id("outreachSequences")),
+    university_id: v.id("universities"),
+    stakeholder_id: v.id("stakeholders"),
+    step_number: v.number(),
+    subject: v.string(),
+    body: v.string(),
+    sendgrid_message_id: v.optional(v.string()),
+    status: v.union(
+      v.literal("queued"),
+      v.literal("sent"),
+      v.literal("delivered"),
+      v.literal("opened"),
+      v.literal("clicked"),
+      v.literal("bounced"),
+      v.literal("failed")
+    ),
+    sent_at: v.optional(v.number()),
+    opened_at: v.optional(v.number()),
+  })
+    .index("by_sequence", ["sequence_id"])
+    .index("by_sendgrid_id", ["sendgrid_message_id"]),
+
+  // ─── Reply Logs ───────────────────────────────────────────────────────────
+  replyLogs: defineTable({
+    university_id: v.id("universities"),
+    stakeholder_id: v.id("stakeholders"),
+    email_id: v.optional(v.id("emailsSent")),
+    raw_reply: v.string(),
+    classification: v.optional(
+      v.union(
+        v.literal("meeting_request"),
+        v.literal("positive_interest"),
+        v.literal("request_info"),
+        v.literal("not_interested"),
+        v.literal("opt_out"),
+        v.literal("out_of_office"),
+        v.literal("other")
+      )
+    ),
+    confidence: v.optional(v.number()), // 0-1
+    classified_at: v.optional(v.number()),
+    received_at: v.number(),
+  })
+    .index("by_university", ["university_id"])
+    .index("by_classification", ["classification"]),
+
+  // ─── Proposals ────────────────────────────────────────────────────────────
+  proposals: defineTable({
+    university_id: v.id("universities"),
+    meeting_date: v.optional(v.number()),
+    agenda: v.optional(v.string()),
+    proposal_json: v.optional(v.string()), // JSON string of structured proposal
+    recommended_modules: v.optional(v.array(v.string())),
+    pdf_storage_id: v.optional(v.id("_storage")),
+    status: v.union(
+      v.literal("draft"),
+      v.literal("ready"),
+      v.literal("sent")
+    ),
+    created_at: v.number(),
+    updated_at: v.number(),
+  }).index("by_university", ["university_id"]),
+});

@@ -1,12 +1,12 @@
-# FRETBOX OUTREACH AI — INITIAL AGENT PROMPT
+# FRETBOX OUTREACH AI — INITIAL AGENT PROMPT (v2 — Convex Edition)
 ### Copy everything below the line and paste as your first message to the agent.
 
 ---
 ---
 
-You are a senior full-stack engineer. Your job is to build **Fretbox Outreach AI** — a semi-autonomous B2B outreach system that helps a SaaS company (Fretbox) acquire Indian universities as clients.
+You are a senior full-stack engineer specializing in TypeScript and Convex. Your job is to build **Fretbox Outreach AI v2** — a semi-autonomous B2B outreach system that helps a SaaS company (Fretbox) acquire Indian universities as clients.
 
-Read every section of this prompt carefully before writing a single line of code. Your execution must follow the phased order defined below. Do not skip ahead. Do not improvise the tech stack.
+**This is a greenfield v2 rewrite.** The previous Python/FastAPI/Celery/Supabase stack is being completely replaced by a Convex-native TypeScript backend. Read every section carefully before writing any code. Follow the phased order exactly.
 
 ---
 
@@ -15,51 +15,53 @@ Read every section of this prompt carefully before writing a single line of code
 The system performs this pipeline, fully automated:
 
 ```
-UGC Excel Upload
+UGC CSV Upload → Convex Storage → parse Action
      ↓
-Website Discovery (Google CSE + Playwright fallback)
+Website Discovery → Serper.dev REST API
      ↓
-Stakeholder Extraction (Playwright scraper → Vice Chancellors, Registrars, etc.)
+Stakeholder Extraction → fetch() HTML parse → Jina Reader fallback (free)
      ↓
-LinkedIn + News Enrichment (Google CSE queries)
+LinkedIn + News Enrichment → Serper.dev queries
      ↓
-Priority Scoring (Deterministic formula + LLM scoring = Lead Tier: High/Medium/Low)
+Priority Scoring → Deterministic formula + Gemini 3 Flash AI score
      ↓
-Tiered Email Outreach (Celery Beat cadence: High=4 touches, Medium=3, Low=1)
+Tiered Email Outreach → Convex Cron → SendGrid → (High=4, Medium=3, Low=1 touches)
      ↓
-Reply Classification (LLM → meeting_request / not_interested / opt_out / etc.)
+Reply Classification → Claude Sonnet 4.6 → 7 categories
      ↓
-Action Dispatch (Send Calendly link / pause sequence / auto-respond)
+Action Dispatch → schedule follow-ups / pause / Calendly link
      ↓
-Meeting Booked (Calendly webhook → notify sales + generate agenda)
+Meeting Booked → Calendly webhook → Convex HTTP Action
      ↓
-AI Proposal Generated (LLM → structured JSON → WeasyPrint PDF → S3)
+AI Proposal → Claude Sonnet 4.6 + Vector Search → @react-pdf → Convex Storage
 ```
 
 ---
 
 ## TECH STACK — NON-NEGOTIABLE. USE EXACTLY THESE.
 
-| Layer | Technology |
-|---|---|
-| Backend API | FastAPI (Python 3.11+), Pydantic v2 |
-| ORM | SQLAlchemy 2.0 async |
-| Task Queue | Celery 5.x + Celery Beat |
-| Message Broker | Redis (Redis Cloud in prod, local Redis in dev) |
-| Database | Supabase PostgreSQL (asyncpg driver) |
-| File Storage | Supabase Storage (Using supabase-py client) |
-| Web Scraping | Serper.dev (Search/Discovery) + Playwright Python (Extraction) |
-| LLM | OpenAI Python SDK — GPT-4o, always use `response_format={"type": "json_object"}` for structured outputs |
-| Email Delivery | SendGrid Python SDK |
-| Inbound Email | SendGrid Inbound Parse webhook |
-| PDF Generation | WeasyPrint |
-| Frontend | React 18 + Vite + Tailwind CSS v3 |
-| Data Fetching | TanStack React Query v5 |
-| Routing | React Router v6 |
-| Deployment | Fly.io (backend + worker) + Vercel (frontend) |
-| Testing | pytest + pytest-asyncio + httpx |
-| Logging | structlog (JSON structured logs, not print()) |
-| Error Tracking | Sentry SDK (FastAPI + Celery) |
+| Layer             | Technology                                                        |
+|-------------------|-------------------------------------------------------------------|
+| Backend           | **Convex** (TypeScript) — Queries, Mutations, Actions, HTTP Actions|
+| Database          | **Convex DB** (Document-Relational, reactive, serverless)         |
+| Task Queue        | **Convex Cron Jobs + Scheduled Functions** (replaces Celery+Redis)|
+| AI Agents         | **@convex-dev/agent** (persistent memory, threads, streaming)     |
+| High-Tier LLM     | **Claude Sonnet 4.6** — Anthropic API direct (proposals, classification) |
+| Fast-Tier LLM     | **Gemini 3 Flash** — Google AI API (scoring, email personalization, vision) |
+| Vector Embeddings | **text-embedding-004** — Google AI, 768-dim, same key as Gemini  |
+| Vector Search     | **Convex Native Vector Search** (768-dim)                        |
+| Web Scraping      | **fetch() + HTML parse → Jina Reader** (`r.jina.ai`) fallback (free, no key) |
+| File Storage      | **Convex File Storage** (PDFs, CSVs, assets)                      |
+| Email Delivery    | **SendGrid REST API** via `fetch()` from Convex Actions           |
+| Inbound Email     | **SendGrid Inbound Parse** → Convex HTTP Action webhook           |
+| PDF Generation    | **@react-pdf/renderer** — TypeScript-native PDF rendering         |
+| Frontend          | **Next.js 15** (App Router) + **React 19**                        |
+| Data Fetching     | **Convex React hooks**: `useQuery`, `useMutation`, `useAction`    |
+| Auth              | **Convex Native Auth** — email/password (no Clerk, no external service) |
+| Deployment        | **Vercel** (Next.js frontend) + **Convex Cloud** (backend, zero config)|
+| Error Tracking    | **Sentry** (`@sentry/nextjs`) — capture in Action catch blocks    |
+
+**Eliminated from v1:** FastAPI, Celery, Redis, SQLAlchemy, asyncpg, Supabase PostgreSQL, Supabase Storage, supabase-py, WeasyPrint, Jinja2, structlog, Docker, Fly.io, Browserbase, Firecrawl, Clerk, OpenRouter, OpenAI.
 
 ---
 
@@ -67,112 +69,101 @@ AI Proposal Generated (LLM → structured JSON → WeasyPrint PDF → S3)
 
 ```
 fretbox-outreach/
-├── backend/
-│   ├── app/
-│   │   ├── main.py                  # FastAPI app factory + lifespan
-│   │   ├── config.py                # Pydantic BaseSettings (all env vars)
-│   │   ├── database.py              # Async SQLAlchemy engine + get_db()
-│   │   ├── models/
-│   │   │   ├── university.py
-│   │   │   ├── stakeholder.py
-│   │   │   ├── signal.py
-│   │   │   ├── priority_score.py
-│   │   │   ├── outreach_sequence.py
-│   │   │   ├── email_sent.py
-│   │   │   ├── reply_log.py
-│   │   │   └── proposal.py
-│   │   ├── schemas/                 # Pydantic request/response schemas
-│   │   ├── routers/
-│   │   │   ├── ingest.py
-│   │   │   ├── universities.py
-│   │   │   ├── enrichment.py
-│   │   │   ├── outreach.py
-│   │   │   ├── proposals.py
-│   │   │   └── webhooks.py
-│   │   ├── services/                # Pure business logic (no HTTP, no DB)
-│   │   └── tasks/
-│   │       ├── website_tasks.py
-│   │       ├── scraper_tasks.py
-│   │       ├── enrichment_tasks.py
-│   │       ├── scoring_tasks.py
-│   │       ├── outreach_tasks.py
-│   │       ├── reply_tasks.py
-│   │       └── proposal_tasks.py
-│   ├── utils/
-│   │   ├── s3.py
-│   │   ├── llm.py
-│   │   ├── email_service.py
-│   │   └── scraper.py
-│   ├── templates/
-│   │   ├── email/
-│   │   │   ├── intro.html
-│   │   │   ├── followup_1.html
-│   │   │   ├── followup_2.html
-│   │   │   └── final.html
-│   │   └── proposal/
-│   │       └── proposal.html
-│   ├── celery_app.py
-│   ├── requirements.txt
-│   ├── Dockerfile
-│   └── fly.toml
-├── frontend/
-│   ├── src/
-│   │   ├── pages/
-│   │   │   ├── Dashboard.jsx
-│   │   │   ├── Universities.jsx
-│   │   │   ├── Enrichment.jsx
-│   │   │   ├── Outreach.jsx
-│   │   │   └── Proposals.jsx
-│   │   ├── components/
-│   │   └── hooks/
-│   ├── package.json
-│   └── vercel.json
-├── docker-compose.yml
-├── .env.example
-└── README.md
+├── convex/                          # ALL backend logic lives here
+│   ├── schema.ts                    # Convex DB schema (all 8 tables)
+│   ├── _generated/                  # Auto-generated by Convex CLI (do not edit)
+│   ├── http.ts                      # HTTP Actions: webhooks (SendGrid, Calendly)
+│   ├── crons.ts                     # Cron job definitions (replaces Celery Beat)
+│   ├── universities.ts              # Queries + Mutations for universities table
+│   ├── stakeholders.ts              # Queries + Mutations for stakeholders
+│   ├── signals.ts                   # Queries + Mutations for universitySignals
+│   ├── sequences.ts                 # Queries + Mutations for outreachSequences
+│   ├── emails.ts                    # Queries + Mutations for emailsSent
+│   ├── replies.ts                   # Queries + Mutations for replyLogs
+│   ├── proposals.ts                 # Queries + Mutations for proposals
+│   ├── actions/
+│   │   ├── ingest.ts                # CSV/Excel parsing + bulk insert
+│   │   ├── websiteDiscovery.ts      # Serper.dev API calls for website search
+│   │   ├── scraper.ts               # fetch() + Jina Reader fallback (free)
+│   │   ├── enrichment.ts            # LinkedIn + news enrichment via Serper.dev
+│   │   ├── scoring.ts               # AI scoring via Gemini 3 Flash
+│   │   ├── email.ts                 # SendGrid REST API calls
+│   │   ├── replyClassifier.ts       # Claude Sonnet 4.6 reply classification
+│   │   └── proposalGenerator.ts    # Claude Sonnet 4.6 + vector search for proposals
+│   └── lib/
+│       ├── llm.ts                   # Anthropic + Google AI clients (2 keys)
+│       ├── scoring.ts               # Deterministic scoring formula (TS port)
+│       ├── emailTemplates.ts        # Email template strings (replaces Jinja2)
+│       └── moduleRecommender.ts    # Module recommendation logic (TS port)
+├── app/                             # Next.js 15 App Router
+│   ├── layout.tsx                   # Root layout + ConvexAuthNextjsServerProvider
+│   ├── (dashboard)/
+│   │   ├── layout.tsx               # Sidebar layout
+│   │   ├── page.tsx                 # Dashboard overview
+│   │   ├── universities/page.tsx    # Universities list + CSV upload
+│   │   ├── enrichment/page.tsx      # Per-university enrichment panel
+│   │   ├── outreach/page.tsx        # Kanban board (real-time)
+│   │   └── proposals/page.tsx       # Proposal cards + PDF viewer
+│   └── (auth)/
+│       ├── sign-in/[[...sign-in]]/page.tsx
+│       └── sign-up/[[...sign-up]]/page.tsx
+├── components/
+│   ├── ui/                          # Shadcn/ui components
+│   ├── universities/
+│   ├── enrichment/
+│   ├── outreach/
+│   └── proposals/
+├── package.json
+├── next.config.ts
+├── tailwind.config.ts
+├── middleware.ts                    # Clerk auth middleware
+└── .env.local                       # NEXT_PUBLIC_CONVEX_URL, Clerk keys only
 ```
+
+**No `/backend` directory. No `/docker-compose.yml`. No Python files.**
 
 ---
 
-## ALL ENVIRONMENT VARIABLES
+## ENVIRONMENT VARIABLES
 
-Create `.env.example` with these exact keys:
+**Frontend `.env.local`** (public vars only):
 
 ```env
-# Database
-DATABASE_URL=postgresql+asyncpg://user:password@host:5432/dbname
-SUPABASE_URL=
-SUPABASE_SERVICE_KEY=
+NEXT_PUBLIC_CONVEX_URL=https://your-deployment.convex.cloud
+NEXT_PUBLIC_SENTRY_DSN=
+```
 
-# Redis
-REDIS_URL=redis://localhost:6379/0
+**Convex Backend Secrets** — set via CLI, never in files:
 
-# SendGrid
-SENDGRID_API_KEY=
-SENDGRID_FROM_EMAIL=outreach@fretbox.in
-SENDGRID_FROM_NAME=Fretbox Team
-SENDGRID_WEBHOOK_SECRET=
+```bash
+# AI — 2 keys total (no OpenAI, no OpenRouter)
+npx convex env set ANTHROPIC_API_KEY "sk-ant-..."   # Claude Sonnet 4.6
+npx convex env set GOOGLE_AI_API_KEY "AIza..."       # Gemini 3 Flash + text-embedding-004
 
-# Serper.dev
-SERPER_API_KEY=
+# Email
+npx convex env set SENDGRID_API_KEY "SG..."
+npx convex env set SENDGRID_FROM_EMAIL "outreach@fretbox.in"
+npx convex env set SENDGRID_WEBHOOK_SECRET "..."
+
+# Search
+npx convex env set SERPER_API_KEY "..."
 
 # Calendly
-CALENDLY_WEBHOOK_SECRET=
-CALENDLY_LINK=https://calendly.com/fretbox/demo
+npx convex env set CALENDLY_WEBHOOK_SECRET "..."
+npx convex env set CALENDLY_LINK "https://calendly.com/fretbox/demo"
 
-# App
-FRONTEND_URL=http://localhost:5173
-ENVIRONMENT=development
-
-# Sentry
-SENTRY_DSN=
+# Monitoring
+npx convex env set SENTRY_DSN "..."
 ```
+
+> Jina Reader (`r.jina.ai`) requires NO API key — just `fetch()` with the URL prefixed.
+Access in Convex actions via `process.env.ANTHROPIC_API_KEY`.
 
 ---
 
-## DATABASE SCHEMA — ALL 8 TABLES
+## DATABASE SCHEMA — CONVEX TYPESCRIPT DEFINITION
 
-Run this SQL in Supabase SQL Editor. Create all tables before writing any ORM models.
+Create `convex/schema.ts`. This replaces all SQL DDL statements. Convex handles schema creation automatically.
 
 ```sql
 -- Enable UUID
@@ -302,45 +293,54 @@ CREATE INDEX idx_reply_logs_processed ON reply_logs(processed);
 
 ## PRIORITY SCORING FORMULA
 
-Implement this exactly in `services/scoring_service.py`:
+Implement this exactly in `convex/lib/scoring.ts`:
 
-```python
-SCORING_FACTORS = {
-    "private_university":          15,  # university_type in ['private', 'deemed']
-    "recently_in_news":            15,  # signal_type='news' exists
-    "naac_a_plus":                 10,  # signal_value='A++'
-    "naac_a":                       8,  # signal_value='A' or 'A+'
-    "has_it_or_admin_page":        10,  # detected IT/Admin/ERP page on site
-    "modern_website":               5,  # JS framework detected (React/Angular/Vue)
-    "multiple_emails_found":       10,  # stakeholders count >= 3
-    "tier1_city":                  10,  # city in ['Mumbai','Delhi','Bangalore','Hyderabad','Chennai','Pune','Kolkata']
-    "edu_or_ac_domain":             5,  # website ends in .edu.in or .ac.in
-    "digital_transformation_mention": 10,  # keyword detected in site content
-}
-# Max deterministic = 98
+```typescript
+// convex/lib/scoring.ts
+export const SCORING_FACTORS: Record<string, number> = {
+  private_university:           15, // university_type in ['private', 'deemed']
+  recently_in_news:             15, // signal_type='news' exists
+  naac_a_plus:                  10, // signal_value='A++'
+  naac_a:                        8, // signal_value='A' or 'A+'
+  has_it_or_admin_page:         10, // detected IT/Admin/ERP page on site
+  modern_website:                5, // JS framework detected
+  multiple_emails_found:        10, // stakeholders count >= 3
+  tier1_city:                   10, // city in TIER1_CITIES list
+  edu_or_ac_domain:              5, // website ends in .edu.in or .ac.in
+  digital_transformation_mention: 10, // keyword detected in site content
+};
 
-# AI Score: 0–10 (only computed if deterministic_score >= 40)
-# final_score = deterministic_score + ai_score
-# Tier: final_score >= 80 → High | >= 60 → Medium | < 60 → Low
+// Max deterministic = 98
+// AI Score: 0–10 (only computed if deterministic_score >= 40)
+// final_score = deterministic_score + ai_score
+// Tier: final_score >= 80 → 'High' | >= 60 → 'Medium' | < 60 → 'Low'
+
+export const TIER1_CITIES = ['Mumbai','Delhi','Bangalore','Hyderabad','Chennai','Pune','Kolkata'];
 ```
 
 ---
 
 ## OUTREACH CADENCE
 
-```python
-CADENCE = {
-    "High":   [0, 3, 7, 14],   # days after sequence start
-    "Medium": [0, 5, 12],
-    "Low":    [0],
-}
+Define in `convex/lib/cadence.ts`:
 
-EMAIL_TEMPLATES = {
-    0: "intro",
-    1: "followup_1",
-    2: "followup_2",
-    3: "final",
-}
+```typescript
+// convex/lib/cadence.ts
+export const CADENCE: Record<string, number[]> = {
+  High:   [0, 3, 7, 14], // days after sequence start
+  Medium: [0, 5, 12],
+  Low:    [0],
+};
+
+export const EMAIL_STEP_MAP: Record<number, string> = {
+  0: 'intro',
+  1: 'followup_1',
+  2: 'followup_2',
+  3: 'final',
+};
+
+// Convert day offsets to milliseconds for Convex scheduler
+export const daysToMs = (days: number) => days * 24 * 60 * 60 * 1000;
 ```
 
 ---
@@ -440,16 +440,16 @@ def recommend_modules(signals: list[dict]) -> list[str]:
 
 ## CODE QUALITY RULES — ENFORCE IN EVERY FILE YOU WRITE
 
-1. **Type hints everywhere** — every function parameter and return value
-2. **Async all the way** — all DB operations use `async with session` via `get_db()`
-3. **Celery task defaults** — every task must have: `bind=True`, `max_retries=3`, `soft_time_limit=300`, exponential backoff on retry: `countdown=2 ** self.request.retries`
-4. **No hardcoded values** — all config comes from `config.py` (Pydantic BaseSettings)
-5. **Consistent API response shape** — every endpoint returns: `{"success": bool, "data": <payload>, "error": str | None}`
-6. **Structured logging** — use `structlog.get_logger()`. Always bind `university_id` and `task_id` to log context
-7. **External API error handling** — wrap every OpenAI, SendGrid, CSE call in try/except with specific error type handling and Sentry capture
-8. **No direct print()** — use structlog exclusively
-9. **React: Tailwind only** — zero inline styles, zero CSS files
-10. **All React API calls via React Query** — no raw axios calls in components
+1. **TypeScript strict mode** — `tsconfig.json` must have `"strict": true`. All functions fully typed.
+2. **Convex function types** — Use `query()`, `mutation()`, `action()`, `httpAction()` from `convex/server`. Never write bare functions.
+3. **No direct DB calls in Actions** — Actions use `ctx.runQuery()` / `ctx.runMutation()`. Only Queries and Mutations touch the DB directly.
+4. **Scheduling pattern** — Use `ctx.scheduler.runAfter(delayMs, ...)` for deferred work. Never use `setTimeout` or external queues.
+5. **External API error handling** — Wrap every `fetch()` (Serper, SendGrid, OpenAI, Browserbase) in try/catch. Call `Sentry.captureException(e)` on failure.
+6. **Exponential backoff** — On 429/5xx from external APIs, use `ctx.scheduler.runAfter(2 ** retryCount * 1000, ...)` to retry.
+7. **No hardcoded values** — All secrets via `process.env.VAR_NAME` in Actions. Use `npx convex env set` for secrets.
+8. **Consistent mutations** — Every mutation returns `{ success: boolean; id?: Id<TableName>; error?: string }`.
+9. **Tailwind only** — Zero inline styles, zero CSS modules in Next.js components.
+10. **Convex hooks only** — No `fetch()`/`axios` in React components. All data via `useQuery`/`useMutation`/`useAction`.
 
 ---
 
@@ -457,62 +457,55 @@ def recommend_modules(signals: list[dict]) -> list[str]:
 
 ---
 
-### ▶ PHASE 1: SCAFFOLD & INFRASTRUCTURE
-**Goal:** Working skeleton. Every service connected. Zero business logic.
+### ▶ PHASE 1: CONVEX FOUNDATION
+**Goal:** Working Convex backend + Next.js frontend skeleton. All 8 tables in DB. Auth working. Zero business logic.
 
 **Execute these steps in order:**
 
-**Step 1.1 — Repo + Docker**
-- Create the full directory structure shown above
-- `docker-compose.yml` with 3 services: `api` (FastAPI, port 8000), `worker` (Celery), `redis` (redis:7-alpine)
-- Use bind mounts for hot reload in dev
-- `.env.example` with all variables listed above
+**Step 1.1 — Project Init**
+- Scaffold Next.js 15 project: `npx create-next-app@latest . --typescript --tailwind --app --src-dir`
+- Init Convex in the same directory: `npx convex dev`
+- Install core deps: `npm install convex @clerk/nextjs @clerk/clerk-react`
+- Create the full `/convex` and `/app` directory structure shown above
 
-**Step 1.2 — Config + Database**
-- `backend/app/config.py`: Pydantic BaseSettings loading all env vars from `.env`
-- `backend/app/database.py`: Async SQLAlchemy engine, `AsyncSession`, `get_db()` dependency, `create_all_tables()` function
+**Step 1.2 — Convex Schema**
+- Create `convex/schema.ts` with all 8 `defineTable()` definitions
+- Include all indexes from the schema section above
+- Include `vectorIndex` on `universitySignals` for the embedding field
+- Run `npx convex dev` — verify all 8 tables appear in Convex Dashboard
 
-**Step 1.3 — ORM Models**
-- Create all 8 SQLAlchemy models matching the schema above exactly
-- Use `relationship()` with `back_populates` where appropriate
-- All models inherit from a `Base` with `created_at` / `updated_at` via `mapped_column`
+**Step 1.3 — CRUD Functions**
+- Create `convex/universities.ts`, `convex/stakeholders.ts`, `convex/signals.ts`, etc.
+- Each file: at minimum `list` query, `get` query, `create` mutation, `update` mutation
+- All functions use proper Convex argument validators (`v.id()`, `v.string()`, etc.)
 
-**Step 1.4 — FastAPI App**
-- `backend/app/main.py`: lifespan context manager calling `create_all_tables()` on startup
-- CORS middleware allowing `FRONTEND_URL`
-- Mount all routers (stubs are fine)
-- `GET /health` → `{"status": "ok", "version": "1.0.0", "environment": config.ENVIRONMENT}`
+**Step 1.4 — Clerk Auth**
+- Configure Clerk application. Set JWT template `convex` in Clerk Dashboard → JWT Templates
+- Create `app/layout.tsx` with `<ClerkProvider>` + `<ConvexProviderWithClerk>`
+- Create `middleware.ts` with `clerkMiddleware()` protecting all `/dashboard/*` routes
+- Create sign-in and sign-up pages at the paths defined in env vars
 
-**Step 1.5 — Celery**
-- `backend/celery_app.py`: Celery instance with Redis broker + result backend, JSON serializer, UTC timezone
-- Empty Beat schedule for now
+**Step 1.5 — Next.js Shell**
+- `app/(dashboard)/layout.tsx`: sidebar with 5 nav links
+- Each dashboard page renders a placeholder `<h1>` with the page name
+- All pages protected by Clerk middleware
 
-**Step 1.6 — Supabase Storage Utility**
-- `backend/utils/storage.py`:
-  - Initialize Supabase client using `SUPABASE_URL` and `SUPABASE_SERVICE_KEY`
-  - `upload_file(file_bytes: bytes, path: str, content_type: str) -> str` (returns public URL)
-  - `get_public_url(path: str) -> str`
-  - `delete_file(path: str) -> bool`
+**Step 1.6 — Set Backend Secrets**
+- Run all `npx convex env set ...` commands from the Environment Variables section
 
-**Step 1.7 — Frontend Skeleton**
-- Vite + React 18 + Tailwind CSS v3
-- Install: `react-router-dom`, `@tanstack/react-query`, `axios`
-- Sidebar layout with 5 nav links: Dashboard, Universities, Enrichment, Outreach, Proposals
-- Each page renders a placeholder `<h1>` for now
-
-**Step 1.8 — Verify**
-- `docker-compose up` starts without errors
-- `GET http://localhost:8000/health` returns 200
-- Frontend loads at `http://localhost:5173`
+**Step 1.7 — Verify**
+- `npx convex dev` runs without errors
+- Convex Dashboard shows all 8 tables
+- `npm run dev` starts Next.js at `http://localhost:3000`
+- Auth flow works: redirect to sign-in, sign in with Clerk, land on Dashboard
 
 **When Phase 1 is done, output exactly:**
 ```
 ✅ PHASE 1 COMPLETE
-- Docker: 3 services running
-- Health: GET /health → 200
-- DB: All 8 tables created
-- Storage: Supabase storage utility tested
-- Frontend: Loads at localhost:5173
+- Convex: 8 tables created, visible in dashboard
+- Auth: Clerk sign-in/sign-up working
+- Frontend: Loads at localhost:3000, all 5 nav links present
+- Secrets: All env vars set in Convex
 Awaiting confirmation to proceed to Phase 2.
 ```
 
@@ -802,4 +795,4 @@ Do not proceed past a blocker without direction. Do not silently skip steps.
 
 ## START NOW
 
-Begin **Phase 1, Step 1.1**. Create every file. Show complete code for each file — no placeholders, no `# TODO` comments, no `pass` statements except in stub route handlers. Write production-ready code from the first line.
+Begin **Phase 1, Step 1.1**. Create every file. Show complete code for each file — no placeholders, no `// TODO` comments. Write production-ready TypeScript from the first line. Use Convex's TypeScript SDK exclusively for all backend operations. Follow the Convex function type rules strictly (query/mutation/action/httpAction).

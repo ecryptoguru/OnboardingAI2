@@ -1,0 +1,47 @@
+[
+  {
+    "type": "State",
+    "university_name": "\"Kaushalya\" the Skill University",
+    "address": "Mahatma Gandhi Labour Institute (MGLI), Drive-in Road, Memnagar, Ahmedabad",
+    "zip_code": "380052",
+    "state": "Gujarat",
+    "ugc_status": "2(f)",
+    "website": "https://kaushalyaskilluniversity.ac.in/"
+  },
+  {
+    "type": "Private",
+    "university_name": "A.K.S. University",
+    "address": "SherGanj, Satna",
+    "zip_code": "485001",
+    "state": "Madhya Pradesh",
+    "ugc_status": "2(f)",
+    "website": "https://www.aksuniversity.ac.in/"
+  },
+  {
+    "type": "Private",
+    "university_name": "A.P.G. (Alakh Prakash Goyal) Shimla University",
+    "address": "Shogi- Mehli Bypass Road, Shimla, H.P 171013",
+    "zip_code": "171009",
+    "state": "Himachal Pradesh",
+    "ugc_status": "2(f)",
+    "website": "http://agu.edu.in/"
+  },
+  {
+    "type": "State",
+    "university_name": "A.P.J. Abdul Kalam Technological University",
+    "address": "CET Campus, Alathara RdAmbady Nagar,Thiruvananthapuram",
+    "zip_code": "695016",
+    "state": "Kerala",
+    "ugc_status": "2(f)",
+    "website": "https://ktu.edu.in/"
+  },
+  {
+    "type": "Private",
+    "university_name": "AAFT University of Media and Arts",
+    "address": "Vill-Maath, Tehsil-Tilda, Dist-Raipur",
+    "zip_code": "493225",
+    "state": "Chhattisgarh",
+    "ugc_status": "2(f)",
+    "website": "https://aaft.edu.in/"
+  }
+]

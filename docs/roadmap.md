@@ -1,258 +1,217 @@
 
-FRETBOX OUTREACH AI
-Intelligent Lean Edition
-AI Agent Build Roadmap + Initial Prompt
-6 Phases
-Build Phases	9 Steps
-Functional Flow	Lean Stack
-Budget Architecture	Deploy Ready
-Cloud Native
+FRETBOX OUTREACH AI — NEXT-GEN EDITION
+Powered by Convex + Next.js 15
+AI-Native Backend | Real-Time Reactive | Zero DevOps
 
-PART 1: PROJECT OVERVIEW & ARCHITECTURE
-This document provides the complete AI coding agent roadmap for building the Fretbox Outreach AI system — a semi-autonomous AI outreach engine targeting Indian universities. It is organized into 6 build phases with granular steps, checkpoints, and a battle-tested initial prompt for your Google Anti-Gravity IDE agent.
+═══════════════════════════════════════════════════════════════
+PART 1: ARCHITECTURE OVERVIEW
+═══════════════════════════════════════════════════════════════
 
-Tech Stack Summary
-Backend	FastAPI (Python 3.11+) — Single service, no microservices
+This document is the official build roadmap for Fretbox Outreach AI v2.0 —
+redesigned from the ground up to use Convex as the exclusive backend.
 
-Worker	Celery with Redis Cloud as broker + result backend
+The old stack (FastAPI + Celery + Redis + SQLAlchemy + Supabase) has been
+replaced with a unified Convex backend that handles the database, serverless
+functions, task scheduling, AI agents, vector search, file storage, and
+webhooks — all in TypeScript with zero infrastructure to manage.
 
-Database	Supabase PostgreSQL (managed, free tier viable)
+## Final Tech Stack
 
-Storage	Supabase Storage — proposal PDFs, scraped assets
+| Layer           | Technology                                                  |
+|-----------------|-------------------------------------------------------------|
+| Backend         | Convex (TypeScript) — Queries, Mutations, Actions           |
+| Database        | Convex DB (Document-Relational, reactive)                   |
+| Task Queue      | Convex Scheduled Functions + Cron Jobs                      |
+| AI Agents       | @convex-dev/agent (memory, threads, streaming)              |
+| High-Tier LLM   | Claude Sonnet 4.6 (Anthropic API direct)                    |
+| Fast-Tier LLM   | Gemini 3 Flash (Google AI API) — scoring, email, vision     |
+| Vector Embeddings | text-embedding-004 (Google AI) — 768-dim, same key as Gemini |
+| Vector Search   | Convex Native Vector Search (768-dim)                       |
+| Web Scraping    | fetch() + HTML parse → Jina Reader fallback (free, no key)  |
+| File Storage    | Convex File Storage (PDFs, assets)                          |
+| Email Delivery  | SendGrid REST API (called from Convex Actions)              |
+| Inbound Email   | SendGrid Inbound Parse → Convex HTTP Action webhook         |
+| PDF Generation  | @react-pdf/renderer (TypeScript native)                     |
+| Frontend        | Next.js 15 (App Router) + React 19                         |
+| Data Fetching   | Convex React hooks (useQuery, useMutation, useAction)       |
+| Auth            | Convex Native Auth (built-in, no external service)          |
+| Deployment      | Vercel (frontend) + Convex Cloud (backend, free tier)       |
+| Monitoring      | Convex Dashboard + Sentry SDK                               |
 
-Scraping	Serper.dev (Discovery/Targeting) + Playwright Python (Extraction)
+## AI Keys (2 total)
 
-LLM	OpenAI GPT-4o or Claude API — scoring, proposals, reply classification
+```bash
+ANTHROPIC_API_KEY   → Claude Sonnet 4.6 (proposals, reply classification)
+GOOGLE_AI_API_KEY   → Gemini 3 Flash (scoring, personalization, vision)
+                    → text-embedding-004 (vector embeddings) ← SAME KEY
+```
 
-Frontend	React + Tailwind CSS deployed on Vercel
+## System Pipeline
 
-Email	SendGrid or AWS SES — outreach + reply handling
+```
+UGC CSV Upload (uploadFile → Convex Storage → parse Action)
+     ↓
+Website Discovery (Convex Action → Serper.dev REST API)
+     ↓
+Stakeholder Extraction (fetch() HTML parse → Jina Reader fallback)
+     ↓
+LinkedIn + News Enrichment (Convex Actions → Serper.dev)
+     ↓
+Priority Scoring (Deterministic Convex Mutation + Gemini 3 Flash AI score)
+     ↓
+Tiered Email Outreach (Convex Cron → Scheduled Mutations → SendGrid)
+     ↓
+Reply Classification (Convex HTTP Action webhook → Claude Sonnet 4.6)
+     ↓
+Action Dispatch (Convex Mutation → schedule follow-ups or proposals)
+     ↓
+Meeting Booked (Calendly → Convex HTTP Action webhook)
+     ↓
+AI Proposal Generated (Claude Sonnet 4.6 + Vector Search → @react-pdf → Convex Storage)
+```
 
-Deployment	Fly.io (backend + worker) + Vercel (frontend)
+**Key Benefit:** Every step above is observable in real-time on the frontend
+via Convex's reactive `useQuery` hooks — no polling, no manual state management.
 
-PART 2: STEP-BY-STEP BUILD ROADMAP
-The roadmap is structured in 6 phases. Each phase must be completed and tested before proceeding. The AI coding agent should treat each phase as an independent milestone with its own test suite.
+═══════════════════════════════════════════════════════════════
+PART 2: 6-PHASE BUILD ROADMAP
+═══════════════════════════════════════════════════════════════
 
-PHASE 1: PROJECT SCAFFOLD & INFRASTRUCTURE   ⏱ Day 1–2
+### PHASE 1: CONVEX FOUNDATION ⏱ Day 1–2
 
-Objectives
-Stand up the complete skeleton of the application. Every service connected. No business logic yet — just working infrastructure.
+**Objective:** Replace the entire FastAPI/Celery/Supabase/Redis infrastructure
+with a single Convex project. Auth, schema, CRUD, and frontend shell.
 
-#	Task	Details / Output	Tech / Tool
-1.1	Init monorepo	Create /backend, /frontend, /workers, /scripts directories. Add .gitignore, README.md, .env.example	Git / Shell
-1.2	Backend scaffold	FastAPI app with health endpoint. Folder structure: /routers, /models, /services, /tasks, /utils	FastAPI / Python
-1.3	Supabase setup	Create project. Connect via psycopg2. Run initial migration with all tables: universities, stakeholders, outreach_sequences, emails_sent, reply_logs, university_signals, priority_scores, proposals	Supabase / SQL
-1.4	Redis + Celery	Connect Redis Cloud. Create celery.py with app config. Test with a dummy task that logs 'hello'	Redis / Celery
-1.5	Storage bucket	Create Supabase Storage bucket. Set public access rules. Write upload_file() and get_public_url() utility functions. Test with a dummy file	Supabase Storage
-1.6	Environment config	Centralize all secrets in config.py using pydantic BaseSettings. Load from .env	Pydantic
-1.7	Frontend scaffold	Create React app with Tailwind. Install react-router-dom, axios, react-query. Set up /pages, /components, /hooks structure	React / Vite
-1.8	Docker compose	docker-compose.yml for local dev: fastapi, celery_worker, redis. Include volume mounts	Docker
-1.9	CI baseline	GitHub Actions workflow: lint (ruff), type check (mypy), test (pytest) on push	GitHub Actions
+#    Task                Details
+1.1  Init Convex         npx convex dev in project root. Creates /convex dir.
+1.2  Define Schema       convex/schema.ts with all 8 defineTable() definitions
+                         (universities, stakeholders, priorityScores,
+                         universitySignals, outreachSequences, emailsSent,
+                         replyLogs, proposals). Add indexes + vectorIndex
+                         (dimensions: 768 for text-embedding-004).
+1.3  Convex Native Auth  convex/auth.config.ts — email/password provider.
+                         ConvexAuthNextjsServerProvider in app/layout.tsx.
+                         convexAuthNextjsMiddleware() in middleware.ts.
+1.4  CRUD Functions      convex/universities.ts, convex/stakeholders.ts etc.
+                         Write query() and mutation() for all 8 tables.
+1.5  Next.js 15 Shell    App Router: /app/(dashboard)/layout.tsx with sidebar.
+                         Pages: universities, enrichment, outreach, proposals.
+1.6  Env Vars            Set all secrets via `npx convex env set`:
+                         ANTHROPIC_API_KEY, GOOGLE_AI_API_KEY, SENDGRID,
+                         SERPER_API_KEY, CALENDLY keys, SENTRY_DSN.
+1.7  Verify              Convex dashboard shows 8 tables. Auth works.
+                         Frontend connects and shows empty university list.
 
-PHASE 2: DATA INGESTION & WEBSITE DISCOVERY   ⏱ Day 3–5
+---
 
-Objectives
-Ingest the UGC Excel sheet, populate the universities table, discover and verify official websites for each institution.
+### PHASE 2: DATA INGESTION & WEBSITE DISCOVERY ⏱ Day 2–3
 
-#	Task	Details / Output	Tech / Tool
-2.1	Excel parser	POST /api/ingest/excel endpoint. Use openpyxl to parse UGC sheet. Map columns: university_name, state, city, affiliation, university_type. Bulk upsert to universities table. Return summary stats.	FastAPI / openpyxl
-2.2	Ingestion UI	React page: drag-and-drop Excel upload. Progress bar. Table showing ingestion results with row counts.	React / Tailwind
-2.3	Website validator	Celery task: validate_website(university_id). If website present in DB: HTTP HEAD check, confirm HTML contains university name. Mark status=website_verified.	Celery / httpx
-2.4	Website discovery	If no website: build search query 'university_name official site'. Use Serper.dev (Google Search API). Parse top 3 results. Score each by domain match + content match. Store best match.	Serper.dev
-2.5	Playwright fallback	If Serper fails to find a high-confidence match: use Playwright to open the top result URL and parse title + meta description to confirm match.	Playwright
-2.6	Batch dispatcher	POST /api/discover/websites triggers Celery group task for all new universities. Polls status via GET /api/universities/status	Celery group
-2.7	Dashboard widget	React: website discovery progress ring. Table: university | status | website_url | confidence_score	React
+#    Task                Details
+2.1  CSV Parse Action    convex/actions/ingest.ts — parse CSV/XLSX bytes,
+                         bulk insert via ctx.runMutation.
+2.2  File Upload UI      Drag-and-drop upload → generateUploadUrl() → action.
+2.3  Website Validator   Convex action: HTTP fetch → check 200 → update status.
+2.4  Website Discovery   Convex action: Serper.dev REST → find university URL.
+                         ctx.scheduler.runAfter() for retries.
+2.5  Batch Dispatcher    Mutation: stagger-schedule discovery per university
+                         (100ms gaps for rate limiting).
 
-PHASE 3: STAKEHOLDER EXTRACTION & ENRICHMENT   ⏱ Day 6–10
+---
 
-Objectives
-Extract senior decision-maker contacts from university websites. Enrich with LinkedIn profile URLs and news signals. Compute priority scores.
+### PHASE 3: STAKEHOLDER EXTRACTION & ENRICHMENT ⏱ Day 3–5
 
-#	Task	Details / Output	Tech / Tool
-3.1	Stakeholder Targeter	Celery task: scrape_stakeholders(university_id). Query Serper: '{university_name} (Vice Chancellor OR Registrar OR Administration OR Contact)'. Extract top 3-5 specific URLs.	Serper.dev
-3.2	Playwright Extractor	Parse top target URLs. Regex + keyword matching for target roles: Vice Chancellor, Registrar, Chancellor, President, Dean. Extract name, role, email, phone.	Playwright / Regex
-3.3	Email extractor	Regex pattern for emails on targeted pages. Associate email with nearest detected role block. Handle obfuscation patterns (at, dot).	Python regex
-3.4	Stakeholders table	Store: university_id, name, role, email, phone, source_url, confidence_score, linkedin_url (null initially)	Supabase
-3.5	LinkedIn enrichment	Celery task: enrich_linkedin(stakeholder_id). Build Google query: '{name} {role} {university} site:linkedin.com'. Call Serper.dev API. Parse profile URL from result snippet. Store linkedin_url.	Serper.dev
-3.6	News enrichment	Celery task: enrich_news(university_id). Query: '{university_name} news 2024'. Parse top 5 results. Extract title + snippet. Store in university_signals table with signal_type=news.	Serper.dev
-3.7	NAAC signal	Separate query: '{university_name} NAAC accreditation grade'. Call Serper.dev. Detect A, A+, B++ mentions. Store signal_type=naac_grade, signal_value=grade.	Serper.dev
-3.8	Priority scoring	Celery task: compute_priority(university_id). Apply deterministic scoring formula from PRD. Sum weights. Store in priority_scores table.	Python
-3.9	AI scoring layer	For universities with deterministic_score > 50: send homepage text to LLM. Prompt for investment likelihood score 0-10. Add to final_score. Assign tier: High/Medium/Low.	OpenAI API
-3.10	Enrichment dashboard	React page: per-university drill-down. Stakeholders list. LinkedIn status. News signals panel. Priority score badge.	React
+**Scraping strategy (3-step, all free):**
+  Step 1: Serper search `site:domain contact email` → check snippets for emails
+  Step 2: fetch(url) → regex parse HTML (works ~70% of sites)
+  Step 3: fetch(r.jina.ai/url) → Jina Reader → clean markdown (free, no key)
 
-PHASE 4: OUTREACH AUTOMATION ENGINE   ⏱ Day 11–16
+#    Task                Details
+3.1  Scraper Action      convex/actions/scraper.ts — 3-step above. Returns
+                         { emails, phones, contacts, source }.
+3.2  Stakeholder Extract Parse scraper output → upsert stakeholders table.
+3.3  LinkedIn Enrichment Serper.dev query → parse LinkedIn URL → update record.
+3.4  News Signals        3x Serper.dev news queries → insert signals →
+                         Google text-embedding-004 (768-dim) → store embedding.
+3.5  Deterministic Score convex/lib/scoring.ts SCORING_FACTORS map → score.
+3.6  AI Scoring          Gemini 3 Flash: feed signals → returns ai_score (0-10).
+3.7  Enrichment Chain    Mutation: schedule 3.1→3.2→3.3→3.4→3.5→3.6 in order.
+                         Each action schedules next on success.
 
-Objectives
-Build the complete email outreach system: template engine, tier-based cadence scheduler, delivery tracking, and reply classification.
+---
 
-#	Task	Details / Output	Tech / Tool
-4.1	Email service	EmailService class wrapping SendGrid SDK. Methods: send_email(to, subject, html_body, metadata). Store every sent email in emails_sent table.	SendGrid
-4.2	Template engine	Jinja2 templates for each email type: intro, followup_1, followup_2, final. Variables: {stakeholder_name}, {role}, {university}, {personalization_snippet}, {calendly_link}.	Jinja2
-4.3	Personalization LLM	For High tier: call LLM with university signals to generate a 2-sentence personalization snippet referencing recent news/achievement.	OpenAI API
-4.4	Cadence scheduler	Celery Beat periodic task: every 6hrs, query outreach_sequences for due emails. High: Day 0,3,7,14. Medium: Day 0,5,12. Low: Day 0 only. Create email job.	Celery Beat
-4.5	Sequence manager	POST /api/outreach/start starts sequence for university. Creates outreach_sequences record with tier, next_email_date, sequence_step.	FastAPI
-4.6	Webhook receiver	POST /api/webhooks/sendgrid receives delivery events: delivered, opened, clicked, bounced. Update email_status in emails_sent.	FastAPI
-4.7	Inbound email parser	Configure SendGrid Inbound Parse webhook. POST /api/webhooks/email-reply. Extract from, subject, body text. Store in reply_logs.	SendGrid Inbound
-4.8	Reply classifier	Celery task: classify_reply(reply_id). Send email body to LLM. Classify into: meeting_request, demo_request, info_request, budget_query, not_interested, auto_reply, opt_out.	OpenAI API
-4.9	Action dispatcher	Based on classification: meeting_request → send Calendly link + notify sales. opt_out → pause sequence + mark opted_out. info_request → auto-respond with brochure.	Python
-4.10	Outreach dashboard	React: pipeline kanban. Columns: Contacted, Replied, Meeting Booked, Proposal Sent, Converted. Drag cards between stages. Stats: open rate, reply rate by tier.	React
+### PHASE 4: OUTREACH AUTOMATION ENGINE ⏱ Day 5–8
 
-PHASE 5: MEETING BOOKING & PROPOSAL GENERATION   ⏱ Day 17–20
+#    Task                Details
+4.1  Sequence Manager    createSequence mutation + processEmailStep action.
+4.2  Email Action        SendGrid REST fetch → POST /v3/mail/send.
+4.3  Email Templates     TypeScript template literals (convex/lib/emailTemplates.ts).
+4.4  Personalization     Gemini 3 Flash → 2-sentence opener (implicit cache).
+4.5  Cadence Cron        crons.ts: every hour → query due sequences → schedule.
+4.6  Delivery Webhook    httpAction POST /webhooks/sendgrid → update emailsSent.
+4.7  Inbound Reply       httpAction POST /webhooks/email-reply → save replyLogs.
+4.8  Reply Classifier    Claude Sonnet 4.6 → classify into 7 categories
+                         (explicit cache breakpoint on system prompt).
+4.9  Action Dispatcher   Mutation: switch on classification → schedule next step.
+4.10 Outreach Kanban     Real-time Kanban driven by useQuery on outreach_stage.
 
-Objectives
-Automate meeting booking confirmation and generate AI-powered, tailored proposals in PDF format when interest is detected.
+---
 
-#	Task	Details / Output	Tech / Tool
-5.1	Calendly webhook	POST /api/webhooks/calendly. On invitee.created: mark university stage=meeting_scheduled. Extract meeting time, attendee. Notify sales team via email.	Calendly API
-5.2	Auto agenda	On meeting scheduled: LLM generates meeting agenda based on university profile, tier, signals, stakeholder role. Send confirmation email with agenda.	OpenAI API
-5.3	Proposal trigger	Trigger proposal generation when: meeting_scheduled OR reply classified as demo_request OR explicit interest detected.	Python
-5.4	Proposal LLM prompt	Send to LLM: university data, signals, stakeholder role, tier score, detected pain points. Request structured JSON: executive_summary, identified_challenges, recommended_modules, implementation_timeline, expected_outcomes.	OpenAI API
-5.5	Module recommender	Logic layer maps signals to Fretbox modules: hostel_pages→Hostel Mgmt, online_forms→Admission Workflow, NAAC→Compliance Dashboard, large_student_body→Lifecycle Automation.	Python
-5.6	PDF generator	WeasyPrint or reportlab: render proposal JSON + Fretbox branding into styled PDF. Upload to Supabase Storage. Store public URL in proposals table.	WeasyPrint / Supabase
-5.7	Proposal API	GET /api/proposals/{university_id} returns proposal list. POST /api/proposals/regenerate triggers fresh generation. GET /api/proposals/{id}/download returns public URL.	FastAPI
-5.8	Proposal UI	React page: proposal card per university. Preview panel. Download button. Status: Draft / Sent / Accepted.	React
+### PHASE 5: PROPOSALS ⏱ Day 8–10
 
-PHASE 6: TESTING, HARDENING & DEPLOYMENT   ⏱ Day 21–26
+#    Task                Details
+5.1  Calendly Webhook    httpAction: HMAC verify → update stage → schedule agent.
+5.2  Agenda Agent        Claude Sonnet 4.6 → meeting agenda from signals.
+5.3  Proposal Agent      Vector search universitySignals (768-dim) → Claude
+                         Sonnet 4.6 → structured JSON proposal (3 cache breakpoints).
+5.4  Module Recommender  convex/lib/moduleRecommender.ts — rule-based selection.
+5.5  PDF Generation      @react-pdf/renderer → PDF bytes → storage.store() →
+                         store ID in proposals.pdf_storage_id.
+5.6  Proposals Page      Card grid + PDF iframe + download + resend buttons.
 
-Objectives
-Comprehensive testing, performance hardening, error monitoring, and full production deployment to Fly.io + Vercel.
+---
 
-#	Task	Details / Output	Tech / Tool
-6.1	Unit tests	pytest suite for: Excel parser, role detector, scoring formula, email template rendering, reply classifier output parsing. Target >80% coverage.	pytest
-6.2	Integration tests	End-to-end test with a seed university: ingest → website → stakeholders → score → outreach sequence creation. Use a test Supabase project.	pytest / httpx
-6.3	Rate limit guards	Add per-domain rate limiting for Playwright scraper. Exponential backoff on CSE API 429s. Token bucket for LLM calls. Max 10 concurrent Celery tasks.	Python / Redis
-6.4	Error monitoring	Integrate Sentry SDK in FastAPI + Celery. Capture unhandled exceptions + task failures. Set up Sentry project, DSN env var.	Sentry
-6.5	Logging	Structured JSON logging via structlog. Log: task_id, university_id, step, duration, status for every pipeline step. Ship to Sentry or Logtail.	structlog
-6.6	Fly.io backend deploy	fly.toml: 1 shared-cpu-1x instance. Deploy FastAPI app. Set all env vars via flyctl secrets set.	Fly.io / flyctl
-6.7	Fly.io worker deploy	Separate Fly app for Celery worker + Celery Beat. Deploy from same Docker image with CMD override.	Fly.io
-6.8	Vercel frontend deploy	Connect GitHub repo to Vercel. Set VITE_API_URL env var. Auto-deploy on main branch push.	Vercel
-6.9	Smoke tests post-deploy	Run: health check, ingest 5 test universities, trigger website discovery, verify Celery tasks execute, check Supabase bucket upload, send 1 test email.	Manual / curl
-6.10	Monitoring dashboard	Set up Fly.io metrics. Celery Flower for task monitoring. Create simple /admin/stats endpoint: universities_total, emails_sent, meetings_booked.	Flower / Fly
+### PHASE 6: HARDENING ⏱ Day 10–11
 
-PART 3: COMPLETE DATABASE SCHEMA
-Run these SQL statements in Supabase SQL Editor in order. All tables use UUID primary keys and include created_at/updated_at timestamps.
+#    Task                Details
+6.1  Sentry              @sentry/nextjs + Sentry.captureException() in catches.
+6.2  Rate Limiting       Exponential backoff on Serper 429 via scheduler.runAfter.
+6.3  Vercel Deploy       Connect repo → set NEXT_PUBLIC_CONVEX_URL as Vercel var.
+6.4  Smoke Tests         Playwright: CSV upload → university appears → enrichment.
+6.5  README              Update with setup instructions and env var list.
 
--- UNIVERSITIES
-CREATE TABLE universities (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  university_name TEXT NOT NULL,
-  state TEXT,
-  city TEXT,
-  affiliation TEXT,
-  university_type TEXT,
-  website_url TEXT,
-  website_status TEXT DEFAULT 'new',
-  outreach_stage TEXT DEFAULT 'new',
-  opted_out BOOLEAN DEFAULT FALSE,
-  created_at TIMESTAMPTZ DEFAULT NOW(),
-  updated_at TIMESTAMPTZ DEFAULT NOW()
-);
+═══════════════════════════════════════════════════════════════
+PART 3: CONVEX SCHEMA NOTES
+═══════════════════════════════════════════════════════════════
 
--- STAKEHOLDERS
-CREATE TABLE stakeholders (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  university_id UUID REFERENCES universities(id),
-  name TEXT,
-  role TEXT,
-  email TEXT,
-  phone TEXT,
-  source_url TEXT,
-  confidence_score FLOAT,
-  linkedin_url TEXT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
+See: convex/schema.ts (created in Phase 1.2)
 
--- PRIORITY SCORES
-CREATE TABLE priority_scores (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  university_id UUID REFERENCES universities(id) UNIQUE,
-  deterministic_score INT,
-  ai_score FLOAT,
-  final_score FLOAT,
-  tier TEXT,
-  computed_at TIMESTAMPTZ DEFAULT NOW()
-);
+Key points:
+- UUIDs replaced by Convex native document IDs (v.id("tableName"))
+- TIMESTAMPTZ replaced by v.number() (Unix ms timestamps)
+- JSONB fields replaced by v.object({...}) with typed sub-schemas
+- Vector embeddings: 768 dimensions (text-embedding-004, NOT 1536)
+- No migrations needed — Convex handles DDL automatically
 
--- UNIVERSITY SIGNALS
-CREATE TABLE university_signals (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  university_id UUID REFERENCES universities(id),
-  signal_type TEXT,
-  signal_value TEXT,
-  weight INT,
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
+═══════════════════════════════════════════════════════════════
+PART 4: ELIMINATED INFRASTRUCTURE
+═══════════════════════════════════════════════════════════════
 
--- OUTREACH SEQUENCES
-CREATE TABLE outreach_sequences (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  university_id UUID REFERENCES universities(id),
-  stakeholder_id UUID REFERENCES stakeholders(id),
-  tier TEXT,
-  sequence_step INT DEFAULT 0,
-  next_email_date DATE,
-  status TEXT DEFAULT 'active',
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
+The following are permanently removed in v2:
 
--- EMAILS SENT
-CREATE TABLE emails_sent (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  university_id UUID REFERENCES universities(id),
-  stakeholder_id UUID REFERENCES stakeholders(id),
-  subject TEXT,
-  sendgrid_message_id TEXT,
-  email_status TEXT DEFAULT 'sent',
-  opened_at TIMESTAMPTZ,
-  clicked_at TIMESTAMPTZ,
-  sent_at TIMESTAMPTZ DEFAULT NOW()
-);
+- ❌ FastAPI (Python) — replaced by Convex Functions (TypeScript)
+- ❌ Celery + Redis — replaced by Convex Cron + Scheduled Actions
+- ❌ SQLAlchemy + asyncpg — replaced by Convex DB
+- ❌ Supabase PostgreSQL — replaced by Convex DB
+- ❌ Supabase Storage — replaced by Convex File Storage
+- ❌ WeasyPrint — replaced by @react-pdf/renderer
+- ❌ Jinja2 templates — replaced by TypeScript template strings
+- ❌ Docker Compose — replaced by npx convex dev
+- ❌ Fly.io (backend) — replaced by Convex Cloud
+- ❌ Clerk — replaced by Convex Native Auth
+- ❌ Browserbase — replaced by fetch() + Jina Reader (free)
+- ❌ Firecrawl — replaced by Jina Reader (free, no key)
+- ❌ OpenRouter — Claude accessed directly via Anthropic API
+- ❌ OpenAI — replaced by Anthropic (Claude) + Google AI (Gemini + embeddings)
 
--- REPLY LOGS
-CREATE TABLE reply_logs (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  university_id UUID REFERENCES universities(id),
-  from_email TEXT,
-  subject TEXT,
-  body TEXT,
-  classification TEXT,
-  processed BOOLEAN DEFAULT FALSE,
-  received_at TIMESTAMPTZ DEFAULT NOW()
-);
-
--- PROPOSALS
-CREATE TABLE proposals (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  university_id UUID REFERENCES universities(id),
-  stakeholder_id UUID REFERENCES stakeholders(id),
-  generated_content JSONB,
-  pdf_url TEXT,
-  status TEXT DEFAULT 'draft',
-  created_at TIMESTAMPTZ DEFAULT NOW()
-);
-
-PART 5: AGENT INTERACTION TIPS
-To get the best results from your AI coding agent in Google Anti-Gravity IDE, follow these guidelines when interacting after the initial prompt:
-
-Confirming Phase Completions
-When the agent says 'Phase X Complete', verify by checking: all files exist, docker-compose up works cleanly, and the health endpoint returns 200. Only then type 'Phase 1 confirmed. Proceed to Phase 2.' This prevents the agent from skipping validation.
-
-When the Agent Gets Stuck
-If the agent produces an error or gets confused, use this recovery prompt:
-You got an error on [describe what]. 
-The error is: [paste exact error].
-The file you were editing is: [filename].
-Fix only this specific error. Do not refactor or change other files.
-Show me the corrected code.
-
-Requesting Specific Sub-Tasks
-After the full build is complete, use targeted prompts like:
-•	'Add rate limiting to the Playwright scraper: max 2 concurrent per domain, 3s delay between requests'
-•	'Improve the priority scoring to also detect LinkedIn follower count if available in the CSE snippet'
-•	'Add a retry mechanism to the proposal PDF generation if WeasyPrint fails'
-•	'Write an integration test that ingests 10 sample universities and verifies the full pipeline'
-
-Cost Control Reminders
-Tell the agent explicitly if LLM costs need to be controlled. Example: 'When calling OpenAI for AI scoring, only use GPT-4o-mini for universities in the Medium tier. Reserve GPT-4o for High tier only.'
-
-Document End — Fretbox Outreach AI Build Roadmap
+═══════════════════════════════════════════════════════════════
+Document End — Fretbox Outreach AI Roadmap v2.0 (Convex Edition)
