@@ -47,13 +47,14 @@ export function UploadCsvButton() {
         type="file"
         accept=".csv"
         className="hidden"
+        aria-label="Upload CSV file"
         ref={fileInputRef}
         onChange={handleFileChange}
       />
       <button
         onClick={() => fileInputRef.current?.click()}
         disabled={isUploading}
-        className="bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50"
+        className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50 shadow-sm"
       >
         {isUploading ? "Uploading..." : "+ Upload CSV"}
       </button>

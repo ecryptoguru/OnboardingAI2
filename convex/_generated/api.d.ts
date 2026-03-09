@@ -14,6 +14,7 @@ import type * as actions_discovery from "../actions/discovery.js";
 import type * as actions_email from "../actions/email.js";
 import type * as actions_enrichment from "../actions/enrichment.js";
 import type * as actions_ingest from "../actions/ingest.js";
+import type * as actions_migrateEmbeddings from "../actions/migrateEmbeddings.js";
 import type * as actions_orchestrator from "../actions/orchestrator.js";
 import type * as actions_outreach from "../actions/outreach.js";
 import type * as actions_personalize from "../actions/personalize.js";
@@ -64,6 +65,7 @@ declare const fullApi: ApiFromModules<{
   "actions/email": typeof actions_email;
   "actions/enrichment": typeof actions_enrichment;
   "actions/ingest": typeof actions_ingest;
+  "actions/migrateEmbeddings": typeof actions_migrateEmbeddings;
   "actions/orchestrator": typeof actions_orchestrator;
   "actions/outreach": typeof actions_outreach;
   "actions/personalize": typeof actions_personalize;

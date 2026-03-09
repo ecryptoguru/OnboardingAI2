@@ -5,28 +5,42 @@ import OpenAI from "openai";
 import { withRetry } from "./utils";
 
 // ─── OpenRouter Unified Client ───────────────────────────────────────────────
-export const openrouter = new OpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENROUTER_API_KEY!,
-  defaultHeaders: {
-    "HTTP-Referer": "https://fretbox.in", // Site URL
-    "X-Title": "Fretbox Outreach AI", // Site Name
-  },
-});
+let _openrouter: OpenAI | null = null;
+export function getOpenRouter(): OpenAI {
+  if (!_openrouter) {
+    _openrouter = new OpenAI({
+      baseURL: "https://openrouter.ai/api/v1",
+      apiKey: process.env.OPENROUTER_API_KEY!,
+      defaultHeaders: {
+        "HTTP-Referer": "https://fretbox.in",
+        "X-Title": "Fretbox Outreach AI",
+      },
+    });
+  }
+  return _openrouter;
+}
 
 // ─── Direct Google SDK ───────────────────────────────────────────────
-export const ai = new GoogleGenAI({ 
-  apiKey: process.env.GOOGLE_API_KEY || ""
-});
+let _ai: GoogleGenAI | null = null;
+export function getGoogleAI(): GoogleGenAI {
+  if (!_ai) {
+    const apiKey = process.env.GOOGLE_API_KEY;
+    if (!apiKey) throw new Error("GOOGLE_API_KEY env var is not set");
+    _ai = new GoogleGenAI({ apiKey });
+  }
+  return _ai;
+}
 
 // ─── Model constants ──────────────────────────────────────────────────────────
 export const MODELS = {
   // Complex reasoning: proposals, reply classification
   claude: "anthropic/claude-sonnet-4.6" as const,
-  // Fast + vision: scoring, email personalization, extraction
-  gemini: "gemini-3-flash-preview" as const, // Official model name for the new SDK
+  // Gemini Pro: enrichment, scoring, personalization
+  gemini: "gemini-3.1-pro-preview" as const,
+  // Gemini Flash: future fast tasks
+  geminiFlash: "gemini-3-flash-preview" as const,
   // Embeddings: 768-dim (direct via Google AI API)
-  embedding: "gemini-embedding-001" as const,
+  embedding: "text-embedding-005" as const,
 } as const;
 
 // ─── Temperature presets ─────────────────────────────────────────────────────
@@ -55,7 +69,7 @@ export async function callClaude({
   maxTokens?: number;
 }): Promise<string> {
   return await withRetry(async () => {
-    const response = await openrouter.chat.completions.create({
+    const response = await getOpenRouter().chat.completions.create({
       model: MODELS.claude,
       max_tokens: maxTokens,
       temperature,
@@ -85,7 +99,9 @@ export async function callClaude({
 }
 
 /**
- * Call Gemini Flash via native @google/genai SDK natively.
+ * Call Gemini via native @google/genai SDK.
+ * Pro models use dynamic thinking by default (cannot be disabled).
+ * We configure a thinking budget to guide depth of reasoning for structured extraction.
  */
 export async function callGemini({
   systemPrompt,
@@ -93,34 +109,76 @@ export async function callGemini({
   temperature = TEMP.balanced,
   responseAsJson = false,
   responseSchema,
-  tools,
-  thinkingConfig,
+  model = MODELS.gemini,
+  thinkingBudget,   // Auto-applied if not set: Pro → 1024 minimum, non-Pro → off
+  maxOutputTokens = 8192,
 }: {
   systemPrompt: string;
   userPrompt: string;
   temperature?: number;
   responseAsJson?: boolean;
   responseSchema?: any;
-  tools?: any[];
-  thinkingConfig?: any;
+  model?: string;
+  thinkingBudget?: number;
+  maxOutputTokens?: number;
 }): Promise<string> {
   return await withRetry(async () => {
-    const result = await ai.models.generateContent({
-      model: MODELS.gemini,
+    // Gemini Pro models REQUIRE thinkingBudget >= 512 (thinking is always on).
+    // Non-Pro models (Flash etc.) work with thinkingBudget = 0 (off).
+    const isProModel = model.includes("pro");
+    const resolvedBudget = thinkingBudget !== undefined
+      ? (isProModel ? Math.max(512, thinkingBudget) : thinkingBudget)
+      : (isProModel ? 1024 : 0);
+
+    const response = await getGoogleAI().models.generateContent({
+      model,
       contents: userPrompt,
       config: {
         systemInstruction: systemPrompt,
         temperature,
+        maxOutputTokens,
         responseMimeType: responseAsJson ? "application/json" : "text/plain",
         responseSchema,
-        thinkingConfig: thinkingConfig,
-        tools: tools,
-      } as any,
+        ...(resolvedBudget > 0 ? {
+          thinkingConfig: {
+            thinkingBudget: resolvedBudget,
+            includeThoughts: false,
+          }
+        } : {}),
+      },
     });
 
-    const text = result.text;
+    const text = response.text;
     if (!text) throw new Error("Unexpected empty response from Gemini via Google SDK");
     return text;
+  });
+}
+
+/**
+ * Budget constants for Gemini thinking mode.
+ * Higher budget = longer latency, deeper reasoning, higher cost.
+ */
+export const THINKING = {
+  off: 0,        // Flash: pure extraction, structured scoring
+  low: 512,      // Pro: minimal synthesis, light conflict resolution
+  medium: 2048,  // Pro: multi-source synthesis, complex extraction
+  high: 8192,    // Pro: complex evaluation, deep step-by-step logic
+} as const;
+
+/**
+ * Convenience wrapper for gemini-3-flash-preview. 
+ * Flash is 2.5x faster and 4x cheaper than Pro, achieving near-Pro performance on extraction/scoring.
+ * Thinking is forced to 0 by default to maximize speed for extraction tasks.
+ */
+export async function callFlash(
+  args: Omit<Parameters<typeof callGemini>[0], "model" | "thinkingBudget"> & {
+    thinkingBudget?: number;
+  }
+): Promise<string> {
+  return callGemini({
+    ...args,
+    model: MODELS.geminiFlash,
+    thinkingBudget: args.thinkingBudget ?? THINKING.off,
   });
 }
 
@@ -129,60 +187,14 @@ export async function callGemini({
  * Note: Requires GOOGLE_API_KEY environment variable.
  */
 export async function embed(text: string): Promise<number[]> {
-  return await withRetry(async () => {
-    const result = await ai.models.embedContent({
-      model: MODELS.embedding,
-      contents: text,
-    });
-    
-    if (!result.embeddings || result.embeddings.length === 0 || !result.embeddings[0].values) {
-      throw new Error("Failed to generate embedding");
-    }
-    
-    return result.embeddings[0].values;
+  const result = await getGoogleAI().models.embedContent({
+    model: MODELS.embedding,
+    contents: text,
   });
-}
-
-/**
- * Call Gemini Flash via native @google/genai SDK natively and returns full result
- * including the groundingMetadata.
- */
-export async function callGeminiWithGrounding({
-  systemPrompt,
-  userPrompt,
-  temperature = TEMP.balanced,
-  responseAsJson = false,
-  responseSchema,
-  tools,
-  thinkingConfig,
-}: {
-  systemPrompt: string;
-  userPrompt: string;
-  temperature?: number;
-  responseAsJson?: boolean;
-  responseSchema?: any;
-  tools?: any[];
-  thinkingConfig?: any;
-}): Promise<{ text: string; groundingMetadata: any }> {
-  return await withRetry(async () => {
-    const result = await ai.models.generateContent({
-      model: MODELS.gemini,
-      contents: userPrompt,
-      config: {
-        systemInstruction: systemPrompt,
-        temperature,
-        responseMimeType: responseAsJson ? "application/json" : "text/plain",
-        responseSchema,
-        thinkingConfig: thinkingConfig,
-        tools: tools,
-      } as any,
-    });
-
-    const text = result.text;
-    if (!text) throw new Error("Unexpected empty response from Gemini via Google SDK");
-    
-    // The google genai SDK places groundingMetadata inside candidates[0].groundingMetadata
-    const groundingMetadata = result.candidates?.[0]?.groundingMetadata || null;
-    return { text, groundingMetadata };
-  });
+  
+  if (!result.embeddings || result.embeddings.length === 0 || !result.embeddings[0].values) {
+    throw new Error("Failed to generate embedding");
+  }
+  
+  return result.embeddings[0].values;
 }

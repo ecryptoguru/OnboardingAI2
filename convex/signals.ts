@@ -20,8 +20,7 @@ export const insert = mutation({
       v.literal("linkedin"),
       v.literal("website"),
       v.literal("manual"),
-      v.literal("image"),
-      v.literal("source")
+      v.literal("image")
     ),
     content: v.string(),
     source_url: v.optional(v.string()),
@@ -61,8 +60,7 @@ export const insertInternal = internalMutation({
       v.literal("linkedin"),
       v.literal("website"),
       v.literal("manual"),
-      v.literal("image"),
-      v.literal("source")
+      v.literal("image")
     ),
     content: v.string(),
     source_url: v.optional(v.string()),
@@ -95,8 +93,7 @@ export const batchInsertInternal = internalMutation({
           v.literal("linkedin"),
           v.literal("website"),
           v.literal("manual"),
-          v.literal("image"),
-          v.literal("source")
+          v.literal("image")
         ),
         content: v.string(),
         source_url: v.optional(v.string()),
@@ -126,8 +123,7 @@ export const deleteByTypeInternal = internalMutation({
       v.literal("linkedin"),
       v.literal("website"),
       v.literal("manual"),
-      v.literal("image"),
-      v.literal("source")
+      v.literal("image")
     )),
   },
   handler: async (ctx, args) => {
@@ -142,4 +138,26 @@ export const deleteByTypeInternal = internalMutation({
       }
     }
   }
+});
+
+// ─── Migration helpers ────────────────────────────────────────────────────────
+
+/** Returns all signals (id + content only) — used by the embedding migration action. */
+export const getAllForMigration = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    const all = await ctx.db.query("universitySignals").collect();
+    return all.map((s) => ({ _id: s._id, content: s.content }));
+  },
+});
+
+/** Patches the embedding field on a single signal record. */
+export const updateEmbedding = internalMutation({
+  args: {
+    signalId: v.id("universitySignals"),
+    embedding: v.array(v.float64()),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.signalId, { embedding: args.embedding });
+  },
 });

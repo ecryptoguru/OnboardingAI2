@@ -70,9 +70,9 @@ export function SyncUgcButton() {
     <div className="flex flex-col items-end gap-2">
       <div className="flex items-center gap-3">
         {syncResult && (
-          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500/10 border border-green-500/20 rounded-full">
-            <CheckCircleIcon className="h-4 w-4 text-green-400" />
-            <span className="text-xs text-green-400 font-medium">
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
+            <CheckCircleIcon className="h-4 w-4 text-emerald-400" />
+            <span className="text-xs text-emerald-400 font-medium tracking-wide">
               Sync Complete: {syncResult.count} new added
             </span>
           </div>
@@ -87,10 +87,10 @@ export function SyncUgcButton() {
         <button
           onClick={handleSync}
           disabled={isSyncing}
-          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 shadow-sm ${
             isSyncing 
-              ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" 
-              : "bg-zinc-900 border border-zinc-800 text-zinc-300 hover:bg-zinc-800 hover:border-zinc-700 hover:text-white"
+              ? "bg-muted/80 text-muted-foreground cursor-not-allowed" 
+              : "bg-card border border-card-border/80 text-foreground hover:bg-muted/80 hover:border-card-border hover:text-white"
           }`}
         >
           <ArrowPathIcon className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`} />
@@ -99,7 +99,7 @@ export function SyncUgcButton() {
       </div>
       
       {syncResult && (
-        <p className="text-[10px] text-zinc-500 italic">
+        <p className="text-[10px] text-muted-foreground italic">
           Last synced: {new Date(syncResult.lastSynced).toLocaleTimeString()}
         </p>
       )}

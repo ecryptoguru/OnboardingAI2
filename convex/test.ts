@@ -18,12 +18,3 @@ export const testScore = action({
     });
   },
 });
-export const getSignals = query({
-  args: { universityId: v.id("universities") },
-  handler: async (ctx, args) => {
-    return await ctx.db
-      .query("universitySignals")
-      .withIndex("by_university", (q) => q.eq("university_id", args.universityId))
-      .collect();
-  },
-});

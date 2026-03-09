@@ -79,39 +79,26 @@ export const processSequenceStep = action({
         return { success: false, reason: "Unknown sequence step" };
     }
 
-    // 3. Send Email with Retry
-    const sendResult = await withRetry(async () => {
-      return await ctx.runAction(api.actions.email.sendEmail, {
-        to: st.email!,
-        subject,
-        text: body,
-      });
-    });
-
-    if (!sendResult.success) {
-      console.error(`[Outreach] Failed to send email to ${st.email}:`, sendResult.error);
-      return { success: false, reason: "SendGrid failure" };
-    }
-
-    // 4. Record Sent Email and Advance Sequence
+    // 3. Draft the Email (HITL) - Do NOT send immediately
     const now = Date.now();
-    await ctx.runMutation(internal.emails.insertInternal, {
+    const emailId = await ctx.runMutation(internal.emails.insertInternal, {
       sequence_id: seq._id,
       university_id: seq.university_id,
       stakeholder_id: seq.stakeholder_id,
       subject,
       body: body,
-      status: "sent",
+      status: "pending_approval", // Instead of "sent"
       step_number: seq.current_step,
-      sent_at: now,
+      sent_at: now, // We treat this as drafted_at for now
     });
 
-    const nextSendAt = getNextSendAt(seq.current_step);
-    
+    console.log(`[Outreach] Drafted Step ${seq.current_step} email for ${st.email} (Email ID: ${emailId}). Pending approval.`);
+
+    // 4. Pause the Sequence awaiting approval
+    // We do NOT compute nextSendAt yet. That happens when the human approves the draft.
     await ctx.runMutation(internal.sequences.advanceInternal, {
       id: seq._id,
-      next_send_at: nextSendAt || undefined,
-      status: nextSendAt ? "active" : "completed",
+      status: "pending_approval",
     });
 
     // 5. Update University Stage if it's the first email
@@ -122,7 +109,7 @@ export const processSequenceStep = action({
       });
     }
 
-    return { success: true };
+    return { success: true, reason: "Drafted for approval" };
     } catch (e) {
       console.error("[Outreach] Fatal error:", e);
       Sentry.captureException(e, {
@@ -148,7 +135,7 @@ export const processDueSequences = action({
     // 2. Process each sequence
     for (let i = 0; i < dueSequences.length; i++) {
        const seq = dueSequences[i];
-       // @ts-ignore - internal.actions property error if type gen is laggy
+       // @ts-expect-error - internal.actions property error if type gen is laggy
        await ctx.scheduler.runAfter(i * 1000, internal.actions.outreach.processSequenceStep, {
          sequenceId: seq._id,
        });

@@ -116,7 +116,7 @@ export const renderToPdf = action({
       date: new Date(proposal.meeting_date || Date.now()).toLocaleDateString(),
     };
 
-    let uniName = "Institution";
+    const uniName = "Institution";
     try {
       // 2. Render to Buffer
       const buffer = await renderToBuffer(

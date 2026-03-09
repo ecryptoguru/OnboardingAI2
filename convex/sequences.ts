@@ -1,6 +1,7 @@
 import { mutation, query, internalMutation, internalQuery } from "./_generated/server";
 import { v, ConvexError } from "convex/values";
 import { validateAuth } from "./lib/auth_utils";
+import { api } from "./_generated/api";
 
 export const listByUniversity = query({
   args: { university_id: v.id("universities") },
@@ -63,6 +64,7 @@ export const advance = mutation({
     status: v.optional(v.union(
       v.literal("active"),
       v.literal("paused"),
+      v.literal("pending_approval"),
       v.literal("completed"),
       v.literal("opted_out")
     )),
@@ -111,6 +113,7 @@ export const advanceInternal = internalMutation({
     status: v.union(
       v.literal("active"),
       v.literal("paused"),
+      v.literal("pending_approval"),
       v.literal("completed"),
       v.literal("opted_out")
     ),
@@ -127,6 +130,22 @@ export const advanceInternal = internalMutation({
     });
   },
 });
+
+export const resumeInternal = internalMutation({
+  args: {
+    id: v.id("outreachSequences"),
+    next_send_at: v.optional(v.number()),
+    status: v.union(v.literal("active"), v.literal("completed")),
+  },
+  handler: async (ctx, args) => {
+    const { id, ...fields } = args;
+    await ctx.db.patch(id, {
+      ...fields,
+      updated_at: Date.now(),
+    });
+  },
+});
+
 export const enroll = mutation({
   args: {
     university_id: v.id("universities"),
@@ -163,15 +182,14 @@ export const enroll = mutation({
       status: "active",
       current_step: 1,
       total_steps: 4,
-      next_send_at: now, // Send immediately (or schedule via action)
+      next_send_at: now,
       created_at: now,
       updated_at: now,
     });
 
-    // 4. Update university stage
-    await ctx.db.patch(args.university_id, {
-      outreach_stage: "sequencing",
-      updated_at: now,
+    // 4. Schedule the first email immediately — this is what kicks off the outreach pipeline
+    await ctx.scheduler.runAfter(0, (api.actions as any).outreach.processSequenceStep, {
+      sequenceId,
     });
 
     return sequenceId;

@@ -70,7 +70,6 @@ export const runChain = action({
 
       // 6. Test Auto-Reply (Requirement 8)
       console.log(`[E2E] 📧 Testing Auto-Reply...`);
-      // @ts-ignore
       const autoReplyResult = await ctx.runAction(api.actions.autoReply.sendAutoReply, {
         universityId,
         stakeholderId,

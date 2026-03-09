@@ -1,7 +1,7 @@
 "use node";
 
 import { action } from "../_generated/server";
-import { internal } from "../_generated/api";
+import { internal, api } from "../_generated/api";
 import { v } from "convex/values";
 import { callClaude, TEMP } from "../lib/llm";
 import { REPLY_CLASSIFIER_SYSTEM_PROMPT } from "../lib/prompts";
@@ -60,7 +60,6 @@ export const classifyReply = action({
       });
 
       // 3. Trigger Auto-Reply if applicable
-      // @ts-ignore
       await ctx.scheduler.runAfter(0, api.actions.autoReply.sendAutoReply, {
         universityId: reply.university_id,
         stakeholderId: reply.stakeholder_id,

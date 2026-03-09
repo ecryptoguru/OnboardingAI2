@@ -51,7 +51,6 @@ export const verifyRequirements = action({
       results.step5_email = emailResult.success ? "PASS" : "WARN (API Key?)";
 
       // 6. Mock Auto-Reply (Requirement 8)
-      // @ts-ignore
       const autoReply = await ctx.runAction(api.actions.autoReply.sendAutoReply, {
           universityId,
           stakeholderId: stId as any,

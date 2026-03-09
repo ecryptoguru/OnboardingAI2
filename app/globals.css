@@ -3,16 +3,43 @@
 @tailwind utilities;
 
 :root {
-  --background: #09090b;
-  --foreground: #fafafa;
-  --card: #18181b;
-  --card-border: #27272a;
-  --primary: #6366f1;
-  --primary-hover: #818cf8;
-  --muted: #71717a;
-  --success: #22c55e;
+  /* Flat Design Light Mode Values (Default) */
+  --background: #f8fafc;
+  --foreground: #09090b;
+  --card: #ffffff;
+  --card-border: #e2e8f0;
+  
+  --primary: #3B82F6;
+  --primary-hover: #2563EB;
+  --cta: #F97316;
+  --cta-hover: #ea580c;
+  
+  --muted: #f1f5f9;
+  --muted-foreground: #64748b;
+  --success: #10b981;
   --warning: #f59e0b;
   --danger: #ef4444;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Flat Design Dark Mode Values */
+    --background: #09090b;
+    --foreground: #f8fafc;
+    --card: #18181b;
+    --card-border: #27272a;
+    
+    --primary: #3B82F6;
+    --primary-hover: #60A5FA;
+    --cta: #F97316;
+    --cta-hover: #fb923c;
+    
+    --muted: #27272a;
+    --muted-foreground: #a1a1aa;
+    --success: #34d399;
+    --warning: #fbbf24;
+    --danger: #f87171;
+  }
 }
 
 * {
@@ -21,13 +48,15 @@
   margin: 0;
 }
 
-html,
 body {
   max-width: 100vw;
   overflow-x: hidden;
-  background: var(--background);
+  background-color: var(--background);
   color: var(--foreground);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Inter",
-    sans-serif;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Poppins', sans-serif;
 }

@@ -25,16 +25,7 @@ export async function withRetry<T>(
     retryOn = (err: any) => {
       // Retry on 429 (Rate Limit) or 5xx (Server Error)
       const status = err?.status || err?.statusCode;
-      if (status === 429 || (status >= 500 && status < 600)) return true;
-      
-      // Also retry on common network errors/timeouts
-      const msg = String(err?.message || "").toLowerCase();
-      return (
-        msg.includes("timeout") || 
-        msg.includes("fetch failed") || 
-        msg.includes("network error") ||
-        err?.code === 'UND_ERR_HEADERS_TIMEOUT'
-      );
+      return status === 429 || (status >= 500 && status < 600);
     },
   } = options;
 
@@ -63,27 +54,4 @@ export async function withRetry<T>(
     Sentry.captureException(lastError);
   }
   throw lastError;
-}
-
-/**
- * Fetch with a mandatory timeout to prevent hanging actions.
- */
-export async function fetchWithTimeout(
-  url: string,
-  options: RequestInit & { timeout?: number } = {}
-): Promise<Response> {
-  const { timeout = 30000, ...fetchOptions } = options;
-  
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
-  
-  try {
-    const response = await fetch(url, {
-      ...fetchOptions,
-      signal: controller.signal,
-    });
-    return response;
-  } finally {
-    clearTimeout(id);
-  }
 }

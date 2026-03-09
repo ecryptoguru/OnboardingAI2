@@ -30,7 +30,8 @@ export default defineSchema({
         v.literal("meeting_booked"),
         v.literal("proposal_sent"),
         v.literal("closed"),
-        v.literal("not_interested")
+        v.literal("not_interested"),
+        v.literal("skipped")
       )
     ),
     address: v.optional(v.string()),
@@ -45,6 +46,7 @@ export default defineSchema({
     notes: v.optional(v.string()),
     demographics: v.optional(
       v.object({
+        // ── AISHE / NAAC SSR block (hostelite breakdown) ──────────────────────
         total_students: v.optional(v.number()),
         total_students_male: v.optional(v.number()),
         total_students_female: v.optional(v.number()),
@@ -54,7 +56,22 @@ export default defineSchema({
         hostelites: v.optional(v.number()),
         hostelites_male: v.optional(v.number()),
         hostelites_female: v.optional(v.number()),
-        source: v.optional(v.string()), // e.g., "aishe.gov.in"
+        source: v.optional(v.string()), // e.g., "AISHE 2022-23 AND NAAC SSR 2023"
+        // ── NIRF program-wise block ───────────────────────────────────────────
+        nirf_source: v.optional(v.string()), // e.g., "NIRF 2023-24"
+        nirf_total: v.optional(v.number()),   // sum across all programs
+        nirf_male: v.optional(v.number()),
+        nirf_female: v.optional(v.number()),
+        nirf_programs: v.optional(
+          v.array(
+            v.object({
+              name: v.string(),        // "UG (4 Years)", "PG (2 Years)", "PhD"
+              male: v.optional(v.number()),
+              female: v.optional(v.number()),
+              total: v.optional(v.number()),
+            })
+          )
+        ),
       })
     ),
     created_at: v.number(), // Unix ms
@@ -89,11 +106,18 @@ export default defineSchema({
     ai_score: v.optional(v.number()), // 0-10 from Gemini
     final_score: v.number(), // weighted composite
     scoring_factors: v.object({
-      student_count_score: v.number(),
-      naac_score: v.number(),
-      digital_presence_score: v.number(),
-      news_activity_score: v.number(),
-      location_score: v.number(),
+      // New Fretbox-specific scoring factors (optional for backward compat with old records)
+      hostelite_score: v.optional(v.number()),
+      student_scale_score: v.optional(v.number()),
+      naac_score: v.optional(v.number()),
+      agility_score: v.optional(v.number()),
+      stakeholder_score: v.optional(v.number()),
+      digital_signals_score: v.optional(v.number()),
+      // Legacy fields (some old records may have these; keep as optional so they don't fail validation)
+      student_count_score: v.optional(v.number()),
+      digital_presence_score: v.optional(v.number()),
+      news_activity_score: v.optional(v.number()),
+      location_score: v.optional(v.number()),
     }),
     scored_at: v.number(),
   }).index("by_university", ["university_id"]),
@@ -106,8 +130,7 @@ export default defineSchema({
       v.literal("linkedin"),
       v.literal("website"),
       v.literal("manual"),
-      v.literal("image"),
-      v.literal("source")
+      v.literal("image")
     ),
     content: v.string(),
     source_url: v.optional(v.string()),
@@ -128,6 +151,7 @@ export default defineSchema({
     status: v.union(
       v.literal("active"),
       v.literal("paused"),
+      v.literal("pending_approval"),
       v.literal("completed"),
       v.literal("opted_out")
     ),
@@ -150,6 +174,7 @@ export default defineSchema({
     body: v.string(),
     sendgrid_message_id: v.optional(v.string()),
     status: v.union(
+      v.literal("pending_approval"),
       v.literal("queued"),
       v.literal("sent"),
       v.literal("delivered"),

@@ -141,7 +141,7 @@ export const update = mutation({
     outreach_stage: v.optional(v.union(
       v.literal("new"), v.literal("enriching"), v.literal("enriched"),
       v.literal("sequencing"), v.literal("replied"), v.literal("meeting_booked"),
-      v.literal("proposal_sent"), v.literal("closed"), v.literal("not_interested")
+      v.literal("proposal_sent"), v.literal("closed"), v.literal("not_interested"), v.literal("skipped")
     )),
     notes: v.optional(v.string()),
   },
@@ -194,6 +194,44 @@ export const generateUploadUrl = mutation(async (ctx) => {
   return await ctx.storage.generateUploadUrl();
 });
 
+// --- Skip University Features ---
+
+export const search = query({
+  args: { query: v.string() },
+  handler: async (ctx, args) => {
+    await validateAuth(ctx);
+    if (!args.query) return [];
+    
+    // Using search index on university_name
+    return await ctx.db
+      .query("universities")
+      .withSearchIndex("search_name", (q) => q.search("university_name", args.query))
+      .take(10);
+  },
+});
+
+export const skipUniversity = mutation({
+  args: { id: v.id("universities") },
+  handler: async (ctx, args) => {
+    await validateAuth(ctx);
+    await ctx.db.patch(args.id, {
+      outreach_stage: "skipped",
+      updated_at: Date.now(),
+    });
+    
+    // Pause any active sequence for this university
+    const sequences = await ctx.db
+       .query("outreachSequences")
+       .withIndex("by_university", (q) => q.eq("university_id", args.id))
+       .filter((q) => q.eq(q.field("status"), "active"))
+       .collect();
+       
+    for (const seq of sequences) {
+       await ctx.db.patch(seq._id, { status: "paused", updated_at: Date.now() });
+    }
+  },
+});
+
 // --- Internal API for actions ---
 export const getInternal = internalQuery({
   args: { universityId: v.id("universities") },
@@ -208,7 +246,7 @@ export const updateOutreachStageInternal = internalMutation({
     stage: v.union(
       v.literal("new"), v.literal("enriching"), v.literal("enriched"),
       v.literal("sequencing"), v.literal("outreach_active"), v.literal("replied"), 
-      v.literal("meeting_booked"), v.literal("proposal_sent"), v.literal("closed"), v.literal("not_interested")
+      v.literal("meeting_booked"), v.literal("proposal_sent"), v.literal("closed"), v.literal("not_interested"), v.literal("skipped")
     ),
   },
   handler: async (ctx, args) => {
@@ -245,7 +283,21 @@ export const updateDemographicsInternal = internalMutation({
       hostelites: v.optional(v.number()),
       hostelites_male: v.optional(v.number()),
       hostelites_female: v.optional(v.number()),
-      source: v.optional(v.string()),
+      source: v.optional(v.string()), // NAAC/AISHE source year
+      nirf_source: v.optional(v.string()), // e.g. "NIRF 2024"
+      nirf_total: v.optional(v.number()),
+      nirf_male: v.optional(v.number()),
+      nirf_female: v.optional(v.number()),
+      nirf_programs: v.optional(
+        v.array(
+          v.object({
+            name: v.string(),
+            male: v.optional(v.number()),
+            female: v.optional(v.number()),
+            total: v.optional(v.number()),
+          })
+        )
+      ),
     }),
   },
   handler: async (ctx, args) => {

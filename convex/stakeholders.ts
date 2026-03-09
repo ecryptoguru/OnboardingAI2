@@ -167,22 +167,23 @@ export const upsertBulkInternal = internalMutation({
       .collect();
 
     for (const st of args.stakeholders) {
-      // Logic: Match on email first, then exact role, then exact name
+      // Match on email (most reliable) OR name — NOT role alone.
+      // FIX: role-only match removed: two different people can hold e.g. "Registrar" at the same university.
       const match = existingStakeholders.find((e) => {
         if (st.email && e.email && e.email.toLowerCase() === st.email.toLowerCase()) return true;
-        if (st.role && e.role && e.role.toLowerCase() === st.role.toLowerCase()) return true;
         if (st.name && e.name && e.name.toLowerCase() === st.name.toLowerCase()) return true;
         return false;
       });
 
       if (match) {
-        // Upsert: Only overwrite empty fields to preserve user edits/previous enrichment
+        // Prefer NEW enrichment data over old — this fills in missing emails/phones from re-enrichment
         await ctx.db.patch(match._id, {
-          name: match.name || st.name,
-          role: match.role || st.role,
-          email: match.email || st.email,
-          phone: match.phone || st.phone,
-          linkedin_url: match.linkedin_url || st.linkedin_url,
+          name: st.name || match.name,
+          role: st.role || match.role,
+          email: st.email || match.email,
+          phone: st.phone || match.phone,
+          linkedin_url: st.linkedin_url || match.linkedin_url,
+          source: args.source || match.source || "deep_enrichment",
         });
       } else {
         // Insert new

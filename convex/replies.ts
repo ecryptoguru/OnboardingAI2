@@ -2,6 +2,22 @@ import { mutation, query, internalMutation, internalQuery } from "./_generated/s
 import { v } from "convex/values";
 import { validateAuth } from "./lib/auth_utils";
 
+export const list = query({
+  args: {},
+  handler: async (ctx, args) => {
+    const logs = await ctx.db
+      .query("replyLogs")
+      .order("desc")
+      .take(50);
+    return await Promise.all(
+      logs.map(async (log) => {
+        const uni = await ctx.db.get(log.university_id);
+        return { ...log, university_name: uni?.university_name ?? "Unknown" };
+      })
+    );
+  },
+});
+
 export const listByUniversity = query({
   args: { university_id: v.id("universities") },
   handler: async (ctx, args) => {

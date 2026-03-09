@@ -11,21 +11,25 @@ export const runEnrichmentChain = action({
     try {
     console.log(`[Orchestrator] Starting enrichment chain for ${args.universityId}`);
     
-    // 1. Scrape
+    // 1 & 2. Scrape and Discover Social Media in parallel
     try {
-      await ctx.runAction(api.actions.scraper.scrapeUniversity, { universityId: args.universityId });
+      console.log(`[Orchestrator] Running Scraper and Social Discovery in parallel`);
+      await Promise.allSettled([
+        ctx.runAction(api.actions.scraper.scrapeUniversity, { universityId: args.universityId }),
+        ctx.runAction(api.actions.enrichment.discoverSocialAndMedia, { universityId: args.universityId })
+      ]);
     } catch (e) {
-      console.error("[Orchestrator] Scraping failed, continuing to enrichment anyway", e);
-    }
-    
-    // 2. Discover Social & Media
-    try {
-      await ctx.runAction(api.actions.enrichment.discoverSocialAndMedia, { universityId: args.universityId });
-    } catch (e) {
-      console.error("[Orchestrator] Social & Media failed", e);
+      console.error("[Orchestrator] Parallel extraction step failed", e);
     }
 
-    // 3. AI Scoring
+    // 3. Deep Enrichment (Crucial for getting demographics before scoring)
+    try {
+      await ctx.runAction(api.actions.deepEnrichment.runDeepEnrichment, { universityId: args.universityId });
+    } catch (e) {
+      console.error("[Orchestrator] Deep Enrichment failed", e);
+    }
+
+    // 4. AI Scoring
     try {
       await ctx.runAction(api.actions.scoring.scoreUniversity, { universityId: args.universityId });
     } catch (e) {

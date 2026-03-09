@@ -32,9 +32,9 @@ export class ErrorBoundary extends Component<Props, State> {
         this.props.fallback || (
           <div className="flex flex-col items-center justify-center min-h-[400px] text-center p-8">
             <div className="text-4xl mb-4">⚠️</div>
-            <h2 className="text-xl font-bold text-white mb-2">Something went wrong</h2>
-            <p className="text-zinc-400 text-sm max-w-sm mb-6">
-              An unexpected error occurred. We've reported it to our team.
+            <h2 className="text-xl font-bold text-foreground mb-2">Something went wrong</h2>
+            <p className="text-muted-foreground text-sm max-w-sm mb-6">
+              An unexpected error occurred. We&apos;ve reported it to our team.
             </p>
             <button
               onClick={() => window.location.reload()}
