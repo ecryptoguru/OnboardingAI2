@@ -175,7 +175,7 @@ export default function OutreachPage() {
                 <div className="py-16 text-center px-4">
                   <div className="text-3xl mb-2 opacity-40">📭</div>
                   <p className="text-muted-foreground text-sm">No replies yet</p>
-                  <p className="text-muted-foreground text-xs mt-1 opacity-60">Use "Simulate Reply" on any active card to test the flow</p>
+                  <p className="text-muted-foreground text-xs mt-1 opacity-60">Use &quot;Simulate Reply&quot; on any active card to test the flow</p>
                 </div>
               ) : (
                 <div className="divide-y divide-zinc-800/60">
