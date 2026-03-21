@@ -2,7 +2,7 @@
 
 import { useQuery, useAction, useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
-import { Id } from "../../../../convex/_generated/dataModel";
+import { Id, Doc } from "../../../../convex/_generated/dataModel";
 import {
   DocumentTextIcon,
   CalendarIcon,
@@ -22,7 +22,7 @@ export default function ProposalsPage() {
   
   // Expose all universities (or limit to enriched/meeting_booked if desired, but user wants all)
   const allUnis = useQuery(api.universities.list, {});
-  const generateProposal = useAction((api.actions as any).proposals.generateProposal);
+  const generateProposal = useAction((api.actions as Record<string, any>).proposals.generateProposal);
   const createProposal = useMutation(api.proposals.create);
   
   const [generating, setGenerating] = useState(false);
@@ -210,19 +210,15 @@ export default function ProposalsPage() {
   );
 }
 
-function ProposalCard({ proposal }: { proposal: any }) {
+function ProposalCard({ proposal }: { proposal: Doc<"proposals"> & { university_name?: string, stakeholder_details?: string } }) {
   const removeProposal  = useMutation(api.proposals.remove);
-  const generateProposal = useAction((api.actions as any).proposals.generateProposal);
-  const emailProposal   = useAction((api.actions as any).proposals.emailProposal);
+  const generateProposal = useAction((api.actions as Record<string, any>).proposals.generateProposal);
+  const emailProposal   = useAction((api.actions as Record<string, any>).proposals.emailProposal);
 
-  const [sending, setSending]           = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting]         = useState(false);
   const [showEditModal, setShowEditModal]   = useState(false);
-  const [showSendConfig, setShowSendConfig] = useState(false);
-  const [selectedEmails, setSelectedEmails] = useState<string[]>([]);
-  const [ccEmailsStr, setCcEmailsStr]   = useState("");
 
   const { withKeyCheck, keyModal: cardKeyModal } = useRequireGeminiKey();
 
@@ -232,7 +228,7 @@ function ProposalCard({ proposal }: { proposal: any }) {
     [allStakeholders]
   );
 
-  let content: any = null;
+  let content: Record<string, any> | null = null;
   try { if (proposal.proposal_json) content = JSON.parse(proposal.proposal_json); } catch {}
 
   // Works for both old plain-string and new structured {hook, why_now, vision_statement} shapes
@@ -242,7 +238,7 @@ function ProposalCard({ proposal }: { proposal: any }) {
     if (typeof es === "string" && es.trim()) return es;
     if (es && typeof es === "object")
       return es.hook || es.why_now || es.vision_statement
-          || (Object.values(es).find((v: any) => typeof v === "string") as string | undefined);
+          || (Object.values(es).find((v: unknown) => typeof v === "string") as string | undefined);
     return content.agenda?.[0] || content.overview || content.summary || null;
   })();
 
@@ -262,22 +258,6 @@ function ProposalCard({ proposal }: { proposal: any }) {
       });
     } catch (e) { alert(`Regeneration failed: ${e}`); }
     finally { setRegenerating(false); }
-  };
-
-  const handleSend = async () => {
-    if (selectedEmails.length === 0) { alert("Select at least one recipient."); return; }
-    setSending(true);
-    try {
-      const ccList = ccEmailsStr.split(",").map(s => s.trim()).filter(Boolean);
-      const result = await emailProposal({
-        proposalId: proposal._id,
-        toEmails: selectedEmails,
-        ccEmails: ccList.length > 0 ? ccList : undefined,
-      });
-      if (!(result as any).success) alert(`Send failed: ${(result as any).error}`);
-      else setShowSendConfig(false);
-    } catch (e) { alert(`Send failed: ${e}`); }
-    finally { setSending(false); }
   };
 
   const isReady = proposal.status === "ready";
@@ -428,13 +408,13 @@ function ProposalEditModal({
   onClose,
   validStakeholders,
 }: {
-  proposal: any;
-  content: any;
+  proposal: Doc<"proposals"> & { university_name?: string };
+  content: Record<string, any> | null;
   onClose: () => void;
-  validStakeholders: any[];
+  validStakeholders: Doc<"stakeholders">[];
 }) {
   const updateProposal  = useMutation(api.proposals.update);
-  const emailProposal   = useAction((api.actions as any).proposals.emailProposal);
+  const emailProposal   = useAction((api.actions as Record<string, any>).proposals.emailProposal);
 
   // Editable fields — initialised from stored JSON
   const [hook,     setHook]     = useState<string>(() => {
@@ -489,11 +469,11 @@ function ProposalEditModal({
       // Save edits first, then email
       await updateProposal({ id: proposal._id, proposal_json: buildUpdatedJson() });
       const ccList = ccEmailsStr.split(",").map(s => s.trim()).filter(Boolean);
-      const result: any = await emailProposal({
+      const result = await emailProposal({
         proposalId: proposal._id,
         toEmails: selectedEmails,
         ccEmails: ccList.length > 0 ? ccList : undefined,
-      });
+      }) as { success?: boolean; error?: string };
       if (!result.success) alert(`Send failed: ${result.error}`);
       else onClose();
     } catch (e) { alert(`Send failed: ${e}`); }
@@ -567,7 +547,7 @@ function ProposalEditModal({
                 </p>
               ) : (
                 <div className="space-y-2 mb-4">
-                  {validStakeholders.map((st: any) => (
+                  {validStakeholders.map((st) => (
                     <label key={st._id} className="flex items-start gap-3 p-3 rounded-xl bg-background border border-card-border/50 cursor-pointer hover:border-emerald-500/30 transition-colors">
                       <input
                         type="checkbox"

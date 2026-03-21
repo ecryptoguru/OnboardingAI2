@@ -17,13 +17,13 @@ export class ErrorBoundary extends Component<Props, State> {
     hasError: false,
   };
 
-  public static getDerivedStateFromError(_: Error): State {
+  public static getDerivedStateFromError(_error: Error): State {
     return { hasError: true };
   }
 
   public componentDidCatch(error: Error, errorInfo: ErrorInfo) {
     console.error("Uncaught error:", error, errorInfo);
-    Sentry.captureException(error, { extra: errorInfo as any });
+    Sentry.captureException(error, { extra: errorInfo as unknown as Record<string, unknown> });
   }
 
   public render() {

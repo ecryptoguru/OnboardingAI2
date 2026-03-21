@@ -25,8 +25,8 @@ export default function SettingsPage() {
       await setKey({ apiKey });
       setApiKey(""); // Clear it from local state after saving for security
       setTestResult({ success: true });
-    } catch (err: any) {
-      setTestResult({ success: false, error: err.message || "Failed to save key." });
+    } catch (err: unknown) {
+      setTestResult({ success: false, error: (err as Error).message || "Failed to save key." });
     } finally {
       setIsSaving(false);
     }
@@ -43,8 +43,8 @@ export default function SettingsPage() {
     try {
       const res = await testKey({ apiKey });
       setTestResult(res);
-    } catch (err: any) {
-      setTestResult({ success: false, error: err.message || "Test failed." });
+    } catch (err: unknown) {
+      setTestResult({ success: false, error: (err as Error).message || "Test failed." });
     } finally {
       setIsTesting(false);
     }

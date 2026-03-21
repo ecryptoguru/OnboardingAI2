@@ -2,9 +2,9 @@
 
 import { useQuery } from "convex/react";
 import { api } from "../../../../../convex/_generated/api";
+import { Id, Doc } from "../../../../../convex/_generated/dataModel";
 import { useState, useEffect } from "react";
 import {
-  EnvelopeOpenIcon,
   ChatBubbleLeftRightIcon,
   CheckCircleIcon,
   ClockIcon,
@@ -247,7 +247,7 @@ export default function DemoPage() {
                   <div key={reply._id} className="p-4 hover:bg-muted/30 transition-colors">
                     <div className="flex items-start justify-between gap-2 mb-1">
                       <span className="text-foreground text-xs font-semibold truncate">
-                        {(reply as any).university_name}
+                        {(reply as Doc<"replyLogs"> & { university_name?: string }).university_name}
                       </span>
                       {reply.classification && (
                         <span className={`text-[9px] font-bold uppercase flex-shrink-0 px-1.5 py-0.5 rounded-full border ${

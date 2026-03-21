@@ -494,7 +494,7 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
                   if (sig.source_url) {
                     host = new URL(sig.source_url).hostname.replace('www.', '');
                   }
-                } catch (e) {}
+                } catch (_e) {}
                 
                 return (
                   <div

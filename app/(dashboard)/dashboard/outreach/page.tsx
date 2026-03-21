@@ -50,7 +50,7 @@ const EMAIL_STATUS_ICON: Record<string, React.ReactNode> = {
 export default function OutreachPage() {
   const universities = useQuery(api.universities.list, {});
   const replies = useQuery(api.replies.list, {});
-  const funnel = useQuery(api.universities.getFunnelStats);
+  // const funnel = useQuery(api.universities.getFunnelStats);
   const [showSkipModal, setShowSkipModal] = useState(false);
   const [timelineUniId, setTimelineUniId] = useState<Id<"universities"> | null>(null);
   const [simulateUni, setSimulateUni] = useState<Doc<"universities"> | null>(null);
@@ -183,7 +183,7 @@ export default function OutreachPage() {
                     <div key={reply._id} className="p-4 hover:bg-muted/30 transition-colors cursor-pointer">
                       <div className="flex items-center justify-between mb-1.5">
                         <span className="text-foreground text-xs font-semibold truncate max-w-[130px]">
-                          {(reply as any).university_name}
+                          {(reply as Doc<"replyLogs"> & { university_name?: string }).university_name}
                         </span>
                         {reply.classification && (
                           <span className={`text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full ${CLASSIFICATION_STYLES[reply.classification] ?? CLASSIFICATION_STYLES.other}`}>
@@ -253,7 +253,7 @@ function KanbanCard({
     setIsEnrolling(true);
     try {
       await enroll({ university_id: university._id });
-    } catch (error) {
+    } catch (_error) {
       alert("Failed to start outreach. Ensure a primary stakeholder is assigned.");
     } finally {
       setIsEnrolling(false);
@@ -419,7 +419,7 @@ function UniversityTimelineDrawer({
             <div className="space-y-4">
               {timeline.map((event, i) => {
                 if (event.type === "email") {
-                  const e = event.data as any;
+                  const e = event.data as Record<string, any>;
                   return (
                     <div key={i} className="flex gap-3 relative">
                       <div className="w-7 h-7 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center flex-shrink-0 z-10">
@@ -452,7 +452,7 @@ function UniversityTimelineDrawer({
                   );
                 }
                 if (event.type === "reply") {
-                  const r = event.data as any;
+                  const r = event.data as Record<string, any>;
                   return (
                     <div key={i} className="flex gap-3 relative">
                       <div className="w-7 h-7 rounded-full bg-emerald-500/10 border border-emerald-500/20 flex items-center justify-center flex-shrink-0 z-10">
@@ -507,7 +507,7 @@ function SimulateReplyModal({
 
   useEffect(() => {
     if (primarySt && !selectedStakeholderId) setSelectedStakeholderId(primarySt._id);
-  }, [primarySt]);
+  }, [primarySt, selectedStakeholderId]);
 
   const PRESETS = [
     { label: "📅 Meeting Request", text: "Hi Ashish, thanks for reaching out! I'd love to schedule a demo. Can we connect next Tuesday at 3 PM?" },
@@ -528,8 +528,8 @@ function SimulateReplyModal({
       });
       const result = await classifyReply({ replyId });
       setDone(result.classification ?? "other");
-    } catch (e) {
-      alert(`Simulation failed: ${e}`);
+    } catch (_e) {
+      alert(`Simulation failed: ${_e}`);
     } finally {
       setRunning(false);
     }
@@ -654,23 +654,23 @@ function SkipUniversityModal({ onClose }: { onClose: () => void }) {
   const unskipUniversity = useMutation(api.universities.unskipUniversity);
   const [loadingId, setLoadingId] = useState<string | null>(null);
 
-  const handleSkip = async (uniId: any) => {
+  const handleSkip = async (uniId: Id<"universities">) => {
     if (!confirm("Are you sure you want to skip this university? It will be removed from all active outreach pipelines permanently.")) return;
     setLoadingId(uniId);
     try {
       await skipUniversity({ id: uniId });
-    } catch (e) {
+    } catch (_e) {
       alert("Failed to skip university");
     } finally {
       setLoadingId(null);
     }
   };
 
-  const handleUnskip = async (uniId: any) => {
+  const handleUnskip = async (uniId: Id<"universities">) => {
     setLoadingId(uniId);
     try {
       await unskipUniversity({ id: uniId });
-    } catch (e) {
+    } catch (_e) {
       alert("Failed to unskip university");
     } finally {
       setLoadingId(null);

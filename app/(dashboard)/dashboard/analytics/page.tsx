@@ -49,9 +49,9 @@ export default function AnalyticsPage() {
         ) : (
           <div className="space-y-3">
             {FUNNEL_STEPS.map((step, i) => {
-              const val: number = (funnel as any)[step.key] ?? 0;
+              const val: number = (funnel as unknown as Record<string, number>)[step.key] ?? 0;
               const pct = maxFunnelVal > 0 ? Math.round((val / maxFunnelVal) * 100) : 0;
-              const prevVal = i > 0 ? ((funnel as any)[FUNNEL_STEPS[i - 1].key] ?? 0) : null;
+              const prevVal = i > 0 ? ((funnel as unknown as Record<string, number>)[FUNNEL_STEPS[i - 1].key] ?? 0) : null;
               const conv = prevVal != null && prevVal > 0 ? Math.round((val / prevVal) * 100) : null;
               return (
                 <div key={step.key} className="flex items-center gap-4">

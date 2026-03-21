@@ -9,7 +9,7 @@ import {
   PencilIcon,
   CheckBadgeIcon,
 } from "@heroicons/react/24/outline";
-import { Id } from "../../../../convex/_generated/dataModel";
+import { Id, Doc } from "../../../../convex/_generated/dataModel";
 
 const STEP_LABELS: Record<number, string> = {
   1: "Initial Outreach",
@@ -44,7 +44,7 @@ export default function ApprovalsPage() {
   const removeLoading = (id: Id<"emailsSent">) =>
     setLoadingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
 
-  const handleEdit = (email: any) => {
+  const handleEdit = (email: Doc<"emailsSent">) => {
     setEditingId(email._id);
     setEditSubject(email.subject);
     setEditBody(email.body);
@@ -137,7 +137,7 @@ export default function ApprovalsPage() {
           </div>
         ) : (
           <div className="space-y-4">
-            {pendingEmails.map((email: any) => {
+            {pendingEmails.map((email) => {
               const isEditing = editingId === email._id;
               const isLoading = loadingIds.has(email._id);
 

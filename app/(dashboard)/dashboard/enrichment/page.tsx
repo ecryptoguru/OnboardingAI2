@@ -3,7 +3,7 @@
 import { useQuery, useAction } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { useState } from "react";
-import { Id } from "../../../../convex/_generated/dataModel";
+import { Id, Doc } from "../../../../convex/_generated/dataModel";
 import { UniversityDetail } from "../../../../components/UniversityDetail";
 import { useRequireGeminiKey } from "../../../../components/ApiKeyModal";
 
@@ -65,7 +65,7 @@ export default function EnrichmentPage() {
     );
   };
 
-  const renderUniversityCard = (uni: any, isNew: boolean, isEnriching: boolean) => (
+  const renderUniversityCard = (uni: Doc<"universities">, isNew: boolean, isEnriching: boolean) => (
     <div 
       key={uni._id} 
       onClick={() => setSelectedId(uni._id)}
