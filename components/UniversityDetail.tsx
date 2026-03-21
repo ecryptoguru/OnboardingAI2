@@ -12,6 +12,7 @@ import {
   LinkIcon,
 } from "@heroicons/react/24/outline";
 import { useState } from "react";
+import { useRequireGeminiKey } from "./ApiKeyModal";
 
 interface UniversityDetailProps {
   universityId: Id<"universities"> | null;
@@ -39,6 +40,8 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
   const runEnrichmentChain = useAction(api.actions.orchestrator.runEnrichmentChain);
   const [isDeepEnriching, setIsDeepEnriching] = useState(false);
   const [enrichStep, setEnrichStep] = useState<string | null>(null);
+
+  const { withKeyCheck, keyModal } = useRequireGeminiKey();
 
   const handleDeepEnrich = async () => {
     if (!universityId) return;
@@ -88,7 +91,7 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
             )}
             
             <button
-              onClick={handleDeepEnrich}
+              onClick={withKeyCheck(handleDeepEnrich)}
               disabled={isDeepEnriching}
               className={`mt-3 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all w-fit shadow-sm ${
                 isDeepEnriching
@@ -238,6 +241,10 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
             {university?.demographics?.source ? (
               <span className="text-[10px] uppercase font-bold text-emerald-400/80 bg-emerald-400/10 px-2 py-0.5 rounded border border-emerald-500/20">
                 {university.demographics.source}
+              </span>
+            ) : university?.demographics ? (
+              <span className="text-[10px] uppercase font-bold text-sky-500/80 bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20">
+                NIRF Only
               </span>
             ) : (
               <span className="text-[10px] uppercase font-bold text-zinc-600 bg-muted px-2 py-0.5 rounded">
@@ -525,6 +532,7 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
           </div>
         </section>
       </div>
+      {keyModal}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { api } from "../../../../convex/_generated/api";
 import { useState } from "react";
 import { Id } from "../../../../convex/_generated/dataModel";
 import { UniversityDetail } from "../../../../components/UniversityDetail";
+import { useRequireGeminiKey } from "../../../../components/ApiKeyModal";
 
 export default function EnrichmentPage() {
   const [selectedId, setSelectedId] = useState<Id<"universities"> | null>(null);
@@ -16,6 +17,8 @@ export default function EnrichmentPage() {
   const runDeepEnrichment = useAction(api.actions.deepEnrichment.runDeepEnrichment);
   const [enrichingIds, setEnrichingIds] = useState<Set<Id<"universities">>>(new Set());
   const [selectedNewIds, setSelectedNewIds] = useState<Set<Id<"universities">>>(new Set());
+
+  const { withKeyCheck, keyModal } = useRequireGeminiKey();
 
   const toggleSelection = (e: React.MouseEvent, id: Id<"universities">) => {
     e.stopPropagation();
@@ -132,7 +135,7 @@ export default function EnrichmentPage() {
         
         {selectedNewIds.size > 0 && (
           <button
-            onClick={handleDeepEnrichSelected}
+            onClick={withKeyCheck(handleDeepEnrichSelected)}
             className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors flex items-center gap-2"
           >
             <span>Deep Enrich {selectedNewIds.size} Selected</span>
@@ -250,6 +253,7 @@ export default function EnrichmentPage() {
         universityId={selectedId} 
         onClose={() => setSelectedId(null)} 
       />
+      {keyModal}
 
       <style jsx global>{`
         .custom-scrollbar::-webkit-scrollbar {

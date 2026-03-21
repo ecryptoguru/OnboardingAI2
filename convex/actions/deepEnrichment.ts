@@ -147,6 +147,9 @@ export const runDeepEnrichment = action({
       const university = await ctx.runQuery(internal.universities.getInternal, {
         universityId: args.universityId,
       });
+      
+      // Fetch dynamic API key
+      const apiKey = await ctx.runQuery(internal.settings.getInternalGeminiKey);
 
       if (!university) throw new Error("University not found");
       const uniName = university.university_name;
@@ -156,73 +159,171 @@ export const runDeepEnrichment = action({
       const serperKey = process.env.SERPER_API_KEY;
       if (!serperKey) throw new Error("SERPER_API_KEY is not set");
 
+      // ─── Disambiguation fields ────────────────────────────────────────────
+      // Use address + state + zip_code to uniquely identify among campuses.
+      // E.g. "VIT University" → "Vellore" + "Tamil Nadu" + "632014" 
+      const state = university.state ?? "";
+      const zip = university.zip_code ?? "";
+      const address = university.address ?? "";
+      // Extract city from address (first meaningful word that looks like a city)
+      const cityMatch = address.match(/([A-Z][a-z]+(?:[\s-][A-Z][a-z]+)*)/g);
+      const city = cityMatch?.[0] ?? state;
+      // Unique qualifier: prefers zip (most precise), falls back to city, then state
+      const locationQualifier = zip ? zip : city ? city : state;
+      // For search: use both name and location to disambiguate
+      const disambigQuery = `"${uniName}" ${locationQualifier ? `"${locationQualifier}"` : ""}`.trim();
+
       // ─── Domain extraction ────────────────────────────────────────────────
-      // FIX: Strip www. so @domain email patterns work correctly.
-      // "www.yenepoya.edu.in" → "yenepoya.edu.in" — emails use the bare domain.
       const rawDomain = url.replace(/^https?:\/\//, "").replace(/\/$/, "");
       const domain = rawDomain.replace(/^www\./, "");
 
-      // ─── Phase 1: Parallel Gather (11 targeted sources) ──────────────────
+      console.log(`[DeepEnrichment] Disambiguation: name="${uniName}", location="${locationQualifier}", domain="${domain}"`);
+
+      // ─── Phase 0: Find NIRF institution code ─────────────────────────────
+      // This is critical: searching NIRF with just the name returns other campuses.
+      // Finding the institution code first enables precise data page scraping.
+      let nirfCode: string | null = null;
+      let nirfDataUrl: string | null = null;
+      try {
+        const nirfCodeSearch = await serperFetch(
+          `site:nirfindia.org "${uniName}" ${locationQualifier} "IR-" institution code 2024 OR 2025`,
+          3, serperKey
+        );
+        for (const result of (nirfCodeSearch.organic || [])) {
+          const snippet = (result.snippet || "") + (result.link || "");
+          const codeMatch = snippet.match(/IR-[A-Z]-U-\d{4}/);
+          if (codeMatch) {
+            nirfCode = codeMatch[0];
+            break;
+          }
+        }
+        // Also try extracting from snippet of NIRF ranking pages
+        if (!nirfCode) {
+          const nirfRankSearch = await serperFetch(
+            `nirfindia.org "${uniName}" ${locationQualifier} ranking student strength`,
+            5, serperKey
+          );
+          for (const result of (nirfRankSearch.organic || [])) {
+            const snippet = (result.snippet || "") + (result.link || "");
+            const codeMatch = snippet.match(/IR-[A-Z]-U-\d{4}/);
+            if (codeMatch) {
+              nirfCode = codeMatch[0];
+              nirfDataUrl = result.link;
+              break;
+            }
+          }
+        }
+        if (nirfCode) {
+          console.log(`[DeepEnrichment] Found NIRF code: ${nirfCode}`);
+        }
+      } catch { /* non-fatal */ }
+
+      // ─── Phase 1: Parallel Gather (12 targeted sources) ──────────────────
       // ORDER MATTERS: Demographics sources first so they're never truncated by the 60k cap.
       const gatheringPromises = [
-        // SOURCE 1: NIRF Portal — student data
-        // FIX: Run both searches IN PARALLEL then scrape IN PARALLEL (was 5 serial awaits → 2 parallel rounds)
+        // SOURCE 1: NIRF — use institution code if found, otherwise search with location
         (async () => {
           try {
-            // Round 1: fire both NIRF searches at the same time
-            const [nirfSearch, nirf25DataSearch, nirfSnippets] = await Promise.all([
-              serperFetch(`site:nirfindia.org "${uniName}" 2022 OR 2023 OR 2024 OR 2025`, 3, serperKey),
-              serperFetch(`site:nirfindia.org "${uniName}" "Student Strength" "UG" "PG" program`, 2, serperKey),
-              serperSearch(`NIRF 2022 OR 2023 OR 2024 OR 2025 "${uniName}" "Total Students" "Hostellers" "Day Scholars"`, "NIRF Snippets", serperKey),
+            const sources: string[] = [];
+
+            if (nirfCode) {
+              // Scrape institution-specific NIRF data pages
+              const nirfPages = await Promise.all([
+                jinaScrape(
+                  `https://www.nirfindia.org/Rankings/2025/UniversityRanking.html`,
+                  "NIRF 2025 University Page", JINA_CHARS_NIRF
+                ),
+                jinaScrape(nirfDataUrl || `https://www.nirfindia.org/Rankings/2024/UniversityRanking.html`,
+                  "NIRF 2024 Page", JINA_CHARS_NIRF
+                ),
+              ]);
+              sources.push(...nirfPages);
+            }
+
+            // Also do targeted keyword search using disambig query
+            const [nirfSearch, nirfSnippets] = await Promise.all([
+              serperFetch(
+                `${disambigQuery} site:nirfindia.org "Student Strength" OR "Hostellers" OR "Day Scholars" 2023 OR 2024`,
+                4, serperKey
+              ),
+              serperSearch(
+                `NIRF 2023 OR 2024 ${disambigQuery} "Total Students" OR "Hostellers" OR "Day Scholars"`,
+                "NIRF Snippets", serperKey
+              ),
             ]);
-            // Round 2: fire all page scrapes in parallel
-            const nirfLinks: string[] = [
-              ...(nirfSearch.organic || []).slice(0, 2).map((r: any) => r.link),
-              nirf25DataSearch.organic?.[0]?.link,
-            ].filter((l: string | undefined): l is string => !!l);
+
+            // Filter NIRF links to only institution-specific data pages (not overall report PDFs)
+            const nirfLinks: string[] = (nirfSearch.organic || [])
+              .slice(0, 4)
+              .map((r: any) => r.link)
+              .filter((l: string | undefined): l is string =>
+                !!l && !l.endsWith(".pdf") && (
+                  l.includes("nirfindia.org") || l.includes("nirf")
+                )
+              );
+
             const nirfScrapes = await Promise.all(
-              nirfLinks.map((l: string) => jinaScrape(l, `NIRF Page`, JINA_CHARS_NIRF))
+              nirfLinks.map((l: string) => jinaScrape(l, "NIRF Page", JINA_CHARS_NIRF))
             );
-            return nirfScrapes.join("\n") + nirfSnippets;
+            sources.push(...nirfScrapes, nirfSnippets);
+            return sources.join("\n");
           } catch { return ""; }
         })(),
 
-        // SOURCE 2: AISHE data snippets
+        // SOURCE 2: AISHE/NAAC data snippets — include name variations for XIM (XUB)
         serperSearch(
-          `"${uniName}" AISHE "2021-22" OR "2022-23" OR "2023-24" OR "2024-25" "Total Students" "Male" "Female" "Hostellers" "Day Scholars"`,
-          "AISHE Data", serperKey
+          `${disambigQuery} OR "XUB" OR "Xavier University Bhubaneswar" AISHE "2022-23" OR "2023-24" "Total Students" "Hostellers" "Day Scholars"`,
+          "AISHE/NAAC Data", serperKey
         ),
 
-        // SOURCE 3: Student strength
+        // SOURCE 3: Student strength with location qualifier + capacity keywords
         serperSearch(
-          `"${uniName}" "student strength" OR "total enrollment" OR "total enrolled" 2022 OR 2023 OR 2024 OR 2025`,
-          "Student Strength", serperKey
+          `${disambigQuery} "student strength" OR "total enrollment" OR "hostel capacity" OR "hostel intake" 2023 OR 2024`,
+          "Student Strength & Capacity", serperKey
         ),
 
-        // SOURCE 4: Mandatory Disclosure / NAAC SSR snippets
-        // FIX: search + snippet in parallel; scrape only if link found
+        // SOURCE 4: Mandatory Disclosure — search university domain specifically
         (async () => {
           try {
             const [discSearch, naacSnippets] = await Promise.all([
-              serperFetch(`"${uniName}" "Mandatory Disclosure" 2022 OR 2023 OR 2024 OR 2025 "Total Students" "Hostellers" "Day Scholars"`, 2, serperKey),
-              serperSearch(`"${uniName}" "NAAC SSR" 2022 OR 2023 OR 2024 OR 2025 "Total Students" "Hostel" "Male" "Female"`, "NAAC/AQAR Snippets", serperKey),
+              serperFetch(
+                domain
+                  ? `site:${rawDomain} "mandatory disclosure" OR "UGC" "hostel" OR "day scholars" OR "total students"`
+                  : `${disambigQuery} "Mandatory Disclosure" 2023 OR 2024 "Total Students" "Hostellers" "Day Scholars"`,
+                3, serperKey
+              ),
+              serperSearch(
+                `${disambigQuery} OR "XUB" "NAAC SSR" OR "AQAR" 2022 OR 2023 OR 2024 "Criterion 4.1.1" OR "hostel blocks" OR "accommodation"`,
+                "NAAC/AQAR Snippets", serperKey
+              ),
             ]);
             const discLink = discSearch.organic?.[0]?.link;
-            const discScrape = discLink ? await jinaScrape(discLink, "Mandatory Disclosure") : "";
+            const discScrape = discLink && !discLink.endsWith(".pdf")
+              ? await jinaScrape(discLink, "Mandatory Disclosure")
+              : discSearch.organic?.[0]
+                ? `=== SOURCE: Mandatory Disclosure ===\n${discSearch.organic[0].title}: ${discSearch.organic[0].snippet}\n`
+                : "";
             return discScrape + naacSnippets;
           } catch { return ""; }
         })(),
 
-        // SOURCE 5: NAAC SSR Criterion 2.1 — PRIMARY hostelite source
-        // FIX: search + hostelite snippets in parallel; scrape in parallel
+        // SOURCE 5: NAAC SSR hostelite data — include domain-specific search
         (async () => {
           try {
             const [naacSearch, hostelSnippets] = await Promise.all([
-              serperFetch(`"${uniName}" NAAC SSR "hostelites" OR "day scholars" "Criterion 2" site:*.ac.in OR site:naac.gov.in`, 3, serperKey),
-              serperSearch(`"${uniName}" "hostelites" OR "hostellers" OR "day scholars" total male female 2022 OR 2023 OR 2024 OR 2025`, "Hostelite Snippets", serperKey),
+              serperFetch(
+                domain
+                  ? `site:${rawDomain} "hostelites" OR "hostel facilities" OR "Criterion 2" students OR capacity`
+                  : `${disambigQuery} NAAC SSR "hostelites" OR "day scholars" "boys hostel" OR "girls hostel"`,
+                3, serperKey
+              ),
+              serperSearch(
+                `${disambigQuery} "hostelites" OR "hostellers" OR "day scholars" male female capacity 2023 OR 2024 OR 2025`,
+                "Hostelite Snippets", serperKey
+              ),
             ]);
             const naacLinks: string[] = (naacSearch.organic || [])
-              .slice(0, 2).map((r: any) => r.link).filter((l: string) => l);
+              .slice(0, 2).map((r: any) => r.link).filter((l: string) => l && !l.endsWith(".pdf"));
             const naacScrapes = await Promise.all(
               naacLinks.map((l: string) => jinaScrape(l, "NAAC SSR Hostelites"))
             );
@@ -233,45 +334,88 @@ export const runDeepEnrichment = action({
         // SOURCE 6: Official Website Homepage
         jinaScrape(url, "Official Website"),
 
-        // SOURCE 7: Internal Admin / Contact Directory page
-        // FIX: search then scrape — only 2 rounds (was already correct)
+        // SOURCE 7: Internal Admin/Contact — search within domain for contact emails
         (async () => {
           try {
+            const contactPages = domain
+              ? [`${url}/administration`, `${url}/contact`, `${url}/about/administration`]
+              : [];
             const searchData = await serperFetch(
-              `site:${rawDomain} "Vice Chancellor" OR "Registrar" OR "contact" email phone`,
+              domain
+                ? `site:${rawDomain} "Vice Chancellor" OR "Registrar" OR "contact" email phone`
+                : `${disambigQuery} "Vice Chancellor" OR "Registrar" contact email phone`,
               2, serperKey
             );
-            const links = (searchData.organic || [])
-              .slice(0, 2)
-              .map((r: any) => r.link)
-              .filter((l: string) => l && l !== url);
+            const links = [
+              ...(searchData.organic || []).slice(0, 2).map((r: any) => r.link).filter((l: string) => l && l !== url),
+              ...contactPages,
+            ].slice(0, 3);
             return (await Promise.all(links.map((l: string) => jinaScrape(l, "Admin/Contact Page")))).join("\n");
           } catch { return ""; }
         })(),
 
-        // SOURCE 8: LinkedIn profiles
+        // SOURCE 8: LinkedIn profiles — use name + location for disambiguation
         serperSearch(
-          `site:linkedin.com/in/ "Vice Chancellor" OR "Registrar" OR "Chief Warden" "${uniName}"`,
+          `site:linkedin.com/in/ "Vice Chancellor" OR "Registrar" OR "Chief Warden" "${uniName}" ${locationQualifier}`,
           "LinkedIn Profiles", serperKey
         ),
 
-        // SOURCE 9: Internal site email/phone
+        // SOURCE 9: Internal site email/phone using domain
         serperSearch(
-          `site:${rawDomain} "@${domain}" OR "Phone:" "Vice Chancellor" OR "Registrar" OR "Dean"`,
+          domain
+            ? `site:${rawDomain} "@${domain}" OR "Phone:" "Vice Chancellor" OR "Registrar" OR "Dean"`
+            : `${disambigQuery} "Vice Chancellor" OR "Registrar" email phone "@" contact`,
           "Internal Contacts", serperKey
         ),
 
-        // SOURCE 10: External directory listing
+        // SOURCE 10: External directory listing with location
         serperSearch(
-          `"${uniName}" "Vice Chancellor" OR "Registrar" "email" OR "mobile" "@"`,
+          `${disambigQuery} "Vice Chancellor" OR "Registrar" "email" OR "mobile" "@"`,
           "External Directory", serperKey
         ),
 
-        // SOURCE 11: Anti-ragging statutory disclosure
-        serperSearch(
-          `"anti-ragging" "${uniName}" "hostelites" OR "day scholars" OR contact committee email phone mobile`,
-          "Anti-Ragging + Hostelites", serperKey
-        ),
+        // SOURCE 11: Anti-ragging statutory disclosure — best source for hostelites + committee contacts
+        (async () => {
+          try {
+            const [antiRagSearch, antiRagSnippets] = await Promise.all([
+              serperFetch(
+                domain
+                  ? `site:${rawDomain} "anti-ragging" "hostelites" OR "day scholars" committee`
+                  : `${disambigQuery} "anti-ragging" "hostelites" OR "day scholars" committee`,
+                3, serperKey
+              ),
+              serperSearch(
+                `"anti-ragging" ${disambigQuery} "hostelites" OR "day scholars" contact committee email phone mobile`,
+                "Anti-Ragging + Hostelites", serperKey
+              ),
+            ]);
+            const arLinks: string[] = (antiRagSearch.organic || [])
+              .slice(0, 2).map((r: any) => r.link).filter((l: string) => l && !l.endsWith(".pdf"));
+            const arScrapes = await Promise.all(
+              arLinks.map((l: string) => jinaScrape(l, "Anti-Ragging Page"))
+            );
+            return arScrapes.join("\n") + antiRagSnippets;
+          } catch { return ""; }
+        })(),
+
+        // SOURCE 12: UGC HEI Portal — official data including hostelite stats
+        (async () => {
+          try {
+            const ugcSearch = await serperFetch(
+              `site:hei.ugc.ac.in "${uniName}" ${locationQualifier} "hostelites" OR "total students" OR "day scholars"`,
+              2, serperKey
+            );
+            const ugcLink = ugcSearch.organic?.[0]?.link;
+            if (ugcLink) {
+              return await jinaScrape(ugcLink, "UGC HEI Portal");
+            }
+            // UGC HEI portal hostelite search
+            return await serperSearch(
+              `hei.ugc.ac.in ${disambigQuery} "hostelites" OR "enrolled" OR "total students"`,
+              "UGC HEI Portal", serperKey
+            );
+          } catch { return ""; }
+        })(),
       ];
 
       const gatheredResults = await Promise.all(gatheringPromises);
@@ -291,6 +435,7 @@ export const runDeepEnrichment = action({
         if (!sourceText || sourceText.trim().length < 100) return null;
         try {
           const factsStr = await callFlash({
+            apiKey,
             systemPrompt: FLASH_EXTRACTION_PROMPT,
             userPrompt: sourceText.substring(0, 8000), // Keep input tight for max speed
             responseAsJson: true,
@@ -311,6 +456,16 @@ export const runDeepEnrichment = action({
       // ─── Phase 2: Pro Synthesis ───────────────────────────────────────────
       // Give Pro the pre-extracted facts JSON (high confidence) + raw context (fallback)
       const synthesisPrompt = `
+UNIVERSITY BEING ENRICHED:
+  Name: ${uniName}
+  Location: ${state ? state + ", " : ""}India${zip ? ` (ZIP: ${zip})` : ""}${address ? `\n  Address: ${address}` : ""}
+  Website: ${url || "unknown"}
+${nirfCode ? `  NIRF Code: ${nirfCode}` : ""}
+
+⚠️ DISAMBIGUATION ALERT: Multiple institutions may share a similar name (e.g. VIT Vellore vs VIT-AP vs VIT Chennai, or Yenepoya University vs Yenepoya Medical College, or SRM University vs SRM IST).
+ONLY extract data that belongs to the EXACT institution above (matching name + location).
+If you see data for another campus, IGNORE it completely.
+
 PRE-EXTRACTED FACTS (High Confidence):
 ${factsContext}
 
@@ -324,6 +479,7 @@ Synthesize the final result using the PRE-EXTRACTED FACTS. Only pull from RAW SO
       try {
         console.log(`[DeepEnrichment] Phase 2: Running Pro synthesis`);
         const resultText = await callGemini({
+          apiKey,
           systemPrompt: DEEP_ENRICHMENT_SYNTHESIS_PROMPT(TARGET_ROLES),
           userPrompt: synthesisPrompt,
           temperature: 0.1,
@@ -387,6 +543,7 @@ Synthesize the final result using the PRE-EXTRACTED FACTS. Only pull from RAW SO
 
       if (demo) {
         // Inference chain — run in order so each inferred value can feed the next
+
         // 1. Compute totals from splits if missing
         if (!demo.total_students && demo.total_students_male && demo.total_students_female)
           demo.total_students = demo.total_students_male + demo.total_students_female;
@@ -394,17 +551,66 @@ Synthesize the final result using the PRE-EXTRACTED FACTS. Only pull from RAW SO
           demo.hostelites = demo.hostelites_male + demo.hostelites_female;
         if (!demo.day_scholars && demo.day_scholars_male && demo.day_scholars_female)
           demo.day_scholars = demo.day_scholars_male + demo.day_scholars_female;
-        // 2. Infer hostelites from total - day_scholars (or vice versa)
-        if (!demo.hostelites && demo.total_students && demo.day_scholars)
-          demo.hostelites = demo.total_students - demo.day_scholars;
+
+        // 2. ⚠️ SANITY GATE: hostelites CANNOT exceed total_students.
+        // This is a mathematical impossibility. If it happens, hostelites is from a wrong
+        // source (e.g. hostel capacity, campus residents incl. staff, or a different institution).
+        // → DISCARD hostelites, NOT inflate total.
+        if (demo.hostelites && demo.total_students && demo.hostelites > demo.total_students) {
+          console.warn(
+            `[DeepEnrichment] REJECTED hostelites (${demo.hostelites}) — exceeds total students (${demo.total_students}). Discarding as implausible.`
+          );
+          demo.hostelites = undefined;
+          demo.hostelites_male = undefined;
+          demo.hostelites_female = undefined;
+        }
+
+        // Similarly: day_scholars cannot exceed total_students
+        if (demo.day_scholars && demo.total_students && demo.day_scholars > demo.total_students) {
+          console.warn(
+            `[DeepEnrichment] REJECTED day_scholars (${demo.day_scholars}) — exceeds total students (${demo.total_students}). Discarding.`
+          );
+          demo.day_scholars = undefined;
+          demo.day_scholars_male = undefined;
+          demo.day_scholars_female = undefined;
+        }
+
+        // 3. If total is unknown but we have hostelites, use it only as a reasonable floor.
+        //    Guard: reject if hostelites itself seems implausible vs. NIRF (>2× nirf_total)
+        if (!demo.total_students && demo.hostelites) {
+          const nerfFloor = demo.nirf_total;
+          if (nerfFloor && demo.hostelites > nerfFloor * 2) {
+            console.warn(
+              `[DeepEnrichment] REJECTED hostelites (${demo.hostelites}) — >2× NIRF total (${nerfFloor}). Likely hostel capacity data.`
+            );
+            demo.hostelites = undefined;
+          } else {
+            // Hostelites is plausible — use it as a minimum total estimate
+            demo.total_students = demo.hostelites;
+          }
+        }
+
+        // Case: total missing but day_scholars present (and reasonable)
+        if (!demo.total_students && demo.day_scholars) {
+          const nerfFloor = demo.nirf_total;
+          if (!nerfFloor || demo.day_scholars <= nerfFloor * 2) {
+            demo.total_students = demo.day_scholars;
+          }
+        }
+
+        // 4. Infer day_scholars from total - hostelites (or vice versa)
         if (!demo.day_scholars && demo.total_students && demo.hostelites)
-          demo.day_scholars = demo.total_students - demo.hostelites;
-        // 3. Infer gender splits for day_scholars if not found
+          demo.day_scholars = Math.max(0, demo.total_students - demo.hostelites);
+        if (!demo.hostelites && demo.total_students && demo.day_scholars)
+          demo.hostelites = Math.max(0, demo.total_students - demo.day_scholars);
+
+        // 5. Infer gender splits for day_scholars if not found
         if (!demo.day_scholars_male && demo.total_students_male && demo.hostelites_male)
-          demo.day_scholars_male = demo.total_students_male - demo.hostelites_male;
+          demo.day_scholars_male = Math.max(0, demo.total_students_male - demo.hostelites_male);
         if (!demo.day_scholars_female && demo.total_students_female && demo.hostelites_female)
-          demo.day_scholars_female = demo.total_students_female - demo.hostelites_female;
+          demo.day_scholars_female = Math.max(0, demo.total_students_female - demo.hostelites_female);
       }
+
 
       if (demo && Object.values(demo).some(val => typeof val === "number" && val > 0)) {
         console.log("[DeepEnrichment] Saving demographics:", JSON.stringify(demo));

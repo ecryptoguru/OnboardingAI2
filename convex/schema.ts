@@ -172,6 +172,7 @@ export default defineSchema({
     step_number: v.number(),
     subject: v.string(),
     body: v.string(),
+    html_body: v.optional(v.string()), // HTML version of body for rich email clients
     sendgrid_message_id: v.optional(v.string()),
     status: v.union(
       v.literal("pending_approval"),
@@ -216,6 +217,7 @@ export default defineSchema({
   // ─── Proposals ────────────────────────────────────────────────────────────
   proposals: defineTable({
     university_id: v.id("universities"),
+    stakeholder_id: v.optional(v.id("stakeholders")),
     meeting_date: v.optional(v.number()),
     agenda: v.optional(v.string()),
     proposal_json: v.optional(v.string()), // JSON string of structured proposal
@@ -229,4 +231,10 @@ export default defineSchema({
     created_at: v.number(),
     updated_at: v.number(),
   }).index("by_university", ["university_id"]),
+
+  // ─── Settings ─────────────────────────────────────────────────────────────
+  systemSettings: defineTable({
+    configKey: v.string(), // e.g. "geminiApiKey"
+    value: v.string(),
+  }).index("by_key", ["configKey"]),
 });

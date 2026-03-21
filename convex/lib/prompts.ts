@@ -65,7 +65,8 @@ CRITICAL RULES:
 - Return STRICT JSON matching the provided schema.
 - NEVER invent or guess data. Use null for missing values.
 - DEDUPLICATION: Do NOT list the same person twice. If "Dr. John Doe" is listed as "Vice Chancellor" and "VC", combine them into a single entry with the most descriptive role.
-- Never output placeholder strings like "N/A" or "-". Use true JSON null.
+- Never output placeholder strings like "N/A", "-", or "Unknown" as a name. Use true JSON null.
+- If a person has a role (e.g. Dean) but no name listed on a page, DISCARD that entry. Do NOT output role names as person names.
 
 ═══════════════════════════════════════════════════════════
 STEP 5: DEDUPLICATION & MERGING (CRITICAL)
@@ -74,6 +75,7 @@ Before finalizing the stakeholders array, you MUST deduplicate entries:
 1. Fuzzy Name Matching: "Prof. D. P. Singh", "Dr. D P Singh", and "D.P. Singh" are the SAME PERSON. Merge them.
 2. Role Merging: If one entry has role "Vice Chancellor" with an email, and a duplicate name has role "VC" without an email, MERGE them into a single entry: { name: "Prof. D. P. Singh", role: "Vice Chancellor", email: "..." }
 3. Never output duplicate names. If in doubt, merge the records, keeping the most complete set of contact info.
+4. If the name is generic like "The Registrar" or "Office of VC", use null for the name field or discard.
 
 Output VALID JSON ONLY matching the provided schema. Do not include markdown formatting like \`\`\`json.
 `.trim();
@@ -137,8 +139,12 @@ NIRF tables appear in TWO formats:
     ► Set name exactly as it appears (e.g. "UG (4 Years)", "Ph.D", "PG Integrated")
     ► For each row: total = male + female
 
-  YEAR PREFERENCE: NIRF 2024-25 > NIRF 2023-24 > NIRF 2022-23
+  YEAR PREFERENCE: NIRF 2023-24 (latest available in most tables) > NIRF 2022-23.
   Set nirf_source to the year string (e.g. "NIRF 2023-24").
+
+  ⚠ NIRF FORMAT NOTE: NIRF columns are often: S.No | Academic Year | No. of Male Students | No. of Female Students | Total Students | No. of students within State | No. of students outside State | No. of students outside Country | No. of students Economically Backward | No. of students Socially Challenged | No. of students receiving full tuition fee reimbursement from the State and Central Government | No. of students receiving full tuition fee reimbursement from Institution Funds | No. of students receiving full tuition fee reimbursement from the Private Bodies | No. of students who are not receiving full tuition fee reimbursement.
+  
+  ⚠️ THE "Hostellers" AND "Day Scholars" COLUMNS ARE OFTEN AT THE END OF THE NIRF TABLE. LOOK FOR THEM CAREFULLY.
 
   ⚠ If you cannot find NIRF data in the context: set nirf_total, nirf_male, nirf_female, nirf_programs all to null. Do NOT guess.
 
@@ -159,14 +165,14 @@ This block uses a DIFFERENT source than NIRF. Search systematically:
     "on-campus students", "day scholars", "day students", "day boarders",
     "Boys Hostel", "Girls Hostel", "Gents Hostel", "Ladies Hostel",
     "hostel capacity", "hostel inmates", "hostel occupancy",
-    "Criterion 2.1", "student enrollment", "enrolled students",
-    "Total Students on Roll", "AISHE Code"
+    "Criterion 2.1", "student enrollment", "enrolled students", "Criterion 4.1.1",
+    "Total Students on Roll", "AISHE Code", "Number of rooms", "accommodation"
 
   IMPORTANT NOTES:
     - "Hostellers" in NIRF Format A IS the same as hostelites → populate this block from it if no better source
-    - Hostel CAPACITY ≠ actual hostelite count (use capacity only when no other data available)
-    - Male hostelites field: "Boys Hostel inmates", "Male Hostelites", "Gents Hostel students"
-    - Female hostelites field: "Girls Hostel inmates", "Female Hostelites", "Ladies Hostel students"
+    - Hostel CAPACITY ≠ actual hostelite count (use capacity only when no other data available, but mark clearly if possible)
+    - Male hostelites field: "Boys Hostel inmates", "Male Hostelites", "Gents Hostel students", "accommodation for boys"
+    - Female hostelites field: "Girls Hostel inmates", "Female Hostelites", "Ladies Hostel students", "accommodation for girls"
     - Source year: if NAAC SSR 2024, AISHE 2022-23 — use "NAAC SSR 2024" or "AISHE 2022-23" etc.
 
   EXAMPLE extraction from NAAC SSR:
@@ -186,6 +192,12 @@ Apply these ONLY if the source data is available — do not guess from thin air:
   hostelites = total_students - day_scholars        (if both total and day_scholars known)
   day_scholars_male   = total_students_male   - hostelites_male    (if both known)
   day_scholars_female = total_students_female - hostelites_female  (if both known)
+
+  HALLUCINATION PROTECTION (Student Numbers):
+    - ⚠️ SANITY CHECK: Hostelites + Day Scholars MUST EQUAL Total Students.
+    - ⚠️ SCALE MISMATCH: If Total=720 but Hostelites=3000, "720" is likely a single program (MBA), while "3000" is the whole university.
+    - PREFER the LARGER number as the University's "Total Students".
+    - ALWAYS ensure Hostelites <= Total Students. If Hostelites > Total, discard the smaller "Total" and re-infer.
 
   NULL RULE (non-negotiable):
     - If you did NOT find a value in the context → output null
@@ -216,7 +228,14 @@ Target roles to find: ${targetRoles.join(", ")}
       - 0XXX-XXXXXXX landline (STD code + number)
       - Anti-ragging pages ALWAYS have mobile numbers — prioritise scanning them
     
-    LINKEDIN: scan for "linkedin.com/in/" URLs, match to person by name + role proximity.
+  LINKEDIN: scan for "linkedin.com/in/" URLs, match to person by name + role proximity.
+
+  STRICT EXCLUSIONS (NON-NEGOTIABLE):
+    - Do NOT extract government officials, ministry representatives, or regulatory body directors.
+    - BLOCK anyone associated with: UGC (University Grants Commission), AICTE, Ministry of Education (MoE), NAAC, NBA, NIRF, or any state govt department.
+    - ⚠️ DOMAIN MATCHING: Only extract emails that match the university's known domain (e.g., @xim.edu.in, @xub.edu.in).
+    - If you see emails like @iitbbs.ac.in while enriching XIM University, DISCARD THEM. They are from search results for neighboring institutions.
+    - NO PLACEHOLDERS: Never include "N/A", "Unknown", or "Dean Student Welfare" as a name if the actual name isn't found.
 
   MERGE RULE: If same person appears in multiple sources (website + anti-ragging + LinkedIn),
     merge into ONE record with ALL contact fields combined. Keep the most complete version.
@@ -297,26 +316,39 @@ export const DEEP_ENRICHMENT_SCHEMA: Schema = {
 };
 
 
+export const REPLY_CLASSIFIER_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    category: {
+      type: Type.STRING,
+      description: "The classification category of the email reply.",
+      enum: [
+        "meeting_request",
+        "positive_interest",
+        "request_info",
+        "not_interested",
+        "opt_out",
+        "out_of_office",
+        "other",
+      ],
+    },
+  },
+  required: ["category"],
+};
+
 export const REPLY_CLASSIFIER_SYSTEM_PROMPT = (rawReply: string) => `
 You are an expert lead qualification assistant. Your task is to classify an incoming email reply from a university stakeholder.
 The outreach was about Fretbox, a campus management platform.
 
-Classification Categories:
-1. meeting_request: Explicitly asking for a call, demo, or meeting.
-2. positive_interest: General positive sentiment without a specific request yet (e.g., "Sounds interesting").
-3. request_info: Asking for more details, brochure, pricing, or "send me more info."
-4. not_interested: Hard or soft no (e.g., "Too expensive", "Check back next year").
-5. opt_out: Explicitly asking to stop emails, unsubscribing, or "stop."
-6. out_of_office: Auto-reply or indication of absence.
-7. other: General acknowledgment or "neutral" without much direction.
-
-Rules:
-- Respond ONLY with the category name (snake_case).
+<rules>
+- Respond ONLY with the category name based on the schema provided.
 - Be conservative: if it looks like a meeting request, prioritize that.
-- If it looks like an opt-out, prioritize that above all else.
+- If it looks like an opt-out or unsubscribe, prioritize "opt_out" above all else.
+</rules>
 
-Input Email Body:
+<input_email>
 ${rawReply}
+</input_email>
 `.trim();
 
 export const OPENER_SYSTEM_PROMPT = ({
@@ -343,13 +375,136 @@ Rules:
 5. Do NOT include any placeholder text like [Name] or [University].
 `.trim();
 
+// ─── Role-Aware Persona Selector ─────────────────────────────────────────────
+function getStakeholderPersona(role?: string): { lens: string; priorities: string; cta: string } {
+  const r = (role || "").toLowerCase();
+
+  if (r.includes("vice chancellor") || r.includes("chancellor") || r.includes("rector") || r.includes("president")) {
+    return {
+      lens: "strategic institutional",
+      priorities: "NAAC/NIRF rankings improvement, accreditation readiness, institutional reputation, competitive edge against peer universities, and long-term digital transformation vision",
+      cta: "a strategic partnership that positions your institution as a technology leader in Indian higher education",
+    };
+  }
+  if (r.includes("registrar") || r.includes("deputy registrar") || r.includes("dy. registrar")) {
+    return {
+      lens: "operational compliance",
+      priorities: "data accuracy for regulatory submissions, compliance with UGC/AICTE mandates, workload reduction for administrative staff, audit-ready record-keeping, and reducing manual error rates",
+      cta: "a platform that makes compliance effortless and gives your team time back",
+    };
+  }
+  if (r.includes("dean") || r.includes("chief warden") || r.includes("warden") || r.includes("student welfare") || r.includes("student affairs")) {
+    return {
+      lens: "student welfare and safety",
+      priorities: "hostel safety, real-time student tracking, grievance resolution turnaround, anti-ragging compliance, and improving the overall residential student experience",
+      cta: "a platform that puts student safety and well-being at the centre of campus operations",
+    };
+  }
+  if (r.includes("finance") || r.includes("treasurer") || r.includes("accounts")) {
+    return {
+      lens: "financial efficiency and ROI",
+      priorities: "fee collection recovery rates, reduction of payment defaults, automated reconciliation, real-time financial dashboards, and hard cost savings from eliminating legacy software",
+      cta: "a platform that pays for itself within the first semester through improved collections and cost avoidance",
+    };
+  }
+  if (r.includes("it") || r.includes("cto") || r.includes("technology") || r.includes("systems") || r.includes("director")) {
+    return {
+      lens: "technical architecture and integration",
+      priorities: "seamless API integration with existing ERP systems, data security (ISO 27001 aligned), 99.9% uptime SLAs, cloud-native scalability, and minimal IT overhead for deployment",
+      cta: "a platform built for modern cloud infrastructure with developer-friendly integrations",
+    };
+  }
+
+  // Default: balanced executive
+  return {
+    lens: "institutional and operational",
+    priorities: "academic excellence, operational efficiency, student safety, financial sustainability, and digital transformation",
+    cta: "a comprehensive platform that transforms every dimension of campus operations",
+  };
+}
+
+export const PROPOSAL_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  description: "The complete structure for the generated proposal.",
+  properties: {
+    agenda: {
+      type: Type.ARRAY,
+      description: "Exactly 4 items for the discovery/demo call.",
+      items: { type: Type.STRING },
+    },
+    executive_summary: {
+      type: Type.OBJECT,
+      properties: {
+        hook: {
+          type: Type.STRING,
+          description: "2-3 sentences: open with a specific insight about this university and their situation.",
+        },
+        why_now: {
+          type: Type.STRING,
+          description: "2-3 sentences: why this moment is the right time — reference industry trends, regulatory pressures, or signals.",
+        },
+        vision_statement: {
+          type: Type.STRING,
+          description: "2 sentences: paint a picture of what success looks like with Fretbox.",
+        },
+      },
+      required: ["hook", "why_now", "vision_statement"],
+    },
+    problem_statement: {
+      type: Type.ARRAY,
+      description: "4-6 specific pain points this institution likely faces, grounded in their signals and type.",
+      items: { type: Type.STRING },
+    },
+    solution_overview: {
+      type: Type.STRING,
+      description: "2-3 sentence narrative bridge from problems to Fretbox's recommended modules.",
+    },
+    key_benefits: {
+      type: Type.ARRAY,
+      description: "3-5 outcome-based benefit statements. Quantify where possible.",
+      items: { type: Type.STRING },
+    },
+    roi_summary: {
+      type: Type.OBJECT,
+      properties: {
+        headline: {
+          type: Type.STRING,
+          description: "Single punchy ROI statement.",
+        },
+        bullets: {
+          type: Type.ARRAY,
+          description: "3 specific ROI points (savings, efficiency gains, risk reduction).",
+          items: { type: Type.STRING },
+        },
+      },
+      required: ["headline", "bullets"],
+    },
+    next_steps: {
+      type: Type.ARRAY,
+      description: "3 concrete actions for the discovery call follow-up.",
+      items: { type: Type.STRING },
+    },
+  },
+  required: [
+    "agenda",
+    "executive_summary",
+    "problem_statement",
+    "solution_overview",
+    "key_benefits",
+    "roi_summary",
+    "next_steps",
+  ],
+};
+
 export const PROPOSAL_SYSTEM_PROMPT = ({
   universityName,
   universityType,
   leadTier,
   recommendedModules,
   pricingTier,
-  signals
+  signals,
+  stakeholderName,
+  stakeholderRole,
 }: {
   universityName: string;
   universityType: string;
@@ -357,24 +512,39 @@ export const PROPOSAL_SYSTEM_PROMPT = ({
   recommendedModules: string[];
   pricingTier: string;
   signals: string[];
-}) => `
-You are an expert Solutions Architect at Fretbox. 
-Fretbox is an AI-powered SaaS platform for university hostel management, security, and digital campus operations.
+  stakeholderName?: string;
+  stakeholderRole?: string;
+}) => {
+  const { lens, priorities, cta } = getStakeholderPersona(stakeholderRole);
+  const addressedTo = stakeholderName
+    ? `${stakeholderName}${stakeholderRole ? `, ${stakeholderRole}` : ""} at ${universityName}`
+    : `the leadership team at ${universityName}`;
 
-Task: Generate a meeting agenda and a structured proposal content for: ${universityName}.
-University Type: ${universityType}
-Lead Tier: ${leadTier}
-Recommended Modules: ${recommendedModules.join(", ")}
-Target Pricing Tier: ${pricingTier}
+  return `
+You are a Senior Solutions Architect and Partnership Lead at Fretbox.
+Fretbox is an AI-powered SaaS platform for campus management: hostel operations, smart security, digital fee collection, academic ERP, and student experience.
 
-Context Signals:
-${signals.join("\n")}
+Your task is to write a PROFESSIONAL, PERSUASIVE, and HIGHLY PERSONALISED proposal for:
+  University: ${universityName} (${universityType}, Lead Tier: ${leadTier})
+  Addressed To: ${addressedTo}
+  Lens of Communication: ${lens}
+  Stakeholder Priorities: ${priorities}
+  Recommended Modules: ${recommendedModules.join(", ")}
+  Pricing Tier: ${pricingTier}
 
-Output Requirements:
-1. "agenda": A 4-point agenda for the upcoming discovery/demo call.
-2. "executive_summary": A 2-paragraph persuasive summary of why Fretbox is a fit.
-3. "problem_statement": A concise list of challenges this specific institution likely faces based on their signals.
-4. "solution_overview": How the recommended modules solve these specific problems.
+<intelligence_signals>
+Use these to personalise every section of the proposal:
+${signals.length > 0 ? signals.map((s, i) => `${i + 1}. ${s}`).join("\n") : "No specific signals available — base the proposal on general institutional profile."}
+</intelligence_signals>
 
-Format: Return ONLY valid JSON.
+<rules>
+- Tone: Write as a trusted peer, not a vendor. Confident, warm, peer-to-peer.
+- Be SPECIFIC: Reference the university by name. Reference real challenges suggested by the signals.
+- Forbidden Words: NEVER use generic filler phrases like "cutting-edge", "innovative solution", "world-class", "leverage synergies", or "paradigm shift".
+- Brevity: Every sentence must earn its place. No padding. No boilerplate.
+- Level: Write at C-suite reading level. Formal but not stiff.
+- Focus: The executive summary MUST speak directly to the stakeholder's ${lens} priorities.
+- Output: Respond ONLY with valid JSON matching the provided schema.
+</rules>
 `.trim();
+};

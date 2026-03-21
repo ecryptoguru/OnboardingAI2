@@ -24,6 +24,40 @@ export const getStats = query({
   },
 });
 
+export const listByUniversity = query({
+  args: { university_id: v.id("universities") },
+  handler: async (ctx, args) => {
+    const emails = await ctx.db
+      .query("emailsSent")
+      .filter((q) => q.eq(q.field("university_id"), args.university_id))
+      .order("desc")
+      .collect();
+    return await Promise.all(
+      emails.map(async (e) => {
+        const st = await ctx.db.get(e.stakeholder_id);
+        return { ...e, stakeholder_name: st?.name, stakeholder_email: st?.email, stakeholder_role: st?.role };
+      })
+    );
+  },
+});
+
+export const getDetailedStats = query({
+  args: {},
+  handler: async (ctx) => {
+    const emails = await ctx.db.query("emailsSent").collect();
+    const byStep: Record<number, { sent: number; opened: number; clicked: number; bounced: number }> = {};
+    for (const e of emails) {
+      if (!byStep[e.step_number]) byStep[e.step_number] = { sent: 0, opened: 0, clicked: 0, bounced: 0 };
+      if (e.status === "sent" || e.status === "delivered" || e.status === "opened" || e.status === "clicked") byStep[e.step_number].sent++;
+      if (e.status === "opened" || e.status === "clicked") byStep[e.step_number].opened++;
+      if (e.status === "clicked") byStep[e.step_number].clicked++;
+      if (e.status === "bounced") byStep[e.step_number].bounced++;
+    }
+    return byStep;
+  },
+});
+
+
 export const getBySendgridId = query({
   args: { sendgrid_message_id: v.string() },
   handler: async (ctx, args) => {
@@ -106,6 +140,7 @@ export const insertInternal = internalMutation({
     stakeholder_id: v.id("stakeholders"),
     subject: v.string(),
     body: v.string(),
+    html_body: v.optional(v.string()),
     status: v.union(
       v.literal("pending_approval"),
       v.literal("queued"), v.literal("sent"), v.literal("delivered"),

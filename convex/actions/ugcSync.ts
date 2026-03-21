@@ -45,8 +45,13 @@ export const fetchFromUgc = action({
     const rawList: UgcUniversity[] = data.List;
     console.log(`Fetched ${rawList.length} universities from UGC.`);
 
-    // Map fields to our schema
-    const companiesToSync = rawList.map(item => ({
+    // Map fields to our schema and filter
+    const companiesToSync = rawList
+      .filter(item => {
+        const name = item.uni_name.trim().toLowerCase();
+        return name.includes("yenepoya") || name.includes("vit university") || name.includes("vellore institute of technology");
+      })
+      .map(item => ({
       university_name: item.uni_name.trim(),
       state: item.state.trim(),
       address: item.address || undefined,

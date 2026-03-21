@@ -47,7 +47,20 @@ graph TD
 | **Deployment**      | "deploy", "production", "CI/CD", "docker"  | `devops-engineer`                           | ✅ YES       |
 | **Security Review** | "security", "vulnerability", "exploit"     | `security-auditor` + `penetration-tester`   | ✅ YES       |
 | **Performance**     | "slow", "optimize", "performance", "speed" | `performance-optimizer`                     | ✅ YES       |
-| **Product Def**     | "requirements", "user story", "backlog", "MVP" | `product-owner`                             | ✅ YES       |
+| **Product Def**     | "requirements", "user story", "backlog", "MVP" | `product-owner`                         | ✅ YES       |
+| **AI / LLM**        | "rag", "llm", "prompt", "embedding", "model", "vector" | `ai-engineer`                  | ✅ YES       |
+| **Data Pipeline**   | "etl", "elt", "pipeline", "ingestion", "streaming", "sync" | `data-engineer`              | ✅ YES       |
+| **Growth / Social** | "growth", "linkedin", "twitter", "reddit", "campaign", "funnel" | `marketing-strategist`    | ✅ YES       |
+| **Reliability**     | "slo", "error budget", "observability", "on-call", "toil", "mttr", "chaos" | `sre-engineer`      | ✅ YES       |
+| **DB Performance**  | "slow query", "n+1", "explain analyze", "index", "connection pool", "query plan" | `database-optimizer` | ✅ YES  |
+| **LLM Cost**        | "llm cost", "model routing", "shadow test", "circuit breaker", "token budget", "ai finops" | `autonomous-optimization-architect` | ✅ YES |
+| **Compliance**      | "soc 2", "gdpr", "iso 27001", "hipaa", "compliance", "audit readiness", "controls" | `compliance-auditor` | ✅ YES |
+| **SEO / GEO**       | "seo", "meta tags", "sitemap", "ranking", "core web vitals", "geo" | `seo-specialist`  | ✅ YES |
+| **E2E / Automation**| "playwright", "cypress", "e2e", "automation", "test pipeline", "flaky test" | `qa-automation-engineer` | ✅ YES |
+| **Legacy / Refactor**| "legacy", "refactor", "undocumented", "technical debt", "codebase archaeology" | `code-archaeologist` | ✅ YES |
+| **Product Reqs**    | "user story", "acceptance criteria", "prd", "feature brief", "requirements doc" | `product-manager` | ✅ YES |
+| **Explore / Map**   | "explore codebase", "map dependencies", "understand structure", "what does this do" | `explorer-agent` | ✅ YES |
+| **Docs Request**    | "write readme", "document this", "add jsdoc", "create docs" | `documentation-writer`  | ✅ YES |
 | **New Feature**     | "build", "create", "implement", "new app"  | `orchestrator` → multi-agent                | ⚠️ ASK FIRST |
 | **Complex Task**    | Multiple domains detected                  | `orchestrator` → multi-agent                | ⚠️ ASK FIRST |
 
@@ -102,17 +115,23 @@ function analyzeRequest(userMessage) {
 
 | Domain          | Patterns                                   | Agent                   |
 | --------------- | ------------------------------------------ | ----------------------- |
-| **Security**    | auth, login, jwt, password, hash, token    | `security-auditor`      |
-| **Frontend**    | component, react, vue, css, html, tailwind | `frontend-specialist`   |
-| **Backend**     | api, server, express, fastapi, node        | `backend-specialist`    |
-| **Mobile**      | react native, flutter, ios, android, expo  | `mobile-developer`      |
-| **Database**    | prisma, sql, mongodb, schema, migration    | `database-architect`    |
-| **Testing**     | test, jest, vitest, playwright, cypress    | `test-engineer`         |
-| **DevOps**      | docker, kubernetes, ci/cd, pm2, nginx      | `devops-engineer`       |
-| **Debug**       | error, bug, crash, not working, issue      | `debugger`              |
-| **Performance** | slow, lag, optimize, cache, performance    | `performance-optimizer` |
-| **SEO**         | seo, meta, analytics, sitemap, robots      | `seo-specialist`        |
-| **Game**        | unity, godot, phaser, game, multiplayer    | `game-developer`        |
+| **Security**        | auth, login, jwt, password, hash, token              | `security-auditor`              |
+| **Frontend**        | component, react, vue, css, html, tailwind           | `frontend-specialist`           |
+| **Backend**         | api, server, express, fastapi, node                  | `backend-specialist`            |
+| **Mobile**          | react native, flutter, ios, android, expo            | `mobile-developer`              |
+| **Database**        | prisma, sql, mongodb, schema, migration              | `database-architect`            |
+| **Testing**         | test, jest, vitest, playwright, cypress              | `test-engineer`                 |
+| **DevOps**          | docker, kubernetes, ci/cd, pm2, nginx                | `devops-engineer`               |
+| **Debug**           | error, bug, crash, not working, issue                | `debugger`                      |
+| **Performance**     | slow, lag, optimize, cache, performance              | `performance-optimizer`         |
+| **SEO**             | seo, meta, analytics, sitemap, robots                | `seo-specialist`                |
+| **AI / LLM**        | rag, llm, prompt, embedding, model, vector, openai   | `ai-engineer`                   |
+| **Data Pipeline**   | etl, elt, pipeline, ingestion, streaming, sync, dbt  | `data-engineer`                 |
+| **Growth / Social** | growth, linkedin, twitter, reddit, campaign, funnel  | `marketing-strategist`          |
+| **Reliability**     | slo, error budget, observability, on-call, toil, chaos, mttr, p99 | `sre-engineer`      |
+| **DB Performance**  | slow query, n+1, explain analyze, index tuning, connection pool  | `database-optimizer`  |
+| **LLM Cost**        | llm cost, model routing, shadow test, circuit breaker, token budget | `autonomous-optimization-architect` |
+| **Compliance**      | soc 2, gdpr, iso 27001, hipaa, compliance, audit, controls, evidence | `compliance-auditor` |
 
 ### Multi-Domain Tasks (Auto-invoke Orchestrator)
 

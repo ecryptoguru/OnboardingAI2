@@ -1,44 +1,24 @@
 "use node";
 
 import { GoogleGenAI } from "@google/genai";
-import OpenAI from "openai";
 import { withRetry } from "./utils";
 
-// ─── OpenRouter Unified Client ───────────────────────────────────────────────
-let _openrouter: OpenAI | null = null;
-export function getOpenRouter(): OpenAI {
-  if (!_openrouter) {
-    _openrouter = new OpenAI({
-      baseURL: "https://openrouter.ai/api/v1",
-      apiKey: process.env.OPENROUTER_API_KEY!,
-      defaultHeaders: {
-        "HTTP-Referer": "https://fretbox.in",
-        "X-Title": "Fretbox Outreach AI",
-      },
-    });
-  }
-  return _openrouter;
-}
-
 // ─── Direct Google SDK ───────────────────────────────────────────────
-let _ai: GoogleGenAI | null = null;
-export function getGoogleAI(): GoogleGenAI {
-  if (!_ai) {
-    const apiKey = process.env.GOOGLE_API_KEY;
-    if (!apiKey) throw new Error("GOOGLE_API_KEY env var is not set");
-    _ai = new GoogleGenAI({ apiKey });
+export function getGoogleAI(apiKey?: string | null): GoogleGenAI {
+  if (!apiKey) {
+    throw new Error("Google Gemini API Key is missing. Please configure it in the Settings dashboard.");
   }
-  return _ai;
+  return new GoogleGenAI({ apiKey });
 }
 
 // ─── Model constants ──────────────────────────────────────────────────────────
 export const MODELS = {
   // Complex reasoning: proposals, reply classification
-  claude: "anthropic/claude-sonnet-4.6" as const,
+  complex: "gemini-3.1-pro-preview" as const,
   // Gemini Pro: enrichment, scoring, personalization
   gemini: "gemini-3.1-pro-preview" as const,
   // Gemini Flash: future fast tasks
-  geminiFlash: "gemini-3-flash-preview" as const,
+  geminiFlash: "gemini-3.1-flash-lite-preview" as const,
   // Embeddings: 768-dim (direct via Google AI API)
   embedding: "text-embedding-005" as const,
 } as const;
@@ -47,56 +27,10 @@ export const MODELS = {
 export const TEMP = {
   deterministic: 0.0, // classification, scoring
   balanced: 0.3,      // personalization
-  creative: 0.7,      // proposal writing
+  creative: 0.6,      // proposal writing
 } as const;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
-
-/**
- * Call Claude Sonnet via OpenRouter with explicit cache breakpoints.
- * Passes cache_control type: ephemeral inside the system prompt block
- * which OpenRouter natively translates to Anthropic's Prompt Caching.
- */
-export async function callClaude({
-  system,
-  userMessage,
-  temperature = TEMP.balanced,
-  maxTokens = 2048,
-}: {
-  system: string;
-  userMessage: string;
-  temperature?: number;
-  maxTokens?: number;
-}): Promise<string> {
-  return await withRetry(async () => {
-    const response = await getOpenRouter().chat.completions.create({
-      model: MODELS.claude,
-      max_tokens: maxTokens,
-      temperature,
-      messages: [
-        {
-          role: "system",
-          content: [
-            {
-              type: "text",
-              text: system,
-              // @ts-expect-error - OpenRouter/Anthropic specific extension not in standard OpenAI types
-              cache_control: { type: "ephemeral" },
-            },
-          ],
-        },
-        {
-          role: "user",
-          content: userMessage,
-        },
-      ],
-    });
-
-    const text = response.choices[0]?.message?.content;
-    if (!text) throw new Error("Unexpected empty response from Claude via OpenRouter");
-    return text;
-  });
-}
 
 /**
  * Call Gemini via native @google/genai SDK.
@@ -112,6 +46,7 @@ export async function callGemini({
   model = MODELS.gemini,
   thinkingBudget,   // Auto-applied if not set: Pro → 1024 minimum, non-Pro → off
   maxOutputTokens = 8192,
+  apiKey,
 }: {
   systemPrompt: string;
   userPrompt: string;
@@ -121,6 +56,7 @@ export async function callGemini({
   model?: string;
   thinkingBudget?: number;
   maxOutputTokens?: number;
+  apiKey?: string | null;
 }): Promise<string> {
   return await withRetry(async () => {
     // Gemini Pro models REQUIRE thinkingBudget >= 512 (thinking is always on).
@@ -130,7 +66,8 @@ export async function callGemini({
       ? (isProModel ? Math.max(512, thinkingBudget) : thinkingBudget)
       : (isProModel ? 1024 : 0);
 
-    const response = await getGoogleAI().models.generateContent({
+    const aiClient = getGoogleAI(apiKey);
+    const response = await aiClient.models.generateContent({
       model,
       contents: userPrompt,
       config: {
@@ -186,8 +123,8 @@ export async function callFlash(
  * Generate a 768-dimensional embedding using Google's text-embedding-004.
  * Note: Requires GOOGLE_API_KEY environment variable.
  */
-export async function embed(text: string): Promise<number[]> {
-  const result = await getGoogleAI().models.embedContent({
+export async function embed(text: string, apiKey?: string | null): Promise<number[]> {
+  const result = await getGoogleAI(apiKey).models.embedContent({
     model: MODELS.embedding,
     contents: text,
   });

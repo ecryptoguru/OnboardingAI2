@@ -109,8 +109,6 @@ Agents: security-auditor → penetration-tester → synthesis
 | `performance-optimizer` | Performance | "slow", "optimize", "profiling" |
 | `project-planner` | Planning | "plan", "roadmap", "milestones" |
 | `seo-specialist` | SEO | "SEO", "meta tags", "search ranking" |
-| `game-developer` | Game Development | "game", "Unity", "Godot", "Phaser" |
-
 ---
 
 ## Antigravity Built-in Agents

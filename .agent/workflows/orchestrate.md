@@ -82,7 +82,7 @@ Do you approve? (Y/N)
 
 > ✅ After user approval, invoke multiple agents in PARALLEL.
 
-## Available Agents (17 total)
+## Available Agents (26 total)
 
 | Agent | Domain | Use When |
 |-------|--------|----------|
@@ -90,18 +90,28 @@ Do you approve? (Y/N)
 | `explorer-agent` | Discovery | Codebase mapping |
 | `frontend-specialist` | UI/UX | React, Vue, CSS, HTML |
 | `backend-specialist` | Server | API, Node.js, Python |
-| `database-architect` | Data | SQL, NoSQL, Schema |
-| `security-auditor` | Security | Vulnerabilities, Auth |
-| `penetration-tester` | Security | Active testing |
-| `test-engineer` | Testing | Unit, E2E, Coverage |
+| `database-architect` | Data | SQL, NoSQL, Schema design |
+| `database-optimizer` | DB Performance | Slow queries, N+1, EXPLAIN ANALYZE, indexing |
+| `security-auditor` | Security | Vulnerabilities, Auth, OWASP |
+| `penetration-tester` | Security | Active red-team testing |
+| `compliance-auditor` | Compliance | SOC 2, GDPR, ISO 27001, controls |
+| `test-engineer` | Testing | Unit, E2E, Coverage, TDD |
+| `qa-automation-engineer` | Test Automation | Playwright, Cypress, CI pipelines |
 | `devops-engineer` | Ops | CI/CD, Docker, Deploy |
-| `mobile-developer` | Mobile | React Native, Flutter |
-| `performance-optimizer` | Speed | Lighthouse, Profiling |
-| `seo-specialist` | SEO | Meta, Schema, Rankings |
-| `documentation-writer` | Docs | README, API docs |
-| `debugger` | Debug | Error analysis |
-| `game-developer` | Games | Unity, Godot |
-| `orchestrator` | Meta | Coordination |
+| `sre-engineer` | Reliability | SLOs, observability, on-call, chaos |
+| `mobile-developer` | Mobile | React Native, Flutter, Expo |
+| `ai-engineer` | AI / LLM | RAG, prompt pipelines, evaluations |
+| `autonomous-optimization-architect` | LLM Cost | Model routing, shadow testing, AI FinOps |
+| `data-engineer` | Data Pipelines | ETL/ELT, streaming, data quality |
+| `performance-optimizer` | Speed | Lighthouse, Profiling, Web Vitals |
+| `seo-specialist` | SEO | Meta, Schema, Rankings, GEO |
+| `marketing-strategist` | Growth | Funnels, X, LinkedIn, Reddit, campaigns |
+| `product-manager` | Requirements | User stories, acceptance criteria, PRD |
+| `product-owner` | Strategy | MVP scope, backlog, roadmap |
+| `documentation-writer` | Docs | README, API docs — explicit request only |
+| `debugger` | Debug | Root cause analysis, error investigation |
+| `code-archaeologist` | Legacy | Refactoring, undocumented systems |
+| `orchestrator` | Meta | Multi-agent coordination |
 
 ---
 

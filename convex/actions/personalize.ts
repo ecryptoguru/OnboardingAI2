@@ -22,6 +22,9 @@ export const generateOpener = action({
       const uni = await ctx.runQuery(internal.universities.getInternal, {
         universityId: args.universityId,
       });
+      
+      // Fetch dynamic API key
+      const apiKey = await ctx.runQuery(internal.settings.getInternalGeminiKey);
       if (uni) uniName = uni.university_name;
       if (!uni) throw new Error("University not found");
 
@@ -45,6 +48,7 @@ export const generateOpener = action({
       const userPrompt = "Write the personalized opener now.";
 
       const opener = await callGemini({
+        apiKey,
         systemPrompt,
         userPrompt,
         temperature: TEMP.balanced,

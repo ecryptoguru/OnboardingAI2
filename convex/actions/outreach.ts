@@ -40,6 +40,7 @@ export const processSequenceStep = action({
     // 2. Determine Email Template and Personalization
     let subject = "";
     let body = "";
+    let html_body: string | undefined;
 
     switch (seq.current_step) {
       case 1: {
@@ -51,12 +52,14 @@ export const processSequenceStep = action({
         const email = TEMPLATES.STEP_1(st.name || st.role || "there", uni.university_name, opener);
         subject = email.subject;
         body = email.body;
+        html_body = email.html;
         break;
       }
       case 2: {
         const email = TEMPLATES.STEP_2(st.name || st.role || "there", uni.university_name);
         subject = email.subject;
         body = email.body;
+        html_body = email.html;
         break;
       }
       case 3: {
@@ -67,12 +70,14 @@ export const processSequenceStep = action({
         const email = TEMPLATES.STEP_3(st.name || st.role || "there", newsSignal);
         subject = email.subject;
         body = email.body;
+        html_body = email.html;
         break;
       }
       case 4: {
         const email = TEMPLATES.STEP_4(st.name || st.role || "there");
         subject = email.subject;
         body = email.body;
+        html_body = email.html;
         break;
       }
       default:
@@ -86,7 +91,8 @@ export const processSequenceStep = action({
       university_id: seq.university_id,
       stakeholder_id: seq.stakeholder_id,
       subject,
-      body: body,
+      body,
+      html_body,
       status: "pending_approval", // Instead of "sent"
       step_number: seq.current_step,
       sent_at: now, // We treat this as drafted_at for now
@@ -135,8 +141,7 @@ export const processDueSequences = action({
     // 2. Process each sequence
     for (let i = 0; i < dueSequences.length; i++) {
        const seq = dueSequences[i];
-       // @ts-expect-error - internal.actions property error if type gen is laggy
-       await ctx.scheduler.runAfter(i * 1000, internal.actions.outreach.processSequenceStep, {
+       await ctx.scheduler.runAfter(i * 1000, (internal as any).actions.outreach.processSequenceStep, {
          sequenceId: seq._id,
        });
     }

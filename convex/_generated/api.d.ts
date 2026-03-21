@@ -45,12 +45,15 @@ import type * as lib_scoring from "../lib/scoring.js";
 import type * as lib_utils from "../lib/utils.js";
 import type * as priorityScores from "../priorityScores.js";
 import type * as proposals from "../proposals.js";
+import type * as removeDuplicates from "../removeDuplicates.js";
 import type * as replies from "../replies.js";
 import type * as sequences from "../sequences.js";
+import type * as settings from "../settings.js";
 import type * as signals from "../signals.js";
 import type * as stakeholders from "../stakeholders.js";
 import type * as test from "../test.js";
 import type * as universities from "../universities.js";
+import type * as wipeEnrichment from "../wipeEnrichment.js";
 
 import type {
   ApiFromModules,
@@ -96,12 +99,15 @@ declare const fullApi: ApiFromModules<{
   "lib/utils": typeof lib_utils;
   priorityScores: typeof priorityScores;
   proposals: typeof proposals;
+  removeDuplicates: typeof removeDuplicates;
   replies: typeof replies;
   sequences: typeof sequences;
+  settings: typeof settings;
   signals: typeof signals;
   stakeholders: typeof stakeholders;
   test: typeof test;
   universities: typeof universities;
+  wipeEnrichment: typeof wipeEnrichment;
 }>;
 
 /**

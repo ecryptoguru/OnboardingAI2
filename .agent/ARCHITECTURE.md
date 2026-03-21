@@ -8,9 +8,9 @@
 
 Antigravity Kit is a modular system consisting of:
 
-- **20 Specialist Agents** - Role-based AI personas
-- **36 Skills** - Domain-specific knowledge modules
-- **11 Workflows** - Slash command procedures
+- **26 Specialist Agents** - Role-based AI personas
+- **42 Skills** - Domain-specific knowledge modules
+- **14 Workflows** - Slash command procedures
 
 ---
 
@@ -19,16 +19,16 @@ Antigravity Kit is a modular system consisting of:
 ```plaintext
 .agent/
 ├── ARCHITECTURE.md          # This file
-├── agents/                  # 20 Specialist Agents
-├── skills/                  # 36 Skills
-├── workflows/               # 11 Slash Commands
+├── agents/                  # 26 Specialist Agents
+├── skills/                  # 42 Skills
+├── workflows/               # 14 Slash Commands
 ├── rules/                   # Global Rules
 └── scripts/                 # Master Validation Scripts
 ```
 
 ---
 
-## 🤖 Agents (20)
+## 🤖 Agents (26)
 
 Specialist AI personas for different domains.
 
@@ -36,11 +36,13 @@ Specialist AI personas for different domains.
 | ------------------------ | -------------------------- | -------------------------------------------------------- |
 | `orchestrator`           | Multi-agent coordination   | parallel-agents, behavioral-modes                        |
 | `project-planner`        | Discovery, task planning   | brainstorming, plan-writing, architecture                |
-| `frontend-specialist`    | Web UI/UX                  | frontend-design, react-best-practices, tailwind-patterns |
-| `backend-specialist`     | API, business logic        | api-patterns, nodejs-best-practices, database-design     |
-| `database-architect`     | Schema, SQL                | database-design, prisma-expert                           |
+| `frontend-specialist`    | Web UI/UX                  | nextjs-react-expert, web-design-guidelines, tailwind-patterns, frontend-design |
+| `backend-specialist`     | API, business logic        | api-patterns, nodejs-best-practices, database-design, llm-patterns, data-pipeline-patterns |
+| `ai-engineer`            | LLM systems, RAG, evals    | llm-patterns, testing-patterns, python-patterns          |
+| `data-engineer`          | ETL/ELT, streaming         | data-pipeline-patterns, database-design                  |
+| `marketing-strategist`   | Growth and social strategy | growth-marketing, social-media-patterns, seo-fundamentals |
+| `database-architect`     | Schema, SQL                | database-design                                          |
 | `mobile-developer`       | iOS, Android, RN           | mobile-design                                            |
-| `game-developer`         | Game logic, mechanics      | game-development                                         |
 | `devops-engineer`        | CI/CD, Docker              | deployment-procedures, docker-expert                     |
 | `security-auditor`       | Security compliance        | vulnerability-scanner, red-team-tactics                  |
 | `penetration-tester`     | Offensive security         | red-team-tactics                                         |
@@ -52,12 +54,16 @@ Specialist AI personas for different domains.
 | `product-manager`        | Requirements, user stories | plan-writing, brainstorming                              |
 | `product-owner`          | Strategy, backlog, MVP     | plan-writing, brainstorming                              |
 | `qa-automation-engineer` | E2E testing, CI pipelines  | webapp-testing, testing-patterns                         |
-| `code-archaeologist`     | Legacy code, refactoring   | clean-code, code-review-checklist                        |
+| `code-archaeologist`     | Legacy code, refactoring   | clean-code, code-review-checklist, systematic-debugging  |
 | `explorer-agent`         | Codebase analysis          | -                                                        |
+| `sre-engineer`           | SLOs, observability, toil  | deployment-procedures, server-management, systematic-debugging |
+| `database-optimizer`     | Query perf, N+1, indexing  | database-design, data-pipeline-patterns                  |
+| `autonomous-optimization-architect` | LLM cost routing | llm-patterns, typescript-expert, python-patterns    |
+| `compliance-auditor`     | SOC 2, GDPR, ISO 27001     | vulnerability-scanner, documentation-templates           |
 
 ---
 
-## 🧩 Skills (36)
+## 🧩 Skills (42)
 
 Modular knowledge domains that agents can load on-demand. based on task context.
 
@@ -65,39 +71,39 @@ Modular knowledge domains that agents can load on-demand. based on task context.
 
 | Skill                   | Description                                                           |
 | ----------------------- | --------------------------------------------------------------------- |
-| `react-best-practices`  | React & Next.js performance optimization (Vercel - 57 rules)          |
-| `web-design-guidelines` | Web UI audit - 100+ rules for accessibility, UX, performance (Vercel) |
+| `nextjs-react-expert`   | React & Next.js performance optimization, patterns, server components |
+| `web-design-guidelines` | Web UI audit - 100+ rules for accessibility, UX, performance          |
 | `tailwind-patterns`     | Tailwind CSS v4 utilities                                             |
 | `frontend-design`       | UI/UX patterns, design systems                                        |
-| `ui-ux-pro-max`         | 50 styles, 21 palettes, 50 fonts                                      |
 
 ### Backend & API
 
-| Skill                   | Description                    |
-| ----------------------- | ------------------------------ |
-| `api-patterns`          | REST, GraphQL, tRPC            |
-| `nestjs-expert`         | NestJS modules, DI, decorators |
-| `nodejs-best-practices` | Node.js async, modules         |
-| `python-patterns`       | Python standards, FastAPI      |
+| Skill                   | Description                              |
+| ----------------------- | ---------------------------------------- |
+| `api-patterns`          | REST, GraphQL, tRPC                      |
+| `llm-patterns`          | RAG, prompt systems, model routing       |
+| `nodejs-best-practices` | Node.js async, modules, production ops   |
+| `python-patterns`       | Python standards, FastAPI                |
+| `rust-pro`              | Rust systems programming, async patterns |
 
 ### Database
 
-| Skill             | Description                 |
-| ----------------- | --------------------------- |
-| `database-design` | Schema design, optimization |
-| `prisma-expert`   | Prisma ORM, migrations      |
+| Skill                    | Description                  |
+| ------------------------ | ---------------------------- |
+| `database-design`        | Schema design, optimization  |
+| `data-pipeline-patterns` | ETL/ELT, streaming, quality  |
 
 ### TypeScript/JavaScript
 
-| Skill               | Description                         |
-| ------------------- | ----------------------------------- |
-| `typescript-expert` | Type-level programming, performance |
+| Skill               | Description                                            |
+| ------------------- | ------------------------------------------------------ |
+| `typescript-expert` | Type modeling, runtime boundaries, maintainable safety |
 
 ### Cloud & Infrastructure
 
 | Skill                   | Description               |
 | ----------------------- | ------------------------- |
-| `docker-expert`         | Containerization, Compose |
+| `docker-expert`         | Containerization, Compose, runtime separation |
 | `deployment-procedures` | CI/CD, deploy workflows   |
 | `server-management`     | Infrastructure management |
 
@@ -133,18 +139,14 @@ Modular knowledge domains that agents can load on-demand. based on task context.
 | --------------- | --------------------- |
 | `mobile-design` | Mobile UI/UX patterns |
 
-### Game Development
-
-| Skill              | Description           |
-| ------------------ | --------------------- |
-| `game-development` | Game logic, mechanics |
-
 ### SEO & Growth
 
 | Skill              | Description                   |
 | ------------------ | ----------------------------- |
-| `seo-fundamentals` | SEO, E-E-A-T, Core Web Vitals |
-| `geo-fundamentals` | GenAI optimization            |
+| `seo-fundamentals`      | SEO, E-E-A-T, Core Web Vitals |
+| `geo-fundamentals`      | GenAI optimization            |
+| `growth-marketing`      | Experimentation and funnel optimization |
+| `social-media-patterns` | Platform-native social strategy |
 
 ### Shell/CLI
 
@@ -157,31 +159,35 @@ Modular knowledge domains that agents can load on-demand. based on task context.
 
 | Skill                     | Description               |
 | ------------------------- | ------------------------- |
-| `clean-code`              | Coding standards (Global) |
-| `behavioral-modes`        | Agent personas            |
-| `parallel-agents`         | Multi-agent patterns      |
-| `mcp-builder`             | Model Context Protocol    |
-| `documentation-templates` | Doc formats               |
-| `i18n-localization`       | Internationalization      |
-| `performance-profiling`   | Web Vitals, optimization  |
-| `systematic-debugging`    | Troubleshooting           |
+| `clean-code`              | Coding standards (Global)             |
+| `behavioral-modes`        | Agent personas                        |
+| `parallel-agents`         | Multi-agent patterns                  |
+| `intelligent-routing`     | Auto agent selection and task routing |
+| `mcp-builder`             | Model Context Protocol                |
+| `documentation-templates` | Doc formats                           |
+| `i18n-localization`       | Internationalization                  |
+| `performance-profiling`   | Web Vitals, optimization              |
+| `systematic-debugging`    | Troubleshooting                       |
 
 ---
 
-## 🔄 Workflows (11)
+## 🔄 Workflows (14)
 
 Slash command procedures. Invoke with `/command`.
 
 | Command          | Description              |
 | ---------------- | ------------------------ |
 | `/brainstorm`    | Socratic discovery       |
+| `/audit-ai`      | Audit AI and LLM systems |
 | `/create`        | Create new features      |
 | `/debug`         | Debug issues             |
 | `/deploy`        | Deploy application       |
 | `/enhance`       | Improve existing code    |
+| `/growth`        | Growth strategy planning |
 | `/orchestrate`   | Multi-agent coordination |
 | `/plan`          | Task breakdown           |
 | `/preview`       | Preview changes          |
+| `/review`        | Multi-domain code review |
 | `/status`        | Check project status     |
 | `/test`          | Run tests                |
 | `/ui-ux-pro-max` | Design with 50 styles    |
@@ -266,9 +272,9 @@ For details, see [scripts/README.md](scripts/README.md)
 
 | Metric              | Value                         |
 | ------------------- | ----------------------------- |
-| **Total Agents**    | 20                            |
-| **Total Skills**    | 36                            |
-| **Total Workflows** | 11                            |
+| **Total Agents**    | 25                            |
+| **Total Skills**    | 44                            |
+| **Total Workflows** | 14                            |
 | **Total Scripts**   | 2 (master) + 18 (skill-level) |
 | **Coverage**        | ~90% web/mobile development   |
 
@@ -278,11 +284,18 @@ For details, see [scripts/README.md](scripts/README.md)
 
 | Need     | Agent                 | Skills                                |
 | -------- | --------------------- | ------------------------------------- |
-| Web App  | `frontend-specialist` | react-best-practices, frontend-design |
+| Web App  | `frontend-specialist` | nextjs-react-expert, frontend-design  |
 | API      | `backend-specialist`  | api-patterns, nodejs-best-practices   |
+| AI/LLM   | `ai-engineer`         | llm-patterns, testing-patterns        |
+| Data Pipelines | `data-engineer`   | data-pipeline-patterns, database-design |
 | Mobile   | `mobile-developer`    | mobile-design                         |
-| Database | `database-architect`  | database-design, prisma-expert        |
+| Database | `database-architect`  | database-design                       |
 | Security | `security-auditor`    | vulnerability-scanner                 |
+| Growth   | `marketing-strategist` | growth-marketing, social-media-patterns |
 | Testing  | `test-engineer`       | testing-patterns, webapp-testing      |
 | Debug    | `debugger`            | systematic-debugging                  |
 | Plan     | `project-planner`     | brainstorming, plan-writing           |
+| Reliability | `sre-engineer`     | deployment-procedures, systematic-debugging |
+| DB Performance | `database-optimizer` | database-design                    |
+| LLM Cost | `autonomous-optimization-architect` | llm-patterns, python-patterns |
+| Compliance | `compliance-auditor` | vulnerability-scanner               |

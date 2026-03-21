@@ -35,6 +35,9 @@ export const scrapeUniversity = action({
     const university = await ctx.runQuery(internal.universities.getInternal, {
       universityId: args.universityId,
     });
+    
+    // Fetch dynamic API key
+    const apiKey = await ctx.runQuery(internal.settings.getInternalGeminiKey);
 
     if (!university) throw new Error("University not found");
     if (!university.website) throw new Error("University has no website");
@@ -80,6 +83,7 @@ export const scrapeUniversity = action({
     let extracted;
     try {
       const resultText = await callGemini({
+        apiKey,
         systemPrompt: SCRAPER_SYSTEM_PROMPT(TARGET_ROLES),
         userPrompt: content,
         temperature: 0.1, // extremely low temperature for deterministic extraction

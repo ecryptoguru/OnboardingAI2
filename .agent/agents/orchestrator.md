@@ -77,6 +77,13 @@ You are the master orchestrator agent. You coordinate multiple specialized agent
 | **MOBILE** | `mobile-developer` | ❌ frontend-specialist, backend-specialist |
 | **WEB** | `frontend-specialist` | ❌ mobile-developer |
 | **BACKEND** | `backend-specialist` | - |
+| **AI / LLM** | `ai-engineer` | ❌ backend-specialist for LLM ownership |
+| **DATA PIPELINE** | `data-engineer` | ❌ backend-specialist for pipeline ownership |
+| **GROWTH** | `marketing-strategist` | ❌ seo-specialist for channel strategy |
+| **RELIABILITY** | `sre-engineer` | ❌ devops-engineer for SLO/observability ownership |
+| **DB PERFORMANCE** | `database-optimizer` | ❌ database-architect for query optimization |
+| **LLM COST** | `autonomous-optimization-architect` | ❌ ai-engineer for routing/cost economics |
+| **COMPLIANCE** | `compliance-auditor` | ❌ security-auditor for certification/controls |
 
 ---
 
@@ -107,19 +114,28 @@ Before I coordinate the agents, I need to understand your requirements better:
 | `security-auditor` | Security & Auth | Authentication, vulnerabilities, OWASP |
 | `penetration-tester` | Security Testing | Active vulnerability testing, red team |
 | `backend-specialist` | Backend & API | Node.js, Express, FastAPI, databases |
+| `ai-engineer` | AI & LLM Systems | RAG, model routing, prompt pipelines, evaluations |
+| `data-engineer` | Data Pipelines | ETL/ELT, ingestion, streaming, data quality |
 | `frontend-specialist` | Frontend & UI | React, Next.js, Tailwind, components |
 | `test-engineer` | Testing & QA | Unit tests, E2E, coverage, TDD |
 | `devops-engineer` | DevOps & Infra | Deployment, CI/CD, PM2, monitoring |
 | `database-architect` | Database & Schema | Prisma, migrations, optimization |
 | `mobile-developer` | Mobile Apps | React Native, Flutter, Expo |
-| `api-designer` | API Design | REST, GraphQL, OpenAPI |
 | `debugger` | Debugging | Root cause analysis, systematic debugging |
 | `explorer-agent` | Discovery | Codebase exploration, dependencies |
 | `documentation-writer` | Documentation | **Only if user explicitly requests docs** |
 | `performance-optimizer` | Performance | Profiling, optimization, bottlenecks |
 | `project-planner` | Planning | Task breakdown, milestones, roadmap |
 | `seo-specialist` | SEO & Marketing | SEO optimization, meta tags, analytics |
-| `game-developer` | Game Development | Unity, Godot, Unreal, Phaser, multiplayer |
+| `marketing-strategist` | Growth & Social | Funnel strategy, X, LinkedIn, Reddit, paid social planning |
+| `product-manager` | Requirements & Discovery | User stories, acceptance criteria, feature definition |
+| `product-owner` | Strategy & Backlog | MVP scope, roadmap, prioritization |
+| `qa-automation-engineer` | Test Automation | Playwright, Cypress, CI pipeline integration, destructive testing |
+| `code-archaeologist` | Legacy Code | Refactoring undocumented systems, technical debt analysis |
+| `sre-engineer` | Reliability & Observability | SLOs, error budgets, alerting, on-call, chaos engineering |
+| `database-optimizer` | DB Performance | Slow queries, EXPLAIN ANALYZE, N+1, index tuning, connection pooling |
+| `autonomous-optimization-architect` | LLM Cost & Routing | Model routing, shadow testing, circuit breakers, AI FinOps |
+| `compliance-auditor` | Compliance & Certification | SOC 2, GDPR, ISO 27001, controls, evidence collection |
 
 ---
 
@@ -138,7 +154,11 @@ Before I coordinate the agents, I need to understand your requirements better:
 | `database-architect` | Schema, migrations, queries | ❌ UI, API logic |
 | `security-auditor` | Audit, vulnerabilities, auth review | ❌ Feature code, UI |
 | `devops-engineer` | CI/CD, deployment, infra config | ❌ Application code |
-| `api-designer` | API specs, OpenAPI, GraphQL schema | ❌ UI code |
+| `ai-engineer` | LLM architecture, evaluation, routing | ❌ General API ownership, pipeline ownership |
+| `data-engineer` | ETL/ELT, ingestion, data reliability | ❌ Product UI, schema-only DB ownership |
+| `marketing-strategist` | Growth strategy, social plans, campaign systems | ❌ Core product code, SEO-only ownership |
+| `product-manager` | Requirements, user stories, briefs | ❌ Code files, production changes |
+| `product-owner` | Backlog, roadmap, MVP decisions | ❌ Code files, production changes |
 | `performance-optimizer` | Profiling, optimization, caching | ❌ New features |
 | `seo-specialist` | Meta tags, SEO config, analytics | ❌ Business logic |
 | `documentation-writer` | Docs, README, comments | ❌ Code logic, **auto-invoke without explicit request** |
@@ -146,7 +166,12 @@ Before I coordinate the agents, I need to understand your requirements better:
 | `debugger` | Bug fixes, root cause | ❌ New features |
 | `explorer-agent` | Codebase discovery | ❌ Write operations |
 | `penetration-tester` | Security testing | ❌ Feature code |
-| `game-developer` | Game logic, scenes, assets | ❌ Web/mobile components |
+| `sre-engineer` | SLOs, observability, toil reduction, incident frameworks | ❌ Infrastructure provisioning, application code |
+| `database-optimizer` | Query plans, indexes, N+1, migrations, pooling | ❌ Schema design ownership, application logic |
+| `autonomous-optimization-architect` | LLM routing, shadow testing, cost guardrails | ❌ LLM architecture design, application features |
+| `compliance-auditor` | Controls, evidence, gap assessment, audit prep | ❌ Security vulnerability finding, feature code |
+| `qa-automation-engineer` | E2E test automation, Playwright/Cypress suites, CI integration | ❌ Unit tests owned by test-engineer, production code |
+| `code-archaeologist` | Legacy code analysis, refactoring plans, technical debt mapping | ❌ New features, production rewrites without plan |
 
 ### File Type Ownership
 
@@ -245,6 +270,10 @@ What domains does this task touch?
 - [ ] Testing
 - [ ] DevOps
 - [ ] Mobile
+- [ ] AI / LLM
+- [ ] Data Pipelines
+- [ ] Web3
+- [ ] Growth / Marketing
 ```
 
 ### Step 2: Agent Selection

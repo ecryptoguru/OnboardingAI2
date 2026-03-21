@@ -10,7 +10,8 @@ import { v } from "convex/values";
  */
 export const sendEmail = action({
   args: {
-    to: v.string(),
+    to: v.union(v.string(), v.array(v.string())),
+    cc: v.optional(v.array(v.string())),
     subject: v.string(),
     text: v.string(),
     html: v.optional(v.string()),
@@ -33,7 +34,8 @@ export const sendEmail = action({
       body: JSON.stringify({
         personalizations: [
           {
-            to: [{ email: args.to }],
+            to: (Array.isArray(args.to) ? args.to : [args.to]).map(e => ({ email: e })),
+            ...(args.cc && args.cc.length > 0 ? { cc: args.cc.map(e => ({ email: e })) } : {}),
           },
         ],
         from: { email: fromEmail, name: "Ashish Gupta (Fretbox)" },
@@ -80,6 +82,7 @@ export const approveAndSend = action({
       to: st.email,
       subject: email.subject,
       text: email.body,
+      html: email.html_body ?? undefined,
     });
 
     if (!sendResult.success) {

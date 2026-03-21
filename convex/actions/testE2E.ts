@@ -68,6 +68,10 @@ export const runChain = action({
       });
       console.log(`[E2E] 🤖 Generated Opener: "${personalization ? (personalization as string).substring(0, 50) : "null"}..."`);
 
+      // Cleanup: remove the test stakeholder immediately after use
+      await ctx.runMutation(internal.stakeholders.removeInternal, { id: stakeholderId });
+      console.log(`[E2E] 🧹 Cleaned up test stakeholder.`);
+
       // 6. Test Auto-Reply (Requirement 8)
       console.log(`[E2E] 📧 Testing Auto-Reply...`);
       const autoReplyResult = await ctx.runAction(api.actions.autoReply.sendAutoReply, {
@@ -77,6 +81,10 @@ export const runChain = action({
       });
       console.log(`[E2E] 📧 Auto-Reply Success: ${autoReplyResult.success}`);
       autoReply = autoReplyResult;
+
+      // Cleanup: remove the test university so it doesn't pollute the DB
+      await ctx.runMutation(api.universities.remove, { id: universityId });
+      console.log(`[E2E] 🧹 Cleaned up test university.`);
     } else {
       console.log(`[E2E] ❌ Could not discover website. Skipping enrichment.`);
     }

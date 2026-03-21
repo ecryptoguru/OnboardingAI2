@@ -23,6 +23,9 @@ export const runMigration = action({
     const total = allSignals.length;
     console.log(`[EmbeddingMigration] Found ${total} signals to re-embed.`);
 
+    // Fetch dynamic API key
+    const apiKey = await ctx.runQuery(internal.settings.getInternalGeminiKey);
+
     let migrated = 0;
     let failed = 0;
 
@@ -34,7 +37,7 @@ export const runMigration = action({
       await Promise.all(
         batch.map(async (signal) => {
           try {
-            const newEmbedding = await embed(signal.content);
+            const newEmbedding = await embed(signal.content, apiKey);
             await ctx.runMutation(internal.signals.updateEmbedding, {
               signalId: signal._id,
               embedding: newEmbedding,

@@ -17,6 +17,9 @@ export const scoreUniversity = action({
       const uni = await ctx.runQuery(internal.universities.getInternal, {
         universityId: args.universityId,
       });
+      
+      // Fetch dynamic API key
+      const apiKey = await ctx.runQuery(internal.settings.getInternalGeminiKey);
       if (!uni) throw new Error("University not found");
 
       const signals = await ctx.runQuery(internal.signals.listByUniversityInternal, {
@@ -62,6 +65,7 @@ ${signalText || "None found"}
 `.trim();
 
           const resultText = await callFlash({
+            apiKey,
             systemPrompt: SCORING_SYSTEM_PROMPT,
             userPrompt: prompt,
             responseAsJson: true,

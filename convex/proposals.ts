@@ -9,7 +9,20 @@ export const listAll = query({
     return await Promise.all(
       proposals.map(async (p) => {
         const uni = await ctx.db.get(p.university_id);
-        return { ...p, university_name: uni?.university_name ?? "Unknown" };
+        
+        let stakeholderText = "General Proposal";
+        if (p.stakeholder_id) {
+          const st = await ctx.db.get(p.stakeholder_id);
+          if (st) {
+             stakeholderText = `${st.name || "Unknown"} ${st.role ? `(${st.role})` : ""}`;
+          }
+        }
+
+        return { 
+          ...p, 
+          university_name: uni?.university_name ?? "Unknown",
+          stakeholder_details: stakeholderText
+        };
       })
     );
   },
@@ -23,6 +36,7 @@ export const get = query({
 export const create = mutation({
   args: {
     university_id: v.id("universities"),
+    stakeholder_id: v.optional(v.id("stakeholders")),
     meeting_date: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -40,6 +54,7 @@ export const create = mutation({
 export const update = mutation({
   args: {
     id: v.id("proposals"),
+    stakeholder_id: v.optional(v.id("stakeholders")),
     agenda: v.optional(v.string()),
     proposal_json: v.optional(v.string()),
     recommended_modules: v.optional(v.array(v.string())),
@@ -60,9 +75,28 @@ export const getInternal = internalQuery({
   handler: async (ctx, args) => ctx.db.get(args.id),
 });
 
+export const createInternal = internalMutation({
+  args: {
+    university_id: v.id("universities"),
+    stakeholder_id: v.optional(v.id("stakeholders")),
+    meeting_date: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    return await ctx.db.insert("proposals", {
+      ...args,
+      status: "draft",
+      created_at: now,
+      updated_at: now,
+    });
+  },
+});
+
+
 export const updateInternal = internalMutation({
   args: {
     id: v.id("proposals"),
+    stakeholder_id: v.optional(v.id("stakeholders")),
     agenda: v.optional(v.string()),
     proposal_json: v.optional(v.string()),
     recommended_modules: v.optional(v.array(v.string())),
@@ -90,6 +124,20 @@ export const getFileUrl = query({
     return await ctx.storage.getUrl(args.storageId);
   },
 });
+
+export const remove = mutation({
+  args: { id: v.id("proposals") },
+  handler: async (ctx, args) => {
+    await validateAuth(ctx);
+    const proposal = await ctx.db.get(args.id);
+    if (!proposal) return;
+    if (proposal.pdf_storage_id) {
+      await ctx.storage.delete(proposal.pdf_storage_id);
+    }
+    await ctx.db.delete(args.id);
+  },
+});
+
 
 export const cleanupOldProposalsInternal = internalMutation({
   args: { days: v.number() },

@@ -99,6 +99,21 @@ export const update = mutation({
   },
 });
 
+export const remove = mutation({
+  args: { id: v.id("stakeholders") },
+  handler: async (ctx, args) => {
+    await validateAuth(ctx);
+    await ctx.db.delete(args.id);
+  },
+});
+
+export const removeInternal = internalMutation({
+  args: { id: v.id("stakeholders") },
+  handler: async (ctx, args) => {
+    await ctx.db.delete(args.id);
+  },
+});
+
 export const insertInternal = internalMutation({
   args: {
     university_id: v.id("universities"),
@@ -166,12 +181,68 @@ export const upsertBulkInternal = internalMutation({
       .withIndex("by_university", (q) => q.eq("university_id", args.university_id))
       .collect();
 
+    // Get university details for domain matching
+    const university = await ctx.db.get(args.university_id);
+    const uniWebsite = university?.website?.toLowerCase().replace(/^https?:\/\//, "").replace(/\/$/, "").replace(/^www\./, "") || "";
+    const uniDomain = uniWebsite.split("/")[0];
+
     for (const st of args.stakeholders) {
-      // Match on email (most reliable) OR name — NOT role alone.
-      // FIX: role-only match removed: two different people can hold e.g. "Registrar" at the same university.
+      // 1. Block generic placeholder emails and names
+      const emailLower = (st.email || "").toLowerCase();
+      const nameLower = (st.name || "").toLowerCase();
+      const roleLower = (st.role || "").toLowerCase();
+
+      // UGC Check (Strictly forbidden as per user rule)
+      const isUGC = emailLower.includes("ugc.ac.in") || 
+                    nameLower.includes("ugc") || 
+                    roleLower.includes("ugc");
+      
+      const isPlaceholder = 
+        isUGC ||
+        (st.email && (emailLower.includes("@example.") || emailLower.includes("test@"))) ||
+        (st.name && (nameLower.startsWith("test ") || nameLower === "test" || nameLower === "unknown" || nameLower === "n/a" || nameLower === "none"));
+
+      // Name-Role Collision: If name matches role, it's just a position title, not a person
+      const isNameRoleCollision = st.name && st.role && nameLower === roleLower;
+
+      if (isPlaceholder || isNameRoleCollision) {
+        console.log(`[stakeholders] Skipping invalid/placeholder stakeholder: ${st.name} <${st.email}> (Reason: ${isUGC ? 'UGC' : isNameRoleCollision ? 'Name=Role' : 'Placeholder'})`);
+        continue;
+      }
+
+      // 2. Domain matching: strictly prevent cross-institution data (e.g. IIT BBS email for XIM)
+      if (st.email && uniDomain) {
+        const emailDomain = emailLower.split("@")[1];
+        const genericDomains = ["gmail.com", "yahoo.com", "outlook.com", "hotmail.com", "rediffmail.com", "icloud.com", "live.com", "me.com"];
+        
+        // If it's a non-generic domain and doesn't contain/match the university domain, reject it
+        const isMatch = genericDomains.includes(emailDomain) || 
+                        emailDomain.includes(uniDomain) || 
+                        uniDomain.includes(emailDomain);
+
+        if (!isMatch) {
+          console.warn(`[stakeholders] Rejecting cross-domain email: ${st.email} for university domain: ${uniDomain}`);
+          // Remove the email but keep the stakeholder if name is present (might update via linkedin later)
+          st.email = undefined;
+        }
+      }
+
+      if (!st.name && !st.email) continue;
+
       const match = existingStakeholders.find((e) => {
         if (st.email && e.email && e.email.toLowerCase() === st.email.toLowerCase()) return true;
+        
+        // If names match exactly (case-insensitive)
         if (st.name && e.name && e.name.toLowerCase() === st.name.toLowerCase()) return true;
+
+        // Fallback: If both have a role, and the roles match exactly (e.g., both "Vice Chancellor"), 
+        // treat it as an update to the SAME stakeholder position rather than duplicating the role.
+        if (st.role && e.role && e.role.toLowerCase() === st.role.toLowerCase()) {
+           // Only match by role if they don't have explicitly conflicting emails
+           if (st.email && e.email && st.email.toLowerCase() !== e.email.toLowerCase()) return false;
+           return true; 
+        }
+
         return false;
       });
 
@@ -237,5 +308,25 @@ export const getByEmailInternal = internalQuery({
       .query("stakeholders")
       .withIndex("by_email", (q) => q.eq("email", args.email))
       .first();
+  },
+});
+
+export const purgeTestStakeholders = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await validateAuth(ctx);
+    const all = await ctx.db.query("stakeholders").collect();
+    const toDelete = all.filter((s) => {
+      const email = (s.email ?? "").toLowerCase();
+      const name = (s.name ?? "").toLowerCase();
+      return email.includes("@example.") || 
+             email.includes("test@") ||
+             name.startsWith("test ") || 
+             name === "test";
+    });
+    for (const s of toDelete) {
+      await ctx.db.delete(s._id);
+    }
+    return { deleted: toDelete.length };
   },
 });

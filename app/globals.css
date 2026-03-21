@@ -2,27 +2,27 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  /* Flat Design Light Mode Values (Default) */
-  --background: #f8fafc;
-  --foreground: #09090b;
-  --card: #ffffff;
-  --card-border: #e2e8f0;
-  
-  --primary: #3B82F6;
-  --primary-hover: #2563EB;
-  --cta: #F97316;
-  --cta-hover: #ea580c;
-  
-  --muted: #f1f5f9;
-  --muted-foreground: #64748b;
-  --success: #10b981;
-  --warning: #f59e0b;
-  --danger: #ef4444;
-}
-
-@media (prefers-color-scheme: dark) {
+@layer base {
   :root {
+    /* Flat Design Light Mode Values (Default) */
+    --background: #f8fafc;
+    --foreground: #09090b;
+    --card: #ffffff;
+    --card-border: #e2e8f0;
+    
+    --primary: #3B82F6;
+    --primary-hover: #2563EB;
+    --cta: #F97316;
+    --cta-hover: #ea580c;
+    
+    --muted: #f1f5f9;
+    --muted-foreground: #64748b;
+    --success: #10b981;
+    --warning: #f59e0b;
+    --danger: #ef4444;
+  }
+
+  .dark {
     /* Flat Design Dark Mode Values */
     --background: #09090b;
     --foreground: #f8fafc;

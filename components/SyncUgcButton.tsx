@@ -7,7 +7,7 @@ import { ArrowPathIcon, CheckCircleIcon } from "@heroicons/react/24/outline";
 
 export function SyncUgcButton() {
   const [isSyncing, setIsSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState<{ count: number; lastSynced: number } | null>(null);
+  const [syncResult, setSyncResult] = useState<{ count: number; updatedCount?: number; lastSynced: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const bulkSyncUgc = useMutation(api.universities.bulkSyncUgc);
@@ -29,8 +29,15 @@ export function SyncUgcButton() {
         throw new Error("Invalid format from UGC API");
       }
 
-      // Step 2: Map data to our schema with normalization
-      const mappedUniversities = data.List.map((item: any) => {
+      // Step 2: Filter and map data to our schema with normalization
+      const targetUniversities = ["yenepoya", "vit university", "vellore institute of technology"];
+      
+      const mappedUniversities = data.List
+        .filter((item: any) => {
+          const name = item.uni_name?.trim().toLowerCase() || "";
+          return targetUniversities.some(target => name.includes(target));
+        })
+        .map((item: any) => {
         let normalizedType = item.uni_type || "Other";
         if (normalizedType.includes("Deemed")) {
           normalizedType = "Deemed";
@@ -56,6 +63,7 @@ export function SyncUgcButton() {
 
       setSyncResult({
         count: result.addedCount,
+        updatedCount: result.updatedCount,
         lastSynced: Date.now()
       });
     } catch (err) {
@@ -73,7 +81,8 @@ export function SyncUgcButton() {
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/20 rounded-lg">
             <CheckCircleIcon className="h-4 w-4 text-emerald-400" />
             <span className="text-xs text-emerald-400 font-medium tracking-wide">
-              Sync Complete: {syncResult.count} new added
+              Sync Complete: {syncResult.count} added
+              {syncResult.updatedCount !== undefined && `, ${syncResult.updatedCount} updated`}
             </span>
           </div>
         )}

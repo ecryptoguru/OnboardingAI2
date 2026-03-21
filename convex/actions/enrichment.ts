@@ -21,6 +21,9 @@ export const discoverSocialAndMedia = action({
       { university_id: args.universityId }
     );
 
+    // Fetch dynamic API key
+    const apiKey = await ctx.runQuery(internal.settings.getInternalGeminiKey);
+
     const serperKey = process.env.SERPER_API_KEY;
     if (!serperKey) {
       console.warn("[Enrichment] No SERPER_API_KEY");
@@ -99,7 +102,7 @@ export const discoverSocialAndMedia = action({
         for (const item of items) {
           const snippet = `${item.title} - ${item.snippet || ""}`;
           // Generate embedding for Vector Search
-          const embedding = await embed(snippet);
+          const embedding = await embed(snippet, apiKey);
           allSignals.push({
             university_id: args.universityId,
             signal_type: "news",
@@ -139,7 +142,7 @@ export const discoverSocialAndMedia = action({
         // We'll store a mock embedding for images or a real one if needed, 
         // but for now let's use a zero-vector or simple embedding of the title
         const snippet = `Image of ${uni.university_name}: ${img.title || "Campus"}`;
-        const embedding = await embed(snippet);
+        const embedding = await embed(snippet, apiKey);
         allSignals.push({
           university_id: args.universityId,
           signal_type: "image",
@@ -155,6 +158,12 @@ export const discoverSocialAndMedia = action({
 
     // 4. Batch Insert Signals
     if (allSignals.length > 0) {
+      // Wipe old signals of the same type to prevent duplicates across multiple enrichment runs
+      await ctx.runMutation(internal.signals.deleteByTypeInternal, {
+        university_id: args.universityId,
+        signal_types: ["news", "image"],
+      });
+
       await ctx.runMutation(internal.signals.batchInsertInternal, {
         signals: allSignals,
       });

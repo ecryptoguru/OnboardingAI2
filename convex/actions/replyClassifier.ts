@@ -3,8 +3,8 @@
 import { action } from "../_generated/server";
 import { internal, api } from "../_generated/api";
 import { v } from "convex/values";
-import { callClaude, TEMP } from "../lib/llm";
-import { REPLY_CLASSIFIER_SYSTEM_PROMPT } from "../lib/prompts";
+import { callGemini, TEMP, MODELS } from "../lib/llm";
+import { REPLY_CLASSIFIER_SYSTEM_PROMPT, REPLY_CLASSIFIER_SCHEMA } from "../lib/prompts";
 import * as Sentry from "@sentry/nextjs";
 
 /**
@@ -26,12 +26,19 @@ export const classifyReply = action({
       const systemPrompt = REPLY_CLASSIFIER_SYSTEM_PROMPT(reply.raw_reply);
       const userMessage = "Classify this email.";
 
-      const classification = await callClaude({
-        system: systemPrompt,
-        userMessage,
+      const apiKey = await ctx.runQuery(internal.settings.getInternalGeminiKey) as string | null;
+      const response = await callGemini({
+        apiKey,
+        systemPrompt,
+        userPrompt: userMessage,
         temperature: TEMP.deterministic,
-        maxTokens: 50,
+        maxOutputTokens: 50,
+        model: MODELS.complex,
+        responseAsJson: true,
+        responseSchema: REPLY_CLASSIFIER_SCHEMA,
       });
+
+      const classificationData = JSON.parse(response);
 
       const validCategories = [
         "meeting_request",
@@ -43,9 +50,9 @@ export const classifyReply = action({
         "other",
       ];
 
-      let result = classification.trim().toLowerCase() as any;
+      let result = classificationData.category;
 
-      if (!validCategories.includes(result)) {
+      if (!result || !validCategories.includes(result)) {
         console.warn(
           `[ReplyClassifier] Invalid classification returned: ${result}. Falling back to other.`
         );
@@ -77,6 +84,25 @@ export const classifyReply = action({
           universityId: reply.university_id,
           stage: newStage,
         });
+      }
+
+      // 5. Auto-generate proposal when meeting is booked
+      if (result === "meeting_request") {
+        try {
+          const proposalId = await ctx.runMutation(internal.proposals.createInternal, {
+            university_id: reply.university_id,
+            stakeholder_id: reply.stakeholder_id,
+            meeting_date: Date.now(),
+          });
+          await ctx.scheduler.runAfter(0, api.actions.proposals.generateProposal, {
+            universityId: reply.university_id,
+            proposalId,
+            stakeholderId: reply.stakeholder_id,
+          });
+          console.log(`[ReplyClassifier] Auto-triggered proposal generation for ${reply.university_id}`);
+        } catch (pErr) {
+          console.warn("[ReplyClassifier] Auto-proposal failed (non-fatal):", pErr);
+        }
       }
 
       return { success: true, classification: result };

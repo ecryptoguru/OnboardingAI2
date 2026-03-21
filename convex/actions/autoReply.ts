@@ -46,6 +46,7 @@ export const sendAutoReply = action({
         to: st.email!,
         subject: emailData!.subject,
         text: emailData!.body,
+        html: (emailData as any).html ?? undefined,
       });
     });
 

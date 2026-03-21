@@ -1,9 +1,5 @@
 ---
-description: Plan and implement UI
----
-
----
-description: AI-powered design intelligence with 50+ styles, 95+ color palettes, and automated design system generation
+description: Plan and implement UI with AI-powered design intelligence. 50+ styles, 95+ color palettes, automated design system generation. Use for web/mobile UI design, component creation, and design system setup.
 ---
 
 # ui-ux-pro-max
@@ -120,7 +116,7 @@ python3 .agent/.shared/ui-ux-pro-max/scripts/search.py "<keyword>" --stack html-
 ```
 
 Available stacks: `html-tailwind`, `react`, `nextjs`, `vue`, `svelte`, `swiftui`, `react-native`, `flutter`, `shadcn`, `jetpack-compose`
-, `jetpack-compose`
+
 ---
 
 ## Search Reference

@@ -152,15 +152,25 @@ export const enroll = mutation({
   },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
-    // 1. Find primary stakeholder
-    const stakeholder = await ctx.db
+    // 1. Find primary stakeholder or fallback to any valid stakeholder
+    let stakeholder = await ctx.db
       .query("stakeholders")
       .withIndex("by_university", (q) => q.eq("university_id", args.university_id))
       .filter((q) => q.eq(q.field("is_primary"), true))
       .first();
 
     if (!stakeholder) {
-      throw new ConvexError("No primary stakeholder found for this university.");
+      // Fallback: get the first stakeholder with an email
+      const allStakeholders = await ctx.db
+        .query("stakeholders")
+        .withIndex("by_university", (q) => q.eq("university_id", args.university_id))
+        .collect();
+        
+      stakeholder = allStakeholders.find(s => s.email && s.email.trim() !== "" && s.email.trim().toLowerCase() !== "null") ?? null;
+    }
+
+    if (!stakeholder) {
+      throw new ConvexError("No valid stakeholder found for this university with a valid email address.");
     }
 
     // 2. Check if sequence already exists
