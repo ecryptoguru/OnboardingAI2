@@ -25,6 +25,7 @@ export default function SettingsPage() {
       await setKey({ apiKey });
       setApiKey(""); // Clear it from local state after saving for security
       setTestResult({ success: true });
+      // The status query will automatically update "Current Integration Status"
     } catch (err: unknown) {
       setTestResult({ success: false, error: (err as Error).message || "Failed to save key." });
     } finally {

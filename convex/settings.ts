@@ -5,8 +5,11 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 
 export const getGeminiKeyStatus = query({
   handler: async (ctx) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) return { hasGeminiKey: false };
+    const skipAuth = process.env.SKIP_AUTH === "true";
+    if (!skipAuth) {
+      const userId = await getAuthUserId(ctx);
+      if (!userId) return { hasGeminiKey: false };
+    }
     
     const doc = await ctx.db
       .query("systemSettings")
@@ -32,9 +35,13 @@ export const getInternalGeminiKey = internalQuery({
 export const setGeminiKey = mutation({
   args: { apiKey: v.string() },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Unauthenticated");
-    
+    // Allow unauthenticated access in dev mode (matches Next.js middleware SKIP_AUTH pattern)
+    const skipAuth = process.env.SKIP_AUTH === "true";
+    if (!skipAuth) {
+      const userId = await getAuthUserId(ctx);
+      if (!userId) throw new Error("Unauthenticated");
+    }
+
     // Check if the key looks like a Gemini key
     if (!args.apiKey.startsWith("AIza")) {
       throw new Error("Invalid Google Gemini API Key format");
@@ -44,7 +51,7 @@ export const setGeminiKey = mutation({
       .query("systemSettings")
       .withIndex("by_key", (q) => q.eq("configKey", "geminiApiKey"))
       .first();
-      
+
     if (doc) {
       await ctx.db.patch(doc._id, { value: args.apiKey });
     } else {
@@ -60,8 +67,11 @@ export const setGeminiKey = mutation({
 export const testGeminiKey = action({
   args: { apiKey: v.string() },
   handler: async (ctx, args) => {
-    const userId = await getAuthUserId(ctx);
-    if (!userId) throw new Error("Unauthenticated");
+    const skipAuth = process.env.SKIP_AUTH === "true";
+    if (!skipAuth) {
+      const userId = await getAuthUserId(ctx);
+      if (!userId) throw new Error("Unauthenticated");
+    }
 
     try {
       const ai = new GoogleGenAI({ apiKey: args.apiKey });
