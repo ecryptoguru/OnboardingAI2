@@ -9,7 +9,7 @@ import * as Sentry from "@sentry/nextjs";
 
 /**
  * Classifies an incoming email reply and updates the reply record.
- * Uses Claude 3.7 Sonnet for high-accuracy nuance detection.
+ * Uses Gemini 3.1 Pro at temperature=0 for deterministic classification.
  */
 export const classifyReply = action({
   args: {
@@ -51,19 +51,22 @@ export const classifyReply = action({
       ];
 
       let result = classificationData.category;
+      // Compute confidence: direct valid match = high confidence, fallback = low
+      let confidence = 0.90;
 
       if (!result || !validCategories.includes(result)) {
         console.warn(
           `[ReplyClassifier] Invalid classification returned: ${result}. Falling back to other.`
         );
         result = "other";
+        confidence = 0.50; // Low confidence when we had to fall back
       }
 
       // 2. Update classification in database
       await ctx.runMutation(internal.replies.classify, {
         id: args.replyId,
         classification: result,
-        confidence: 0.95, // Stub confidence
+        confidence, // computed above — not a stub
       });
 
       // 3. Trigger Auto-Reply if applicable
@@ -86,22 +89,21 @@ export const classifyReply = action({
         });
       }
 
-      // 5. Auto-generate proposal when meeting is booked
+      // 5. Create a draft proposal record when a meeting is booked.
+      // ⚠️ HITL GATE: We do NOT auto-trigger generateProposal.
+      // A human must click "Generate Proposal" from the University detail panel
+      // after reviewing the meeting context. This prevents misclassifications
+      // from firing proposals to the wrong person at the wrong time.
       if (result === "meeting_request") {
         try {
-          const proposalId = await ctx.runMutation(internal.proposals.createInternal, {
+          await ctx.runMutation(internal.proposals.createInternal, {
             university_id: reply.university_id,
             stakeholder_id: reply.stakeholder_id,
             meeting_date: Date.now(),
           });
-          await ctx.scheduler.runAfter(0, api.actions.proposals.generateProposal, {
-            universityId: reply.university_id,
-            proposalId,
-            stakeholderId: reply.stakeholder_id,
-          });
-          console.log(`[ReplyClassifier] Auto-triggered proposal generation for ${reply.university_id}`);
+          console.log(`[ReplyClassifier] Created draft proposal for ${reply.university_id} — awaiting human approval to generate.`);
         } catch (pErr) {
-          console.warn("[ReplyClassifier] Auto-proposal failed (non-fatal):", pErr);
+          console.warn("[ReplyClassifier] Draft proposal creation failed (non-fatal):", pErr);
         }
       }
 

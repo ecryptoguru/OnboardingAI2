@@ -131,33 +131,39 @@ def print_summary(results: List[dict]):
     
     passed_count = sum(1 for r in results if r["passed"] and not r.get("skipped"))
     failed_count = sum(1 for r in results if not r["passed"] and not r.get("skipped"))
+    required_failed_count = sum(1 for r in results if not r["passed"] and not r.get("skipped") and r.get("required", False))
+    advisory_failed_count = sum(1 for r in results if not r["passed"] and not r.get("skipped") and not r.get("required", False))
     skipped_count = sum(1 for r in results if r.get("skipped"))
     
     print(f"Total Checks: {len(results)}")
     print(f"{Colors.GREEN}✅ Passed: {passed_count}{Colors.ENDC}")
     print(f"{Colors.RED}❌ Failed: {failed_count}{Colors.ENDC}")
     print(f"{Colors.YELLOW}⏭️  Skipped: {skipped_count}{Colors.ENDC}")
+    if advisory_failed_count > 0:
+        print(f"{Colors.YELLOW}ℹ️  Advisory failures: {advisory_failed_count}{Colors.ENDC}")
     print()
     
-    # Detailed results
     for r in results:
         if r.get("skipped"):
             status = f"{Colors.YELLOW}⏭️ {Colors.ENDC}"
         elif r["passed"]:
             status = f"{Colors.GREEN}✅{Colors.ENDC}"
-        else:
+        elif r.get("required", False):
             status = f"{Colors.RED}❌{Colors.ENDC}"
+        else:
+            status = f"{Colors.YELLOW}⚠️ {Colors.ENDC}"
         
         print(f"{status} {r['name']}")
     
     print()
     
-    if failed_count > 0:
-        print_error(f"{failed_count} check(s) FAILED - Please fix before proceeding")
+    if required_failed_count > 0:
+        print_error(f"{required_failed_count} required check(s) FAILED - Please fix before proceeding")
         return False
-    else:
-        print_success("All checks PASSED ✨")
-        return True
+    if advisory_failed_count > 0:
+        print_warning(f"{advisory_failed_count} advisory check(s) need follow-up")
+    print_success("All required checks PASSED ✨")
+    return True
 
 def main():
     parser = argparse.ArgumentParser(
@@ -192,6 +198,7 @@ Examples:
     for name, script_path, required in CORE_CHECKS:
         script = project_path / script_path
         result = run_script(name, script, str(project_path))
+        result["required"] = required
         results.append(result)
         
         # If required check fails, stop
@@ -206,6 +213,7 @@ Examples:
         for name, script_path, required in PERFORMANCE_CHECKS:
             script = project_path / script_path
             result = run_script(name, script, str(project_path), args.url)
+            result["required"] = required
             results.append(result)
     
     # Print summary

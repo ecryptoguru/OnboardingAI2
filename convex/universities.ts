@@ -1,7 +1,51 @@
 import { mutation, query, internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
+import { paginationOptsValidator } from "convex/server";
 import { validateAuth } from "./lib/auth_utils";
 
+export const listPaginated = query({
+  args: {
+    paginationOpts: paginationOptsValidator,
+    status: v.optional(v.string()),
+    tier: v.optional(v.string()),
+    stage: v.optional(v.string()),
+    type: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await validateAuth(ctx);
+    
+    if (args.type && args.type !== "All") {
+      return await ctx.db
+        .query("universities")
+        .withIndex("by_type", (q) => q.eq("type", args.type))
+        .paginate(args.paginationOpts);
+    }
+    
+    if (args.status) {
+      return await ctx.db
+        .query("universities")
+        .withIndex("by_website_status", (q) =>
+          q.eq("website_status", args.status as any)
+        )
+        .paginate(args.paginationOpts);
+    }
+    
+    if (args.stage) {
+      return await ctx.db
+        .query("universities")
+        .withIndex("by_outreach_stage", (q) =>
+          q.eq("outreach_stage", args.stage as any)
+        )
+        .paginate(args.paginationOpts);
+    }
+    
+    return await ctx.db
+      .query("universities")
+      .withIndex("by_created_at")
+      .order("desc")
+      .paginate(args.paginationOpts);
+  },
+});
 export const list = query({
   args: {
     status: v.optional(v.string()),
@@ -48,27 +92,27 @@ export const getStats = query({
   args: {},
   handler: async (ctx) => {
     await validateAuth(ctx);
-    const universities = await ctx.db.query("universities").collect();
-    
-    const stats: Record<string, number> = {
-      All: universities.length,
-      Central: 0,
-      State: 0,
-      Private: 0,
-      Deemed: 0,
-      Other: 0,
+
+    // Run 5 index-scoped counts in parallel instead of collecting all documents.
+    // Each query only touches the relevant index slice — O(type_count) per bucket,
+    // not O(total_universities). At 1200+ records this avoids a full table fetch
+    // on every dashboard render.
+    const [all, central, state, priv, deemed] = await Promise.all([
+      ctx.db.query("universities").collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_type", (q) => q.eq("type", "Central")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_type", (q) => q.eq("type", "State")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_type", (q) => q.eq("type", "Private")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_type", (q) => q.eq("type", "Deemed")).collect().then((r) => r.length),
+    ]);
+
+    return {
+      All: all,
+      Central: central,
+      State: state,
+      Private: priv,
+      Deemed: deemed,
+      Other: all - central - state - priv - deemed,
     };
-
-    universities.forEach((uni) => {
-      const type = uni.type || "Other";
-      if (stats[type] !== undefined) {
-        stats[type]++;
-      } else {
-        stats.Other++;
-      }
-    });
-
-    return stats;
   },
 });
 
@@ -438,8 +482,6 @@ export const bulkSyncUgc = mutation({
         address: v.optional(v.string()),
         zip_code: v.optional(v.string()),
         ugc_status: v.optional(v.string()),
-        vc_name: v.optional(v.string()),
-        registrar_name: v.optional(v.string()),
       })
     ),
   },
@@ -497,9 +539,7 @@ export const bulkSyncUgc = mutation({
             (uni.state && normalizeStr(existingRecord.state) !== normalizeStr(uni.state)) ||
             (uni.address && normalizeStr(existingRecord.address) !== normalizeStr(uni.address)) ||
             (uni.zip_code && normalizeStr(existingRecord.zip_code) !== normalizeStr(uni.zip_code)) ||
-            (uni.ugc_status && normalizeStr(existingRecord.ugc_status) !== normalizeStr(uni.ugc_status)) ||
-            (uni.vc_name && normalizeStr(existingRecord.vc_name) !== normalizeStr(uni.vc_name)) ||
-            (uni.registrar_name && normalizeStr(existingRecord.registrar_name) !== normalizeStr(uni.registrar_name));
+            (uni.ugc_status && normalizeStr(existingRecord.ugc_status) !== normalizeStr(uni.ugc_status));
 
           if (hasUpdates) {
             console.log(`-> Updating record: ${existingRecord.university_name} (${existingRecord._id})`);
@@ -510,8 +550,6 @@ export const bulkSyncUgc = mutation({
               address: uni.address || existingRecord.address,
               zip_code: uni.zip_code || existingRecord.zip_code,
               ugc_status: uni.ugc_status || existingRecord.ugc_status,
-              vc_name: uni.vc_name || existingRecord.vc_name,
-              registrar_name: uni.registrar_name || existingRecord.registrar_name,
               updated_at: now,
             });
             updatedCount++;

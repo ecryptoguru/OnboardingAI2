@@ -79,12 +79,17 @@ export default function SignInPage() {
           </button>
         </form>
 
-        <p className="text-center text-muted-foreground text-xs mt-6">
-          Team access only.{" "}
-          <a href="/sign-up" className="text-indigo-400 hover:text-indigo-300">
-            Request access
-          </a>
-        </p>
+        <div className="text-center mt-6 pt-6 border-t border-card-border">
+          <p className="text-muted-foreground text-sm">
+            Don&apos;t have an account?{" "}
+            <a href="/sign-up" className="text-indigo-400 hover:text-indigo-300 font-semibold transition-colors">
+              Sign up
+            </a>
+          </p>
+          <p className="text-[10px] text-zinc-500 mt-4 uppercase tracking-widest">
+            Team access only
+          </p>
+        </div>
       </div>
     </div>
   );

@@ -58,6 +58,8 @@ export async function callGemini({
   maxOutputTokens?: number;
   apiKey?: string | null;
 }): Promise<string> {
+  // LLM generation calls are NOT idempotent — retrying the same prompt charges twice
+  // and can return a different (worse) result. Limit to 1 retry only for transient errors.
   return await withRetry(async () => {
     // Gemini Pro models REQUIRE thinkingBudget >= 512 (thinking is always on).
     // Non-Pro models (Flash etc.) work with thinkingBudget = 0 (off).
@@ -88,7 +90,7 @@ export async function callGemini({
     const text = response.text;
     if (!text) throw new Error("Unexpected empty response from Gemini via Google SDK");
     return text;
-  });
+  }, { maxRetries: 1 }); // ⚠️ 1 retry only — generation is non-idempotent
 }
 
 /**

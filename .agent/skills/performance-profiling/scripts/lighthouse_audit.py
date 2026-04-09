@@ -69,8 +69,9 @@ def get_summary(categories: dict) -> str:
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        print(json.dumps({"error": "Usage: python lighthouse_audit.py <url>"}))
+        print(json.dumps({"error": "Usage: python lighthouse_audit.py <url> or python lighthouse_audit.py <project_path> <url>"}))
         sys.exit(1)
-    
-    result = run_lighthouse(sys.argv[1])
+
+    url = sys.argv[2] if len(sys.argv) >= 3 else sys.argv[1]
+    result = run_lighthouse(url)
     print(json.dumps(result, indent=2))

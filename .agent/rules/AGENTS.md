@@ -2,7 +2,7 @@
 trigger: always_on
 ---
 
-# GEMINI.md - Antigravity Kit
+# AGENTS.md - Antigravity Kit
 
 > This file defines how the AI behaves in this workspace.
 
@@ -17,7 +17,7 @@ trigger: always_on
 Agent activated → Check frontmatter "skills:" → Read SKILL.md (INDEX) → Read specific sections.
 
 - **Selective Reading:** DO NOT read ALL files in a skill folder. Read `SKILL.md` first, then only sections matching the request.
-- **Rule Priority:** P0 (GEMINI.md) > P1 (Agent .md) > P2 (SKILL.md). All rules are binding.
+- **Rule Priority:** P0 (AGENTS.md) > P1 (Agent .md) > P2 (SKILL.md). All rules are binding.
 
 ### 2. Enforcement Protocol
 
@@ -38,7 +38,7 @@ Agent activated → Check frontmatter "skills:" → Read SKILL.md (INDEX) → Re
 | **AI / LLM**     | "rag", "llm", "prompt", "embedding", "model"            | TIER 0 + TIER 1 + Agent        | Route to `ai-engineer`      |
 | **MARKETING**    | "growth", "linkedin", "twitter", "reddit", "campaign"   | TIER 0 + TIER 1 + Agent        | Route to `marketing-strategist` |
 | **DATA PIPELINE**| "etl", "elt", "sync", "pipeline", "streaming"          | TIER 0 + TIER 1 + Agent        | Route to `data-engineer`    |
-| **SLASH CMD**    | /audit-ai, /brainstorm, /create, /debug, /deploy, /enhance, /growth, /orchestrate, /plan, /preview, /review, /status, /test, /ui-ux-pro-max | Command-specific flow          | Variable                    |
+| **SLASH CMD**    | /create, /orchestrate, /debug                           | Command-specific flow          | Variable                    |
 
 ---
 

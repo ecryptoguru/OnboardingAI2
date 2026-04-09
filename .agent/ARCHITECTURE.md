@@ -274,7 +274,7 @@ For details, see [scripts/README.md](scripts/README.md)
 | ------------------- | ----------------------------- |
 | **Total Agents**    | 25                            |
 | **Total Skills**    | 44                            |
-| **Total Workflows** | 14                            |
+| **Total Workflows** | 15                            |
 | **Total Scripts**   | 2 (master) + 18 (skill-level) |
 | **Coverage**        | ~90% web/mobile development   |
 

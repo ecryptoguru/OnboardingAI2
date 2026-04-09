@@ -59,8 +59,6 @@ export const fetchFromUgc = action({
       ugc_status: item.status || undefined,
       website: item.url || undefined,
       type: item.uni_type || undefined,
-      vc_name: item.NM_VC || undefined,
-      registrar_name: item.NM_REG || undefined,
     }));
 
     // Trigger the mutation to save data

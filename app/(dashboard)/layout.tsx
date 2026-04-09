@@ -48,7 +48,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   let currentSection = "";
 
   return (
-    <div className="flex min-h-screen bg-background">
+    <div className="flex min-h-screen bg-background" suppressHydrationWarning>
       {/* Sidebar */}
       <aside className="w-60 flex-shrink-0 border-r border-card-border flex flex-col">
         {/* Logo */}

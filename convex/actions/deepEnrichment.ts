@@ -39,6 +39,14 @@ function normalizeContent(raw: string): string {
     .replace(/&quot;/gi, '"')
     .replace(/!\[.*?\]\(data:.*?\)/g, "")
     .replace(/\[(?:Home|About|Contact|Menu|Login|Register|Apply|Skip to|Back to top|Toggle navigation|Search|Read more|Click here|Download|View all)\]/gi, "")
+    // ─── Prompt injection stripping ─────────────────────────────────────────
+    // Adversarial web pages may embed instruction override payloads in content.
+    // The responseSchema is the primary defense, but belt-and-suspenders is warranted
+    // given 60k of raw web content flowing into the model context.
+    .replace(/(?:disregard|ignore|forget|override)\s+(?:all\s+)?(?:previous|above|prior)\s+(?:instructions?|prompts?|context)/gi, "[FILTERED]")
+    .replace(/(?:you are now|act as|pretend to be|roleplay as|new persona)/gi, "[FILTERED]")
+    .replace(/```(?:json|javascript|python|bash)?[\s\S]*?```/g, "[CODE_BLOCK_FILTERED]")
+    // ────────────────────────────────────────────────────────────────────────
     .replace(/\n{3,}/g, "\n\n")
     .replace(/ {2,}/g, " ")
     .split("\n")
@@ -142,7 +150,7 @@ export const runDeepEnrichment = action({
   args: {
     universityId: v.id("universities"),
   },
-  handler: async (ctx, args) => {
+  handler: async (ctx, args): Promise<{ success: boolean; skipped?: boolean; reason?: string; stakeholdersSynthesized?: number; demographicsIncluded?: boolean; contextChars?: number; estimatedTokens?: { flash: number; pro: number }; error?: string }> => {
     try {
       const university = await ctx.runQuery(internal.universities.getInternal, {
         universityId: args.universityId,
@@ -155,9 +163,24 @@ export const runDeepEnrichment = action({
       const uniName = university.university_name;
       const url = typeof university.website === "string" ? university.website : "";
 
+      // ─── Recent Enrichment Guard ──────────────────────────────────────────
+      // Skip universities enriched within the ENRICHMENT_COOLDOWN_DAYS window
+      // to prevent cost blowout on bulk re-enrichment runs.
+      // Set FORCE_ENRICHMENT=true env var to bypass for manual re-runs.
+      const COOLDOWN_DAYS = parseInt(process.env.ENRICHMENT_COOLDOWN_DAYS || "30", 10);
+      const forceEnrichment = process.env.FORCE_ENRICHMENT === "true";
+      if (!forceEnrichment && university.updated_at) {
+        const daysSinceUpdate = (Date.now() - university.updated_at) / (1000 * 60 * 60 * 24);
+        const wasEnriched = university.outreach_stage && !["new", "enriching"].includes(university.outreach_stage);
+        if (wasEnriched && daysSinceUpdate < COOLDOWN_DAYS) {
+          console.log(`[DeepEnrichment] SKIPPED ${uniName} — enriched ${daysSinceUpdate.toFixed(1)} days ago (cooldown: ${COOLDOWN_DAYS}d). Set FORCE_ENRICHMENT=true to override.`);
+          return { success: true, skipped: true, reason: `Already enriched ${Math.round(daysSinceUpdate)} days ago` };
+        }
+      }
+
       console.log(`[DeepEnrichment] Starting for ${uniName}...`);
-      const serperKey = process.env.SERPER_API_KEY;
-      if (!serperKey) throw new Error("SERPER_API_KEY is not set");
+      const serperKey = (await ctx.runQuery(internal.settings.getInternalSerperKey)) || process.env.SERPER_API_KEY;
+      if (!serperKey) throw new Error("SERPER API KEY is not set securely in settings nor in env variables");
 
       // ─── Disambiguation fields ────────────────────────────────────────────
       // Use address + state + zip_code to uniquely identify among campuses.
@@ -655,11 +678,27 @@ Synthesize the final result using the PRE-EXTRACTED FACTS. Only pull from RAW SO
         stage: "enriched",
       });
 
+      // ─── Cost / Usage Logging ─────────────────────────────────────────────
+      // Rough token estimate: 1 token ≈ 4 chars. Log for spend awareness.
+      const phase1Calls = gatheredResults.filter(s => s && s.trim().length >= 100).length;
+      const phase1InputChars = gatheredResults.reduce((sum, s) => sum + Math.min((s || "").length, 8000), 0);
+      const phase2InputChars = synthesisPrompt.length;
+      const estimatedFlashTokens = Math.round(phase1InputChars / 4);
+      const estimatedProTokens = Math.round((phase2InputChars + finalContext.substring(0, 20000).length) / 4);
+      console.log(
+        `[DeepEnrichment] COST ESTIMATE for ${uniName}:\n` +
+        `  Serper queries: 12 (fixed)\n` +
+        `  Flash Phase 1 calls: ${phase1Calls}, ~${estimatedFlashTokens.toLocaleString()} input tokens\n` +
+        `  Pro Phase 2: 1 call, ~${estimatedProTokens.toLocaleString()} input tokens\n` +
+        `  Context: ${finalContext.length.toLocaleString()} chars (raw: ${rawContext.length.toLocaleString()})`
+      );
+
       return {
         success: true,
         stakeholdersSynthesized: validStakeholders.length,
         demographicsIncluded: !!demographics,
         contextChars: finalContext.length,
+        estimatedTokens: { flash: estimatedFlashTokens, pro: estimatedProTokens },
       };
 
     } catch (e) {

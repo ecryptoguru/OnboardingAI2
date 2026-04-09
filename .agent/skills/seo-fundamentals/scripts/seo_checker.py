@@ -34,7 +34,8 @@ except:
 SKIP_DIRS = {
     'node_modules', '.next', 'dist', 'build', '.git', '.github',
     '__pycache__', '.vscode', '.idea', 'coverage', 'test', 'tests',
-    '__tests__', 'spec', 'docs', 'documentation', 'examples'
+    '__tests__', 'spec', 'docs', 'documentation', 'examples',
+    '.vercel', 'playwright-report', 'test-results', 'audit-results'
 }
 
 # Files to skip (not pages)
@@ -53,23 +54,28 @@ def is_page_file(file_path: Path) -> bool:
     # Skip utility/config files
     if any(skip in name for skip in SKIP_PATTERNS):
         return False
+    if 'prerender-fallback' in name:
+        return False
     
     # Check path - pages in specific directories are likely pages
     parts = [p.lower() for p in file_path.parts]
     page_dirs = ['pages', 'app', 'routes', 'views', 'screens']
     
-    if any(d in parts for d in page_dirs):
+    if file_path.name in {'layout.tsx', 'layout.jsx', 'page.tsx', 'page.jsx'}:
+        return True
+    
+    if any(d in parts for d in page_dirs) and file_path.name.startswith('page.'):
         return True
     
     # Filename indicators for pages
     page_names = ['page', 'index', 'home', 'about', 'contact', 'blog', 
                   'post', 'article', 'product', 'landing', 'layout']
     
-    if any(p in stem for p in page_names):
+    if any(p in stem for p in page_names) and 'client' not in stem:
         return True
     
     # HTML files are usually pages
-    if file_path.suffix.lower() in ['.html', '.htm']:
+    if file_path.suffix.lower() in ['.html', '.htm'] and 'fallback' not in stem:
         return True
     
     return False
@@ -102,21 +108,23 @@ def check_page(file_path: Path) -> dict:
     except Exception as e:
         return {"file": str(file_path.name), "issues": [f"Error: {e}"]}
     
-    # Detect if this is a layout/template file (has Head component)
-    is_layout = 'Head>' in content or '<head' in content.lower()
+    # Detect if this file owns page metadata
+    is_client_component = content.lstrip().startswith('"use client"') or content.lstrip().startswith("'use client'")
+    owns_metadata = 'export const metadata' in content or 'generateMetadata' in content
+    is_layout = (file_path.name.startswith('layout.') and not is_client_component) or owns_metadata
     
     # 1. Title tag
-    has_title = '<title' in content.lower() or 'title=' in content or 'Head>' in content
+    has_title = '<title' in content.lower() or 'title=' in content or 'Head>' in content or 'title:' in content
     if not has_title and is_layout:
         issues.append("Missing <title> tag")
     
     # 2. Meta description
-    has_description = 'name="description"' in content.lower() or 'name=\'description\'' in content.lower()
+    has_description = 'name="description"' in content.lower() or 'name=\'description\'' in content.lower() or 'description:' in content
     if not has_description and is_layout:
         issues.append("Missing meta description")
     
     # 3. Open Graph tags
-    has_og = 'og:' in content or 'property="og:' in content.lower()
+    has_og = 'og:' in content or 'property="og:' in content.lower() or 'openGraph:' in content or 'twitter:' in content
     if not has_og and is_layout:
         issues.append("Missing Open Graph tags")
     

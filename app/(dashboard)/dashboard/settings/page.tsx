@@ -9,11 +9,24 @@ export default function SettingsPage() {
   const status = useQuery(api.settings.getGeminiKeyStatus);
   const setKey = useMutation(api.settings.setGeminiKey);
   const testKey = useAction(api.settings.testGeminiKey);
+  const removeKey = useMutation(api.settings.removeGeminiKey);
+
+  const serperStatus = useQuery(api.settings.getSerperKeyStatus);
+  const setSerperApiKey = useMutation(api.settings.setSerperKey);
+  const testSerperApiKey = useAction(api.settings.testSerperKey);
+  const removeSerperApiKey = useMutation(api.settings.removeSerperKey);
   
   const [apiKey, setApiKey] = useState("");
   const [isSaving, setIsSaving] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
+  const [isRemoving, setIsRemoving] = useState(false);
   const [testResult, setTestResult] = useState<{ success?: boolean; error?: string } | null>(null);
+
+  const [serperKey, setSerperKey] = useState("");
+  const [isSerperSaving, setIsSerperSaving] = useState(false);
+  const [isSerperTesting, setIsSerperTesting] = useState(false);
+  const [isSerperRemoving, setIsSerperRemoving] = useState(false);
+  const [serperTestResult, setSerperTestResult] = useState<{ success?: boolean; error?: string } | null>(null);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -48,6 +61,73 @@ export default function SettingsPage() {
       setTestResult({ success: false, error: (err as Error).message || "Test failed." });
     } finally {
       setIsTesting(false);
+    }
+  };
+
+  const handleRemove = async () => {
+    if (!confirm("Are you sure you want to disconnect the Gemini API? This will remove the stored key.")) return;
+    
+    setIsRemoving(true);
+    setTestResult(null);
+    try {
+      await removeKey();
+      setApiKey("");
+      setTestResult({ success: true, error: "API Key removed successfully." });
+    } catch (err: unknown) {
+      setTestResult({ success: false, error: (err as Error).message || "Failed to remove key." });
+    } finally {
+      setIsRemoving(false);
+    }
+  };
+
+  const handleSerperSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!serperKey) return;
+    
+    setIsSerperSaving(true);
+    setSerperTestResult(null);
+    try {
+      await setSerperApiKey({ apiKey: serperKey });
+      setSerperKey("");
+      setSerperTestResult({ success: true });
+    } catch (err: unknown) {
+      setSerperTestResult({ success: false, error: (err as Error).message || "Failed to save Serper key." });
+    } finally {
+      setIsSerperSaving(false);
+    }
+  };
+
+  const handleSerperTest = async () => {
+    if (!serperKey) {
+      setSerperTestResult({ success: false, error: "Please enter a key to test." });
+      return;
+    }
+    
+    setIsSerperTesting(true);
+    setSerperTestResult(null);
+    try {
+      const res = await testSerperApiKey({ apiKey: serperKey });
+      setSerperTestResult(res);
+    } catch (err: unknown) {
+      setSerperTestResult({ success: false, error: (err as Error).message || "Test failed." });
+    } finally {
+      setIsSerperTesting(false);
+    }
+  };
+
+  const handleSerperRemove = async () => {
+    if (!confirm("Are you sure you want to disconnect the Serper API? This will remove the stored key.")) return;
+    
+    setIsSerperRemoving(true);
+    setSerperTestResult(null);
+    try {
+      await removeSerperApiKey();
+      setSerperKey("");
+      setSerperTestResult({ success: true, error: "Serper API Key removed successfully." });
+    } catch (err: unknown) {
+      setSerperTestResult({ success: false, error: (err as Error).message || "Failed to remove key." });
+    } finally {
+      setIsSerperRemoving(false);
     }
   };
 
@@ -134,6 +214,109 @@ export default function SettingsPage() {
               >
                 {isSaving ? "Saving..." : "Save Key"}
               </button>
+
+              {status?.hasGeminiKey && (
+                <button
+                  type="button"
+                  onClick={handleRemove}
+                  disabled={isRemoving}
+                  className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
+                >
+                  {isRemoving ? "Disconnecting..." : "Disconnect"}
+                </button>
+              )}
+            </div>
+          </form>
+        </div>
+      </div>
+
+      <div className="bg-card border border-card-border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+        <div className="p-6 border-b border-card-border bg-muted/20">
+          <div className="flex items-center gap-3">
+            <div className="p-2.5 bg-indigo-500/10 rounded-xl border border-indigo-500/20 text-indigo-500 shadow-inner">
+              <KeyIcon className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold text-foreground tracking-tight">Serper API Configuration</h2>
+              <p className="text-sm text-muted-foreground mt-0.5">Used for deep data enrichment and discovering university endpoints.</p>
+            </div>
+          </div>
+        </div>
+        
+        <div className="p-6 space-y-6">
+          <div className="flex items-center justify-between bg-background border border-card-border p-4 rounded-lg">
+            <span className="text-sm font-medium text-foreground">Current Integration Status</span>
+            <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold shadow-sm ${serperStatus?.hasSerperKey ? 'bg-green-500/10 text-green-500 border border-green-500/20' : 'bg-red-500/10 text-red-500 border border-red-500/20'}`}>
+              <div className={`w-2 h-2 rounded-full ${serperStatus?.hasSerperKey ? 'bg-green-500' : 'bg-red-500'} animate-pulse shadow-sm`} />
+              {serperStatus?.hasSerperKey ? "Key Actively Configured" : "Not Configured"}
+            </div>
+          </div>
+
+          <form onSubmit={handleSerperSave} className="space-y-5">
+            <div className="space-y-2.5">
+              <label htmlFor="serperKey" className="text-sm font-semibold text-foreground">
+                API Key
+              </label>
+              <input
+                id="serperKey"
+                type="password"
+                value={serperKey}
+                onChange={(e) => setSerperKey(e.target.value)}
+                placeholder={serperStatus?.hasSerperKey ? "••••••••••••••••••••••••••••" : "Paste Serper Key..."}
+                className="flex h-11 w-full rounded-lg border border-card-border bg-background px-4 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 transition-all shadow-sm"
+              />
+              <p className="text-[13px] text-muted-foreground">
+                Your key will be securely stored in the database. Leave blank to keep the current key.
+              </p>
+            </div>
+
+            {serperTestResult && (
+              <div className={`p-4 rounded-xl flex items-start gap-3 border shadow-sm ${serperTestResult.success ? 'bg-green-500/10 border-green-500/20 text-green-600 dark:text-green-400' : 'bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400'}`}>
+                {serperTestResult.success ? (
+                  <CheckCircleIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                ) : (
+                  <XCircleIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                )}
+                <div className="text-sm font-medium leading-relaxed">
+                  {serperTestResult.success 
+                    ? "Connection successful! Serper API is responding correctly." 
+                    : serperTestResult.error}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3 pt-5 border-t border-card-border">
+              <button
+                type="button"
+                onClick={handleSerperTest}
+                disabled={!serperKey || isSerperTesting}
+                className="px-5 py-2.5 bg-muted hover:bg-muted/80 text-foreground text-sm font-semibold rounded-lg transition-all border border-card-border focus:outline-none focus:ring-2 focus:ring-muted-foreground focus:ring-offset-2 flex items-center justify-center min-w-[150px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
+              >
+                {isSerperTesting ? (
+                  <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                ) : (
+                  "Test Connection"
+                )}
+              </button>
+              
+              <button
+                type="submit"
+                disabled={!serperKey || isSerperSaving}
+                className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-semibold rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 flex items-center justify-center min-w-[130px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
+              >
+                {isSerperSaving ? "Saving..." : "Save Key"}
+              </button>
+
+              {serperStatus?.hasSerperKey && (
+                <button
+                  type="button"
+                  onClick={handleSerperRemove}
+                  disabled={isSerperRemoving}
+                  className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
+                >
+                  {isSerperRemoving ? "Disconnecting..." : "Disconnect"}
+                </button>
+              )}
             </div>
           </form>
         </div>

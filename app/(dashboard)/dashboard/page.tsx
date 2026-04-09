@@ -1,18 +1,66 @@
 "use client";
 
-import { useQuery, useMutation } from "convex/react";
+import { useQuery, useMutation, usePaginatedQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { UploadCsvButton } from "../../../components/UploadCsvButton";
 import { SyncUgcButton } from "../../../components/SyncUgcButton";
 import { UniversityDetail } from "../../../components/UniversityDetail";
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { Id } from "../../../convex/_generated/dataModel";
+import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 
 export default function UniversitiesPage() {
   const [selectedId, setSelectedId] = useState<Id<"universities"> | null>(null);
   const [activeTab, setActiveTab] = useState<string>("All");
   const [validating, setValidating] = useState(false);
-  const universities = useQuery(api.universities.list, { type: activeTab });
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+
+  // Debounce search input — wait 300ms after user stops typing before firing a Convex query.
+  // Without this, every keystroke fires a new query (e.g. "vit" = 3 queries per character).
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery.trim()), 300);
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const isSearching = debouncedSearch.length >= 2;
+
+  const searchResults = useQuery(api.universities.search, isSearching ? { query: debouncedSearch } : "skip");
+  
+  const {
+    results: tabUniversities,
+    status: listStatus,
+    loadMore,
+  } = usePaginatedQuery(
+    api.universities.listPaginated,
+    isSearching ? "skip" : { type: activeTab },
+    { initialNumItems: 100 }
+  );
+  
+  const observerTarget = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    // Only observe when in tab/paginated mode — not during search.
+    // In search mode, listStatus is "Exhausted" (skipped query) and loadMore is a no-op,
+    // but we avoid the unnecessary IntersectionObserver firing entirely.
+    if (isSearching) return;
+
+    const target = observerTarget.current;
+    if (!target) return;
+
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && listStatus === "CanLoadMore") {
+          loadMore(100);
+        }
+      },
+      { threshold: 0.1 }
+    );
+
+    observer.observe(target);
+    return () => observer.unobserve(target);
+  }, [listStatus, loadMore, isSearching]);
+  
   const stats = useQuery(api.universities.getStats);
   const dispatchValidation = useMutation(api.dispatcher.dispatchWebsiteValidation);
 
@@ -28,7 +76,7 @@ export default function UniversitiesPage() {
     }
   };
 
-  const filteredUniversities = universities;
+  const filteredUniversities = isSearching ? searchResults : tabUniversities;
 
   const tabs = ["All", "Central", "State", "Private", "Deemed"];
 
@@ -64,32 +112,45 @@ export default function UniversitiesPage() {
         </div>
       </div>
 
-      <div className="flex items-center gap-1 mb-6 bg-card p-1.5 border border-card-border/80 rounded-xl w-fit shadow-sm">
-        {tabs.map((tab) => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2 ${
-              activeTab === tab
-                ? "bg-muted text-white shadow-sm"
-                : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
-            }`}
-          >
-            <span>{tab}</span>
-            {stats && (
-              <span className={`text-[10px] px-1.5 py-0.5 rounded-md transition-colors font-bold ${
-                activeTab === tab 
-                  ? "bg-zinc-700/50 text-white" 
-                  : "bg-muted/50 text-muted-foreground"
-              }`}>
-                {stats[tab] || 0}
-              </span>
-            )}
-          </button>
-        ))}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
+        <div className="flex items-center gap-1 bg-card p-1.5 border border-card-border/80 rounded-xl w-fit shadow-sm">
+          {tabs.map((tab) => (
+            <button
+              key={tab}
+              onClick={() => setActiveTab(tab)}
+              className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2 ${
+                activeTab === tab
+                  ? "bg-muted text-white shadow-sm"
+                  : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
+              }`}
+            >
+              <span>{tab}</span>
+              {stats && (
+                <span className={`text-[10px] px-1.5 py-0.5 rounded-md transition-colors font-bold ${
+                  activeTab === tab 
+                    ? "bg-zinc-700/50 text-white" 
+                    : "bg-muted/50 text-muted-foreground"
+                }`}>
+                  {(stats as Record<string, number>)[tab] ?? 0}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        <div className="relative w-full sm:w-80">
+          <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <input
+            type="text"
+            placeholder="Search universities..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full pl-9 pr-4 py-1.5 bg-card border border-card-border/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm transition-shadow text-foreground placeholder:text-muted-foreground placeholder:font-medium"
+          />
+        </div>
       </div>
 
-      {universities === undefined ? (
+      {filteredUniversities === undefined ? (
         <div className="space-y-4">
           <div className="h-4 w-full bg-muted animate-pulse rounded" />
           <div className="h-4 w-full bg-muted animate-pulse rounded opacity-75" />
@@ -101,11 +162,17 @@ export default function UniversitiesPage() {
         </div>
       ) : (filteredUniversities?.length === 0) ? (
         <div className="flex flex-col items-center justify-center py-24 text-center">
-          <div className="text-5xl mb-4">🏛️</div>
-          <h3 className="text-lg font-medium text-foreground mb-2">No {activeTab === "All" ? "" : activeTab} universities found</h3>
+          <div className="text-5xl mb-4">{isSearching ? "🔍" : "🏛️"}</div>
+          <h3 className="text-lg font-medium text-foreground mb-2">
+            {isSearching
+              ? `No universities match "${debouncedSearch}"`
+              : `No ${activeTab === "All" ? "" : activeTab + " "}universities found`}
+          </h3>
           <p className="text-muted-foreground text-sm max-w-sm">
-            {activeTab === "All" 
-              ? "Upload a CSV or sync from UGC to get started." 
+            {isSearching
+              ? "Try a different search term or clear the search to browse all universities."
+              : activeTab === "All"
+              ? "Upload a CSV or sync from UGC to get started."
               : `There are currently no universities categorized as ${activeTab}.`}
           </p>
         </div>
@@ -179,6 +246,18 @@ export default function UniversitiesPage() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+      
+      {/* Infinite Scroll Trigger — only active in tab/paginated mode */}
+      {!isSearching && (
+        <div ref={observerTarget} className="h-10 mt-4 flex items-center justify-center">
+          {listStatus === "LoadingMore" && (
+            <svg className="animate-spin h-5 w-5 text-muted-foreground" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            </svg>
+          )}
         </div>
       )}
 

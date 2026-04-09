@@ -124,7 +124,7 @@ export default function EnrichmentPage() {
   );
 
   return (
-    <div className="p-8 h-screen max-h-screen overflow-hidden flex flex-col relative text-zinc-200">
+    <div className="p-8 h-screen max-h-screen overflow-hidden flex flex-col relative text-zinc-200" suppressHydrationWarning>
       <div className="flex items-start justify-between mb-8 flex-shrink-0">
         <div>
           <h1 className="text-3xl font-heading font-bold text-foreground tracking-tight">Deep Enrichment Engine</h1>

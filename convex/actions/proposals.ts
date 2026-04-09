@@ -55,7 +55,7 @@ export const generateProposal = action({
         apiKey,
         systemPrompt,
         userPrompt: "Generate the proposal JSON now.",
-        temperature: TEMP.creative,
+        temperature: TEMP.balanced, // 0.3 — structured JSON output needs consistency, not randomness
         model: MODELS.complex,
         responseAsJson: true,
         responseSchema: PROPOSAL_SCHEMA,
