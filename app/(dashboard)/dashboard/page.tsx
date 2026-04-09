@@ -131,7 +131,7 @@ export default function UniversitiesPage() {
                     ? "bg-zinc-700/50 text-white" 
                     : "bg-muted/50 text-muted-foreground"
                 }`}>
-                  {(stats as Record<string, number>)[tab] ?? 0}
+                  {stats[tab] || 0}
                 </span>
               )}
             </button>

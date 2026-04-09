@@ -417,7 +417,7 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-foreground font-medium">{s.name || "Unknown"}</p>
+                        <p className="text-foreground font-medium">{s.name || "Unspecified Contact"}</p>
                         {s.source && (
                           <span className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded ${
                             s.source === "deep_enrichment"

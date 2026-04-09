@@ -145,7 +145,7 @@ export default function ProposalsPage() {
                       <option value="">General Proposal (No specific addressing)</option>
                       {filteredStakeholders.map((st) => (
                          <option key={st._id} value={st._id}>
-                           {st.name || "Unknown"} {st.role ? `— ${st.role}` : ""} ({st.email})
+                           {st.name || "Unspecified Contact"} {st.role ? `— ${st.role}` : ""} ({st.email})
                          </option>
                       ))}
                     </select>

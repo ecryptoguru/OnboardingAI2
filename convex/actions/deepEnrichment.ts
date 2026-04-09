@@ -45,7 +45,6 @@ function normalizeContent(raw: string): string {
     // given 60k of raw web content flowing into the model context.
     .replace(/(?:disregard|ignore|forget|override)\s+(?:all\s+)?(?:previous|above|prior)\s+(?:instructions?|prompts?|context)/gi, "[FILTERED]")
     .replace(/(?:you are now|act as|pretend to be|roleplay as|new persona)/gi, "[FILTERED]")
-    .replace(/```(?:json|javascript|python|bash)?[\s\S]*?```/g, "[CODE_BLOCK_FILTERED]")
     // ────────────────────────────────────────────────────────────────────────
     .replace(/\n{3,}/g, "\n\n")
     .replace(/ {2,}/g, " ")
@@ -163,24 +162,16 @@ export const runDeepEnrichment = action({
       const uniName = university.university_name;
       const url = typeof university.website === "string" ? university.website : "";
 
-      // ─── Recent Enrichment Guard ──────────────────────────────────────────
-      // Skip universities enriched within the ENRICHMENT_COOLDOWN_DAYS window
-      // to prevent cost blowout on bulk re-enrichment runs.
-      // Set FORCE_ENRICHMENT=true env var to bypass for manual re-runs.
-      const COOLDOWN_DAYS = parseInt(process.env.ENRICHMENT_COOLDOWN_DAYS || "30", 10);
-      const forceEnrichment = process.env.FORCE_ENRICHMENT === "true";
-      if (!forceEnrichment && university.updated_at) {
-        const daysSinceUpdate = (Date.now() - university.updated_at) / (1000 * 60 * 60 * 24);
-        const wasEnriched = university.outreach_stage && !["new", "enriching"].includes(university.outreach_stage);
-        if (wasEnriched && daysSinceUpdate < COOLDOWN_DAYS) {
-          console.log(`[DeepEnrichment] SKIPPED ${uniName} — enriched ${daysSinceUpdate.toFixed(1)} days ago (cooldown: ${COOLDOWN_DAYS}d). Set FORCE_ENRICHMENT=true to override.`);
-          return { success: true, skipped: true, reason: `Already enriched ${Math.round(daysSinceUpdate)} days ago` };
-        }
-      }
+      // ─── Pre-Enrichment Cleanup ───────────────────────────────────────────
+      // If we are artificially running deep enrichment again, clear out the 
+      // previous AI signals, demographics, and stakeholders first.
+      await ctx.runMutation(internal.wipeEnrichment.clearSingleUniversityEnrichmentInternal, {
+        universityId: args.universityId,
+      });
 
       console.log(`[DeepEnrichment] Starting for ${uniName}...`);
-      const serperKey = (await ctx.runQuery(internal.settings.getInternalSerperKey)) || process.env.SERPER_API_KEY;
-      if (!serperKey) throw new Error("SERPER API KEY is not set securely in settings nor in env variables");
+      const serperKey = process.env.SERPER_API_KEY;
+      if (!serperKey) throw new Error("SERPER API KEY is not set tightly in env variables");
 
       // ─── Disambiguation fields ────────────────────────────────────────────
       // Use address + state + zip_code to uniquely identify among campuses.
@@ -576,26 +567,25 @@ Synthesize the final result using the PRE-EXTRACTED FACTS. Only pull from RAW SO
           demo.day_scholars = demo.day_scholars_male + demo.day_scholars_female;
 
         // 2. ⚠️ SANITY GATE: hostelites CANNOT exceed total_students.
-        // This is a mathematical impossibility. If it happens, hostelites is from a wrong
-        // source (e.g. hostel capacity, campus residents incl. staff, or a different institution).
-        // → DISCARD hostelites, NOT inflate total.
+        // If it happens, total_students was likely extracted from a subset/single college.
+        // → DISCARD the invalid total, DO NOT discard the valid hostelites!
         if (demo.hostelites && demo.total_students && demo.hostelites > demo.total_students) {
           console.warn(
-            `[DeepEnrichment] REJECTED hostelites (${demo.hostelites}) — exceeds total students (${demo.total_students}). Discarding as implausible.`
+            `[DeepEnrichment] REJECTED total_students (${demo.total_students}) — smaller than hostelites (${demo.hostelites}). Discarding invalid total.`
           );
-          demo.hostelites = undefined;
-          demo.hostelites_male = undefined;
-          demo.hostelites_female = undefined;
+          demo.total_students = undefined;
+          demo.total_students_male = undefined;
+          demo.total_students_female = undefined;
         }
 
         // Similarly: day_scholars cannot exceed total_students
         if (demo.day_scholars && demo.total_students && demo.day_scholars > demo.total_students) {
           console.warn(
-            `[DeepEnrichment] REJECTED day_scholars (${demo.day_scholars}) — exceeds total students (${demo.total_students}). Discarding.`
+            `[DeepEnrichment] REJECTED total_students (${demo.total_students}) — smaller than day_scholars (${demo.day_scholars}). Discarding invalid total.`
           );
-          demo.day_scholars = undefined;
-          demo.day_scholars_male = undefined;
-          demo.day_scholars_female = undefined;
+          demo.total_students = undefined;
+          demo.total_students_male = undefined;
+          demo.total_students_female = undefined;
         }
 
         // 3. If total is unknown but we have hostelites, use it only as a reasonable floor.

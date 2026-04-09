@@ -28,6 +28,7 @@ import type * as actions_testVerifyOptimizations from "../actions/testVerifyOpti
 import type * as actions_testVerifyRequirements from "../actions/testVerifyRequirements.js";
 import type * as actions_ugcSeed from "../actions/ugcSeed.js";
 import type * as actions_ugcSync from "../actions/ugcSync.js";
+import type * as admin from "../admin.js";
 import type * as auth from "../auth.js";
 import type * as crons from "../crons.js";
 import type * as dbReset from "../dbReset.js";
@@ -82,6 +83,7 @@ declare const fullApi: ApiFromModules<{
   "actions/testVerifyRequirements": typeof actions_testVerifyRequirements;
   "actions/ugcSeed": typeof actions_ugcSeed;
   "actions/ugcSync": typeof actions_ugcSync;
+  admin: typeof admin;
   auth: typeof auth;
   crons: typeof crons;
   dbReset: typeof dbReset;

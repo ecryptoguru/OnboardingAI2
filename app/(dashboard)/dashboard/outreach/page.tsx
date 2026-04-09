@@ -580,7 +580,7 @@ function SimulateReplyModal({
               >
                 {stakeholders?.map(st => (
                   <option key={st._id} value={st._id}>
-                    {st.name || "Unknown"} {st.role ? `— ${st.role}` : ""} {st.email ? `(${st.email})` : "(no email)"}
+                    {st.name || "Unspecified Contact"} {st.role ? `— ${st.role}` : ""} {st.email ? `(${st.email})` : "(no email)"}
                   </option>
                 ))}
               </select>

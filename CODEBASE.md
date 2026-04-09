@@ -9,7 +9,7 @@ This document serves as the central reference point for AI coding agents to navi
 - **Framework:** Next.js 15 (React 19, App Router)
 - **Backend & Database:** Convex (Serverless functions, Real-time DB, Crons)
 - **Styling:** Tailwind CSS, Glassmorphism design system
-- **AI Models:** Google Gemini 3.1 Pro (Reasoning/Complex Tasks), Google Gemini 3.1 Flash Lite Preview (Vision/Speed/Extraction)
+- **AI Models:** Anthropic Claude 3.7 Sonnet (Reasoning), Google Gemini 2.5 Flash (Vision/Speed)
 - **External Services:** 
   - SendGrid (Email dispatch)
   - Calendly Webhooks (Booking triggers)
