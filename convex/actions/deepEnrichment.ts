@@ -170,7 +170,7 @@ export const runDeepEnrichment = action({
       });
 
       console.log(`[DeepEnrichment] Starting for ${uniName}...`);
-      const serperKey = process.env.SERPER_API_KEY;
+      const serperKey = await ctx.runQuery(internal.settings.getInternalSerperKey);
       if (!serperKey) throw new Error("SERPER API KEY is not set tightly in env variables");
 
       // ─── Disambiguation fields ────────────────────────────────────────────

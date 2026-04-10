@@ -5,20 +5,44 @@ import { validateAuth } from "./lib/auth_utils";
 export const listByUniversity = query({
   args: { university_id: v.id("universities") },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const all = await ctx.db
       .query("stakeholders")
       .withIndex("by_university", (q) => q.eq("university_id", args.university_id))
       .collect();
+      
+    // Carefully exclude UGC stakeholders that have no contact info to prevent duplicates alongside rich AI data
+    return all.filter((s) => {
+      const isUGC = s.source !== "deep_enrichment";
+      const hasEmail = s.email && s.email !== "null";
+      const hasPhone = s.phone && s.phone !== "null";
+      
+      if (isUGC && !hasEmail && !hasPhone) {
+        return false;
+      }
+      return true;
+    });
   },
 });
 
 export const getPrimary = query({
   args: { university_id: v.id("universities") },
   handler: async (ctx, args) => {
-    const all = await ctx.db
+    let all = await ctx.db
       .query("stakeholders")
       .withIndex("by_university", (q) => q.eq("university_id", args.university_id))
       .collect();
+      
+    all = all.filter((s) => {
+      const isUGC = s.source !== "deep_enrichment";
+      const hasEmail = s.email && s.email !== "null";
+      const hasPhone = s.phone && s.phone !== "null";
+      
+      if (isUGC && !hasEmail && !hasPhone) {
+        return false;
+      }
+      return true;
+    });
+      
     return all.find((s) => s.is_primary) ?? all[0] ?? null;
   },
 });
@@ -277,10 +301,21 @@ export const upsertBulkInternal = internalMutation({
 export const getByUniversityInternal = internalQuery({
   args: { university_id: v.id("universities") },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const all = await ctx.db
       .query("stakeholders")
       .withIndex("by_university", (q) => q.eq("university_id", args.university_id))
       .collect();
+      
+    return all.filter((s) => {
+      const isUGC = s.source !== "deep_enrichment";
+      const hasEmail = s.email && s.email !== "null";
+      const hasPhone = s.phone && s.phone !== "null";
+      
+      if (isUGC && !hasEmail && !hasPhone) {
+        return false;
+      }
+      return true;
+    });
   },
 });
 

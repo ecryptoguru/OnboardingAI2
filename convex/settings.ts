@@ -111,3 +111,86 @@ export const removeGeminiKey = mutation({
   },
 });
 
+// --- SERPER API KEY ---
+
+export const getSerperKeyStatus = query({
+  handler: async (ctx) => {
+    const skipAuth = process.env.SKIP_AUTH === "true";
+    if (!skipAuth) {
+      const userId = await getAuthUserId(ctx);
+      if (!userId) return { hasSerperKey: false };
+    }
+    
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "serperApiKey"))
+      .first();
+      
+    return {
+      hasSerperKey: !!doc?.value,
+      isEnvFallback: false
+    };
+  },
+});
+
+export const getInternalSerperKey = internalQuery({
+  handler: async (ctx) => {
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "serperApiKey"))
+      .first();
+    // Exclusively return DB value (No .env fallback)
+    return doc?.value || null;
+  },
+});
+
+export const setSerperKey = mutation({
+  args: { apiKey: v.string() },
+  handler: async (ctx, args) => {
+    const skipAuth = process.env.SKIP_AUTH === "true";
+    if (!skipAuth) {
+      const userId = await getAuthUserId(ctx);
+      if (!userId) throw new Error("Unauthenticated");
+    }
+
+    if (args.apiKey.length < 32) {
+      throw new Error("Invalid Serper API Key format");
+    }
+
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "serperApiKey"))
+      .first();
+
+    if (doc) {
+      await ctx.db.patch(doc._id, { value: args.apiKey });
+    } else {
+      await ctx.db.insert("systemSettings", {
+        configKey: "serperApiKey",
+        value: args.apiKey,
+      });
+    }
+    return { success: true };
+  },
+});
+
+export const removeSerperKey = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const skipAuth = process.env.SKIP_AUTH === "true";
+    if (!skipAuth) {
+      const userId = await getAuthUserId(ctx);
+      if (!userId) throw new Error("Unauthenticated");
+    }
+
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "serperApiKey"))
+      .first();
+
+    if (doc) {
+      await ctx.db.delete(doc._id);
+    }
+    return { success: true };
+  },
+});

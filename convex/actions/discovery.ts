@@ -2,7 +2,7 @@
 
 import { action } from "../_generated/server";
 import { v } from "convex/values";
-import { api } from "../_generated/api";
+import { api, internal } from "../_generated/api";
 import { withRetry } from "../lib/utils";
 
 export const validateWebsite = action({
@@ -62,7 +62,7 @@ export const validateWebsite = action({
 export const discoverWebsite = action({
   args: { universityId: v.id("universities"), universityName: v.string() },
   handler: async (ctx, args) => {
-    const apiKey = process.env.SERPER_API_KEY;
+    const apiKey = await ctx.runQuery(internal.settings.getInternalSerperKey);
     if (!apiKey) {
       console.warn("SERPER_API_KEY is not set. Cannot discover website.");
       return null;

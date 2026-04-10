@@ -23,8 +23,8 @@ export const discoverSocialAndMedia = action({
 
     // Fetch dynamic API key
     const apiKey = await ctx.runQuery(internal.settings.getInternalGeminiKey);
+    const serperKey = await ctx.runQuery(internal.settings.getInternalSerperKey);
 
-    const serperKey = process.env.SERPER_API_KEY;
     if (!serperKey) {
       console.warn("[Enrichment] No SERPER_API_KEY");
       return { success: false, reason: "No SERPER_API_KEY" };
