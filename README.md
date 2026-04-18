@@ -32,7 +32,7 @@ Set these variables in your Convex dashboard (or via CLI):
 ## 🛠 Tech Stack
 - **Backend/DB**: [Convex](https://convex.dev)
 - **Frontend**: [Next.js 15](https://nextjs.org) + React 19 + Tailwind CSS
-- **AI**: Claude 3.7 Sonnet (Reasoning) + Gemini 2.5 Flash (Vision/Speed)
+- **AI**: Gemini 3.1 Pro (Reasoning) + Gemini 3.1 Flash Lite (Vision/Speed)
 - **Email**: SendGrid
 - **PDF**: @react-pdf/renderer
 - **Scraping**: fetch + Jina Reader
