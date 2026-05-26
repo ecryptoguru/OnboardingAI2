@@ -7,14 +7,14 @@ const crons = cronJobs();
 crons.hourly(
   "process-outreach-sequences",
   { minuteUTC: 0 },
-  (api.actions as any).outreach.processDueSequences
+  api.actions.outreach.processDueSequences,
 );
 
 crons.weekly(
   "weekly-cleanup",
   { dayOfWeek: "sunday", hourUTC: 0, minuteUTC: 0 },
   internal.proposals.cleanupOldProposalsInternal,
-  { days: 30 }
+  { days: 30 },
 );
 
 export default crons;

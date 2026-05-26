@@ -10,6 +10,7 @@ import {
   CheckBadgeIcon,
 } from "@heroicons/react/24/outline";
 import { Id, Doc } from "../../../../convex/_generated/dataModel";
+import { useToast } from "../../../../components/Toast";
 
 const STEP_LABELS: Record<number, string> = {
   1: "Initial Outreach",
@@ -20,7 +21,14 @@ const STEP_LABELS: Record<number, string> = {
 };
 
 export default function ApprovalsPage() {
-  const pendingEmails = useQuery(api.emails.listPending);
+  const { show, toastElement } = useToast();
+  const pendingEmails = useQuery(api.emails.listPending) as
+    | (Doc<"emailsSent"> & {
+        university_name?: string;
+        stakeholder_name?: string;
+        stakeholder_email?: string;
+      })[]
+    | undefined;
   const updateDraft = useMutation(api.emails.updateDraft);
   const rejectDraft = useMutation(api.emails.rejectDraft);
   const approveAndSend = useAction(api.actions.email.approveAndSend);
@@ -28,7 +36,9 @@ export default function ApprovalsPage() {
   const [editingId, setEditingId] = useState<Id<"emailsSent"> | null>(null);
   const [editSubject, setEditSubject] = useState("");
   const [editBody, setEditBody] = useState("");
-  const [loadingIds, setLoadingIds] = useState<Set<Id<"emailsSent">>>(new Set());
+  const [loadingIds, setLoadingIds] = useState<Set<Id<"emailsSent">>>(
+    new Set(),
+  );
   const [bulkApproving, setBulkApproving] = useState(false);
 
   if (pendingEmails === undefined) {
@@ -42,7 +52,11 @@ export default function ApprovalsPage() {
   const addLoading = (id: Id<"emailsSent">) =>
     setLoadingIds((prev) => new Set(prev).add(id));
   const removeLoading = (id: Id<"emailsSent">) =>
-    setLoadingIds((prev) => { const next = new Set(prev); next.delete(id); return next; });
+    setLoadingIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
 
   const handleEdit = (email: Doc<"emailsSent">) => {
     setEditingId(email._id);
@@ -61,27 +75,37 @@ export default function ApprovalsPage() {
       await approveAndSend({ emailId: id });
     } catch (e) {
       console.error(e);
-      alert("Failed to approve and send email");
+      show("Failed to approve and send email", "error");
     } finally {
       removeLoading(id);
     }
   };
 
   const handleReject = async (id: Id<"emailsSent">) => {
-    if (!confirm("Reject this draft? The sequence will be paused for this stakeholder.")) return;
+    if (
+      !confirm(
+        "Reject this draft? The sequence will be paused for this stakeholder.",
+      )
+    )
+      return;
     addLoading(id);
     try {
       await rejectDraft({ id });
     } catch (e) {
       console.error(e);
-      alert("Failed to reject draft");
+      show("Failed to reject draft", "error");
     } finally {
       removeLoading(id);
     }
   };
 
   const handleBulkApprove = async () => {
-    if (!confirm(`Approve and send ALL ${pendingEmails.length} pending emails now?`)) return;
+    if (
+      !confirm(
+        `Approve and send ALL ${pendingEmails.length} pending emails now?`,
+      )
+    )
+      return;
     setBulkApproving(true);
     for (const email of pendingEmails) {
       try {
@@ -103,7 +127,8 @@ export default function ApprovalsPage() {
               HITL Approvals
             </h1>
             <p className="text-muted-foreground text-sm">
-              Review, edit, and approve AI-drafted outreach emails before sending.
+              Review, edit, and approve AI-drafted outreach emails before
+              sending.
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -111,16 +136,21 @@ export default function ApprovalsPage() {
               <span className="text-sm font-bold text-amber-400">
                 {pendingEmails.length}
               </span>
-              <span className="text-sm text-muted-foreground ml-1">Pending</span>
+              <span className="text-sm text-muted-foreground ml-1">
+                Pending
+              </span>
             </div>
             {pendingEmails.length > 1 && (
               <button
+                type="button"
                 onClick={handleBulkApprove}
                 disabled={bulkApproving}
                 className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-60 text-white text-sm font-bold rounded-lg transition-all shadow-sm"
               >
                 <CheckBadgeIcon className="h-5 w-5" />
-                {bulkApproving ? "Sending all..." : `Approve All (${pendingEmails.length})`}
+                {bulkApproving
+                  ? "Sending all..."
+                  : `Approve All (${pendingEmails.length})`}
               </button>
             )}
           </div>
@@ -130,9 +160,12 @@ export default function ApprovalsPage() {
         {pendingEmails.length === 0 ? (
           <div className="text-center py-28 bg-card rounded-2xl border border-card-border/60 shadow-sm">
             <div className="text-5xl mb-4">🎉</div>
-            <h3 className="text-lg font-heading font-semibold text-foreground">Inbox Zero!</h3>
+            <h3 className="text-lg font-heading font-semibold text-foreground">
+              Inbox Zero!
+            </h3>
             <p className="text-muted-foreground mt-2 text-sm">
-              All drafted emails have been reviewed. The AI will draft new emails as sequences progress.
+              All drafted emails have been reviewed. The AI will draft new
+              emails as sequences progress.
             </p>
           </div>
         ) : (
@@ -152,11 +185,14 @@ export default function ApprovalsPage() {
                       {/* Step indicator */}
                       <div className="flex items-center gap-2 shrink-0">
                         <div className="w-7 h-7 rounded-full bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
-                          <span className="text-amber-400 text-xs font-bold">{email.step_number}</span>
+                          <span className="text-amber-400 text-xs font-bold">
+                            {email.step_number}
+                          </span>
                         </div>
                         <div>
                           <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
-                            {STEP_LABELS[email.step_number] ?? `Step ${email.step_number}`}
+                            {STEP_LABELS[email.step_number] ??
+                              `Step ${email.step_number}`}
                           </p>
                         </div>
                       </div>
@@ -167,7 +203,8 @@ export default function ApprovalsPage() {
                           {email.university_name}
                         </h3>
                         <p className="text-xs text-muted-foreground truncate">
-                          To: {email.stakeholder_name ?? "—"} · {email.stakeholder_email ?? "No email"}
+                          To: {email.stakeholder_name ?? "—"} ·{" "}
+                          {email.stakeholder_email ?? "No email"}
                         </p>
                       </div>
                     </div>
@@ -176,15 +213,18 @@ export default function ApprovalsPage() {
                     <div className="flex items-center gap-2 shrink-0">
                       {!isEditing && (
                         <button
+                          type="button"
                           onClick={() => handleEdit(email)}
                           disabled={isLoading}
                           className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors disabled:opacity-50"
                           title="Edit Draft"
+                          aria-label="Edit Draft"
                         >
                           <PencilIcon className="h-4 w-4" />
                         </button>
                       )}
                       <button
+                        type="button"
                         onClick={() => handleReject(email._id)}
                         disabled={isLoading}
                         className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-400 hover:text-white hover:bg-red-500/15 rounded-lg transition-colors disabled:opacity-50 border border-transparent hover:border-red-500/25"
@@ -193,6 +233,7 @@ export default function ApprovalsPage() {
                         Reject
                       </button>
                       <button
+                        type="button"
                         onClick={() => handleApprove(email._id)}
                         disabled={isLoading || isEditing}
                         className="flex items-center gap-1.5 px-4 py-1.5 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg shadow-sm transition-all duration-200 disabled:opacity-50"
@@ -208,7 +249,9 @@ export default function ApprovalsPage() {
                     {isEditing ? (
                       <div className="space-y-4">
                         <div>
-                          <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Subject</label>
+                          <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
+                            Subject
+                          </label>
                           <input
                             type="text"
                             value={editSubject}
@@ -217,7 +260,9 @@ export default function ApprovalsPage() {
                           />
                         </div>
                         <div>
-                          <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">Body</label>
+                          <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-1.5">
+                            Body
+                          </label>
                           <textarea
                             value={editBody}
                             onChange={(e) => setEditBody(e.target.value)}
@@ -243,29 +288,47 @@ export default function ApprovalsPage() {
                     ) : (
                       <div>
                         <div className="flex items-baseline gap-2 mb-4">
-                          <span className="text-xs text-muted-foreground font-medium">Subject:</span>
-                          <span className="text-sm text-foreground font-semibold">{email.subject}</span>
+                          <span className="text-xs text-muted-foreground font-medium">
+                            Subject:
+                          </span>
+                          <span className="text-sm text-foreground font-semibold">
+                            {email.subject}
+                          </span>
                         </div>
                         {/* Styled email preview */}
                         <div className="bg-background border border-card-border/60 rounded-xl overflow-hidden">
                           <div className="px-5 py-3 bg-muted/40 border-b border-card-border/40">
-                            <span className="text-xs text-muted-foreground">Email Preview</span>
+                            <span className="text-xs text-muted-foreground">
+                              Email Preview
+                            </span>
                           </div>
                           <div className="px-6 py-5">
-                            {email.body.split("\n").map((line: string, i: number) => (
-                              line.trim() === "" ? (
-                                <div key={i} className="h-3" />
-                              ) : line.startsWith("-") ? (
-                                <div key={i} className="flex items-start gap-2 my-1">
-                                  <span className="text-blue-400 mt-0.5 shrink-0">•</span>
-                                  <p className="text-sm text-foreground leading-relaxed">{line.slice(1).trim()}</p>
-                                </div>
-                              ) : (
-                                <p key={i} className={`text-sm text-foreground leading-relaxed ${i === 0 ? "font-medium" : ""}`}>
-                                  {line}
-                                </p>
-                              )
-                            ))}
+                            {email.body
+                              .split("\n")
+                              .map((line: string, i: number) =>
+                                line.trim() === "" ? (
+                                  <div key={i} className="h-3" />
+                                ) : line.startsWith("-") ? (
+                                  <div
+                                    key={i}
+                                    className="flex items-start gap-2 my-1"
+                                  >
+                                    <span className="text-blue-400 mt-0.5 shrink-0">
+                                      •
+                                    </span>
+                                    <p className="text-sm text-foreground leading-relaxed">
+                                      {line.slice(1).trim()}
+                                    </p>
+                                  </div>
+                                ) : (
+                                  <p
+                                    key={i}
+                                    className={`text-sm text-foreground leading-relaxed ${i === 0 ? "font-medium" : ""}`}
+                                  >
+                                    {line}
+                                  </p>
+                                ),
+                              )}
                           </div>
                         </div>
                       </div>
@@ -277,6 +340,7 @@ export default function ApprovalsPage() {
           </div>
         )}
       </div>
+      {toastElement}
     </div>
   );
 }

@@ -58,7 +58,8 @@ const htmlWrap = (content: string) => `<!DOCTYPE html>
 const p = (text: string, style = "") =>
   `<p style="margin:0 0 16px 0;${style}">${text}</p>`;
 
-const strong = (text: string) => `<strong style="color:#111827;">${text}</strong>`;
+const strong = (text: string) =>
+  `<strong style="color:#111827;">${text}</strong>`;
 
 const bullet = (items: string[]) => `
 <ul style="margin:0 0 20px 0;padding-left:20px;color:#374151;">
@@ -70,7 +71,8 @@ const ctaButton = (href: string, label: string) =>
     <a href="${href}" style="display:inline-block;background:#3b82f6;color:#ffffff;font-weight:600;font-size:14px;text-decoration:none;padding:12px 28px;border-radius:8px;letter-spacing:0.01em;">${label} →</a>
   </div>`;
 
-const divider = () => `<div style="border-top:1px solid #e5e7eb;margin:24px 0;"></div>`;
+const divider = () =>
+  `<div style="border-top:1px solid #e5e7eb;margin:24px 0;"></div>`;
 
 // ─── Templates ───────────────────────────────────────────────────────────────
 
@@ -108,7 +110,7 @@ Founder, Fretbox
         "Improve real-time communication between campus stakeholders",
         "Drive better student outcomes through data-driven insights",
       ])}
-      ${p("I'd love to show you how Fretbox can create real value for " + strong(uniName) + ". Would you have <strong style=\"color:#111827;\">10 minutes</strong> for a quick introductory call this week?")}
+      ${p("I'd love to show you how Fretbox can create real value for " + strong(uniName) + '. Would you have <strong style="color:#111827;">10 minutes</strong> for a quick introductory call this week?')}
       ${ctaButton("https://calendly.com/fretbox-demo", "Book a 10-min Call")}
       ${divider()}
       ${p("Best regards,", "margin-bottom:4px;")}
@@ -170,10 +172,10 @@ Founder, Fretbox
       ${p(`I saw that <em style="color:#374151;">${newsSignal}</em> — that's a great milestone!`)}
       ${p("As institutions grow, the right digital backbone becomes critical to student success. Fretbox is built to scale with you:")}
       ${bullet([
-        "<strong style=\"color:#111827;\">Hostel &amp; Facility Management</strong> — real-time occupancy, maintenance, and communication",
-        "<strong style=\"color:#111827;\">Administrative Automation</strong> — reduce manual processes by 30%+",
-        "<strong style=\"color:#111827;\">Student Engagement</strong> — digital-first communication channels",
-        "<strong style=\"color:#111827;\">Actionable Analytics</strong> — data-driven decisions for leadership",
+        '<strong style="color:#111827;">Hostel &amp; Facility Management</strong> — real-time occupancy, maintenance, and communication',
+        '<strong style="color:#111827;">Administrative Automation</strong> — reduce manual processes by 30%+',
+        '<strong style="color:#111827;">Student Engagement</strong> — digital-first communication channels',
+        '<strong style="color:#111827;">Actionable Analytics</strong> — data-driven decisions for leadership',
       ])}
       ${p("I'd love to walk you through a customized demo tailored to your institution's specific needs.")}
       ${ctaButton("https://calendly.com/fretbox-demo", "Schedule a Custom Demo")}
@@ -216,48 +218,70 @@ Founder, Fretbox
   }),
 
   // 5. Auto-Reply: Positive Interest / More Info
-  POSITIVE_INTEREST: (name: string, uniName: string) => ({
-    subject: `Deep dive: Fretbox x ${uniName}`,
-    body: `
+  POSITIVE_INTEREST: (name: string, uniName: string, meetLink?: string) => {
+    const ctaText = meetLink
+      ? `You can join the meeting here: ${meetLink}`
+      : "Would you like to schedule a 15-minute demo to see the platform in action? Simply reply to this email with a few times that work for you.";
+    const ctaLabel = meetLink ? "Join Google Meet →" : "Book a 15-min Demo";
+    const ctaHref = meetLink ?? "https://fretbox.in/book";
+    return {
+      subject: `Deep dive: Fretbox x ${uniName}`,
+      body: `
 Hi ${name},
 
 I'm glad to hear you're interested in learning more about how Fretbox can help ${uniName}.
 
 I've attached a detailed brochure that covers our core modules: Hostel Management, Digital Security, and Student Engagement.
 
-Would you like to schedule a 15-minute demo to see the platform in action? You can pick a time that works best for you here: https://calendly.com/fretbox-demo
+${ctaText}
 
 Best regards,
 
 Ashish Gupta
 Founder, Fretbox
     `.trim(),
-    html: htmlWrap(`
+      html: htmlWrap(`
       ${p(`Hi ${strong(name)},`)}
       ${p(`Glad to hear you're interested! Here's a quick overview of what Fretbox can do for ${strong(uniName)}:`)}
       ${bullet([
-        "<strong style=\"color:#111827;\">Hostel Management</strong> — room allocation, visitor tracking, warden dashboards",
-        "<strong style=\"color:#111827;\">Facility Operations</strong> — maintenance requests, asset tracking, vendor management",
-        "<strong style=\"color:#111827;\">Student Engagement</strong> — digital notice boards, event management, feedback loops",
-        "<strong style=\"color:#111827;\">Admin Automation</strong> — fee management, attendance, compliance reporting",
+        '<strong style="color:#111827;">Hostel Management</strong> — room allocation, visitor tracking, warden dashboards',
+        '<strong style="color:#111827;">Facility Operations</strong> — maintenance requests, asset tracking, vendor management',
+        '<strong style="color:#111827;">Student Engagement</strong> — digital notice boards, event management, feedback loops',
+        '<strong style="color:#111827;">Admin Automation</strong> — fee management, attendance, compliance reporting',
       ])}
-      ${p(`I'd love to walk you through a <strong style="color:#111827;">live demo</strong> customized specifically for ${strong(uniName)}. Pick any 15-min slot that works for you:`)}
-      ${ctaButton("https://calendly.com/fretbox-demo", "Book a 15-min Demo")}
+      ${p(`I'd love to walk you through a <strong style="color:#111827;">live demo</strong> customized specifically for ${strong(uniName)}.`)}
+      ${
+        meetLink
+          ? p(
+              `Join the call here: <a href="${meetLink}" style="color:#3b82f6;text-decoration:none;font-weight:600;">${meetLink}</a>`,
+            )
+          : p(
+              "Simply reply to this email with a few times that work for you and I will send over a calendar invite.",
+            )
+      }
+      ${ctaButton(ctaHref, ctaLabel)}
       ${divider()}
       ${p("Best regards,", "margin-bottom:4px;")}
       ${p(`${strong("Ashish Gupta")}<br/><span style="color:#6b7280;font-size:13px;">Founder, Fretbox</span>`)}
     `),
-  }),
+    };
+  },
 
   // 6. Auto-Reply: Meeting Request Acknowledgement
-  MEETING_REQUEST_ACK: (name: string, uniName: string) => ({
-    subject: `Let's connect: Fretbox x ${uniName}`,
-    body: `
+  MEETING_REQUEST_ACK: (name: string, uniName: string, meetLink?: string) => {
+    const ctaText = meetLink
+      ? `Your meeting is confirmed. Join here: ${meetLink}`
+      : "To make our time most productive, feel free to book a specific slot that works for you.";
+    const ctaLabel = meetLink ? "Join Google Meet →" : "Confirm Your Slot →";
+    const ctaHref = meetLink ?? "https://fretbox.in/book";
+    return {
+      subject: `Let's connect: Fretbox x ${uniName}`,
+      body: `
 Hi ${name},
 
 Looking forward to our call! I've received your request for a demo/meeting.
 
-To make our time most productive, feel free to book a specific slot on my calendar here: https://calendly.com/fretbox-demo
+${ctaText}
 
 I'll also prepare a custom walkthrough based on ${uniName}'s specific needs.
 
@@ -266,18 +290,26 @@ See you soon,
 Ashish Gupta
 Founder, Fretbox
     `.trim(),
-    html: htmlWrap(`
+      html: htmlWrap(`
       ${p(`Hi ${strong(name)},`)}
       <div style="background:#ecfdf5;border-left:3px solid #10b981;border-radius:4px;padding:14px 18px;margin:0 0 24px 0;">
         <p style="margin:0;font-size:15px;color:#065f46;font-weight:600;">🎉 Meeting request received!</p>
         <p style="margin:6px 0 0;font-size:14px;color:#047857;">I'm excited to connect with you and the ${uniName} team.</p>
       </div>
-      ${p("To make our time together as valuable as possible, please book a specific slot that works for you:")}
-      ${ctaButton("https://calendly.com/fretbox-demo", "Confirm Your Slot →")}
-      ${p("Before our call, I'll prepare a <strong style=\"color:#111827;\">custom walkthrough</strong> tailored specifically to the needs and scale of " + strong(uniName) + " — so we can make the most of every minute.")}
+      ${p(ctaText)}
+      ${
+        meetLink
+          ? p(
+              `<a href="${meetLink}" style="color:#3b82f6;text-decoration:none;font-weight:600;">${meetLink}</a>`,
+            )
+          : ""
+      }
+      ${ctaButton(ctaHref, ctaLabel)}
+      ${p('Before our call, I\'ll prepare a <strong style="color:#111827;">custom walkthrough</strong> tailored specifically to the needs and scale of ' + strong(uniName) + " — so we can make the most of every minute.")}
       ${divider()}
       ${p("See you soon,", "margin-bottom:4px;")}
       ${p(`${strong("Ashish Gupta")}<br/><span style="color:#6b7280;font-size:13px;">Founder, Fretbox</span>`)}
     `),
-  }),
+    };
+  },
 };

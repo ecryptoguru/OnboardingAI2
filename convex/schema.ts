@@ -14,10 +14,11 @@ export default defineSchema({
       v.literal("pending"),
       v.literal("valid"),
       v.literal("invalid"),
-      v.literal("discovered")
+      v.literal("discovered"),
+      v.literal("discovered_weak"),
     ),
     lead_tier: v.optional(
-      v.union(v.literal("High"), v.literal("Medium"), v.literal("Low"))
+      v.union(v.literal("High"), v.literal("Medium"), v.literal("Low")),
     ),
     outreach_stage: v.optional(
       v.union(
@@ -31,8 +32,8 @@ export default defineSchema({
         v.literal("proposal_sent"),
         v.literal("closed"),
         v.literal("not_interested"),
-        v.literal("skipped")
-      )
+        v.literal("skipped"),
+      ),
     ),
     address: v.optional(v.string()),
     zip_code: v.optional(v.string()),
@@ -59,20 +60,20 @@ export default defineSchema({
         source: v.optional(v.string()), // e.g., "AISHE 2022-23 AND NAAC SSR 2023"
         // ── NIRF program-wise block ───────────────────────────────────────────
         nirf_source: v.optional(v.string()), // e.g., "NIRF 2023-24"
-        nirf_total: v.optional(v.number()),   // sum across all programs
+        nirf_total: v.optional(v.number()), // sum across all programs
         nirf_male: v.optional(v.number()),
         nirf_female: v.optional(v.number()),
         nirf_programs: v.optional(
           v.array(
             v.object({
-              name: v.string(),        // "UG (4 Years)", "PG (2 Years)", "PhD"
+              name: v.string(), // "UG (4 Years)", "PG (2 Years)", "PhD"
               male: v.optional(v.number()),
               female: v.optional(v.number()),
               total: v.optional(v.number()),
-            })
-          )
+            }),
+          ),
         ),
-      })
+      }),
     ),
     created_at: v.number(), // Unix ms
     updated_at: v.number(),
@@ -97,7 +98,8 @@ export default defineSchema({
     created_at: v.number(),
   })
     .index("by_university", ["university_id"])
-    .index("by_email", ["email"]),
+    .index("by_email", ["email"])
+    .index("by_university_primary", ["university_id", "is_primary"]),
 
   // ─── Priority Scores ──────────────────────────────────────────────────────
   priorityScores: defineTable({
@@ -130,7 +132,7 @@ export default defineSchema({
       v.literal("linkedin"),
       v.literal("website"),
       v.literal("manual"),
-      v.literal("image")
+      v.literal("image"),
     ),
     content: v.string(),
     source_url: v.optional(v.string()),
@@ -153,7 +155,7 @@ export default defineSchema({
       v.literal("paused"),
       v.literal("pending_approval"),
       v.literal("completed"),
-      v.literal("opted_out")
+      v.literal("opted_out"),
     ),
     current_step: v.number(), // 1-based step index
     total_steps: v.number(),
@@ -182,12 +184,15 @@ export default defineSchema({
       v.literal("opened"),
       v.literal("clicked"),
       v.literal("bounced"),
-      v.literal("failed")
+      v.literal("failed"),
     ),
     sent_at: v.optional(v.number()),
     opened_at: v.optional(v.number()),
   })
     .index("by_sequence", ["sequence_id"])
+    .index("by_university", ["university_id"])
+    .index("by_status", ["status"])
+    .index("by_step_number", ["step_number"])
     .index("by_sendgrid_id", ["sendgrid_message_id"]),
 
   // ─── Reply Logs ───────────────────────────────────────────────────────────
@@ -204,8 +209,8 @@ export default defineSchema({
         v.literal("not_interested"),
         v.literal("opt_out"),
         v.literal("out_of_office"),
-        v.literal("other")
-      )
+        v.literal("other"),
+      ),
     ),
     confidence: v.optional(v.number()), // 0-1
     classified_at: v.optional(v.number()),
@@ -223,14 +228,27 @@ export default defineSchema({
     proposal_json: v.optional(v.string()), // JSON string of structured proposal
     recommended_modules: v.optional(v.array(v.string())),
     pdf_storage_id: v.optional(v.id("_storage")),
-    status: v.union(
-      v.literal("draft"),
-      v.literal("ready"),
-      v.literal("sent")
+    status: v.union(v.literal("draft"), v.literal("ready"), v.literal("sent")),
+    // Google Calendar / Meet integration
+    calendar_event_id: v.optional(v.string()),
+    meet_link: v.optional(v.string()),
+    calendar_event_status: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("confirmed"),
+        v.literal("cancelled"),
+      ),
     ),
     created_at: v.number(),
     updated_at: v.number(),
   }).index("by_university", ["university_id"]),
+
+  // ─── Rate Limits ──────────────────────────────────────────────────────────
+  rateLimits: defineTable({
+    key: v.string(),
+    count: v.number(),
+    resetAt: v.number(),
+  }).index("by_key", ["key"]),
 
   // ─── Settings ─────────────────────────────────────────────────────────────
   systemSettings: defineTable({

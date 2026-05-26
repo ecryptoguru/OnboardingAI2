@@ -7,7 +7,11 @@ import { ArrowPathIcon, CheckCircleIcon } from "@heroicons/react/24/outline";
 
 export function SyncUgcButton() {
   const [isSyncing, setIsSyncing] = useState(false);
-  const [syncResult, setSyncResult] = useState<{ count: number; updatedCount?: number; lastSynced: number } | null>(null);
+  const [syncResult, setSyncResult] = useState<{
+    count: number;
+    updatedCount: number;
+    lastSynced: number;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const bulkSyncUgc = useMutation(api.universities.bulkSyncUgc);
@@ -16,59 +20,66 @@ export function SyncUgcButton() {
     setIsSyncing(true);
     setError(null);
     setSyncResult(null);
-    
+
     try {
       // Step 1: Fetch through the Proxy Route Handler
       const response = await fetch("/api/sync-ugc");
       if (!response.ok) {
         throw new Error(`Proxy error: ${response.status}`);
       }
-      
+
       const data = await response.json();
       if (!data.List || !Array.isArray(data.List)) {
         throw new Error("Invalid format from UGC API");
       }
 
-      // Step 2: Filter and map data to our schema with normalization
-      const targetUniversities = ["yenepoya", "vit university", "vellore institute of technology"];
-      
-      const mappedUniversities = data.List
-        .filter((item: any) => {
-          const name = item.uni_name?.trim().toLowerCase() || "";
-          return targetUniversities.some(target => name.includes(target));
-        })
-        .map((item: any) => {
-        let normalizedType = item.uni_type || "Other";
-        if (normalizedType.includes("Deemed")) {
-          normalizedType = "Deemed";
-        }
+      // Step 2: Map full UGC dataset to our schema with normalization
+      const mappedUniversities = data.List.map(
+        (item: {
+          uni_name?: string;
+          uni_type?: string;
+          state?: string;
+          address?: string;
+          Zip?: string;
+          status?: string;
+          url?: string;
+          NM_VC?: string;
+          NM_REG?: string;
+        }) => {
+          let normalizedType = item.uni_type || "Other";
+          if (normalizedType.includes("Deemed")) {
+            normalizedType = "Deemed";
+          }
 
-        return {
-          university_name: item.uni_name?.trim() || "Unknown",
-          state: item.state?.trim() || "Unknown",
-          address: item.address || undefined,
-          zip_code: item.Zip || undefined,
-          ugc_status: item.status || undefined,
-          website: item.url || undefined,
-          type: normalizedType,
-          vc_name: item.NM_VC || undefined,
-          registrar_name: item.NM_REG || undefined,
-        };
-      });
+          return {
+            university_name: item.uni_name?.trim() || "Unknown",
+            state: item.state?.trim() || "Unknown",
+            address: item.address || undefined,
+            zip_code: item.Zip || undefined,
+            ugc_status: item.status || undefined,
+            website: item.url || undefined,
+            type: normalizedType,
+            vc_name: item.NM_VC || undefined,
+            registrar_name: item.NM_REG || undefined,
+          };
+        },
+      );
 
       // Step 3: Send to Convex mutation
       const result = await bulkSyncUgc({
-        universities: mappedUniversities
+        universities: mappedUniversities,
       });
 
       setSyncResult({
         count: result.addedCount,
-        updatedCount: result.updatedCount,
-        lastSynced: Date.now()
+        updatedCount: result.updatedCount ?? 0,
+        lastSynced: Date.now(),
       });
     } catch (err) {
       console.error("Sync failed:", err);
-      setError("Failed to sync data from UGC.");
+      setError(
+        err instanceof Error ? err.message : "Failed to sync data from UGC.",
+      );
     } finally {
       setIsSyncing(false);
     }
@@ -82,31 +93,31 @@ export function SyncUgcButton() {
             <CheckCircleIcon className="h-4 w-4 text-emerald-400" />
             <span className="text-xs text-emerald-400 font-medium tracking-wide">
               Sync Complete: {syncResult.count} added
-              {syncResult.updatedCount !== undefined && `, ${syncResult.updatedCount} updated`}
+              {`, ${syncResult.updatedCount} updated`}
             </span>
           </div>
         )}
-        
+
         {error && (
-          <span className="text-xs text-red-400 font-medium">
-            {error}
-          </span>
+          <span className="text-xs text-red-400 font-medium">{error}</span>
         )}
 
         <button
           onClick={handleSync}
           disabled={isSyncing}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 shadow-sm ${
-            isSyncing 
-              ? "bg-muted/80 text-muted-foreground cursor-not-allowed" 
+            isSyncing
+              ? "bg-muted/80 text-muted-foreground cursor-not-allowed"
               : "bg-card border border-card-border/80 text-foreground hover:bg-muted/80 hover:border-card-border hover:text-white"
           }`}
         >
-          <ArrowPathIcon className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`} />
-          {isSyncing ? "Syncing..." : "Sync UGC Data"}
+          <ArrowPathIcon
+            className={`h-4 w-4 ${isSyncing ? "animate-spin" : ""}`}
+          />
+          {isSyncing ? "Syncing UGC..." : "Sync All UGC Universities"}
         </button>
       </div>
-      
+
       {syncResult && (
         <p className="text-[10px] text-muted-foreground italic">
           Last synced: {new Date(syncResult.lastSynced).toLocaleTimeString()}

@@ -2,7 +2,6 @@
 
 import { action } from "../_generated/server";
 import { api } from "../_generated/api";
-import { v } from "convex/values";
 
 interface UgcUniversity {
   uni_name: string;
@@ -13,31 +12,38 @@ interface UgcUniversity {
   url: string | null;
   NM_VC: string | null;
   NM_REG: string | null;
-  [key: string]: any;
+  status?: string | null;
+  [key: string]: unknown;
 }
 
 export const fetchFromUgc = action({
   args: {},
-  handler: async (ctx): Promise<{ addedCount: number }> => {
+  handler: async (
+    ctx,
+  ): Promise<{ addedCount: number; updatedCount: number }> => {
     console.log("Starting UGC sync fetch...");
-    
+
     // unitypeID=0 fetches all universities
-    const response = await fetch("https://www.ugc.gov.in/universitydetails/Getuniversity_details?unitypeID=0", {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept": "application/json, text/plain, */*",
-        "Referer": "https://www.ugc.gov.in/universitydetails/university",
-        "Origin": "https://www.ugc.gov.in",
-        "X-Requested-With": "XMLHttpRequest"
-      }
-    });
-    
+    const response = await fetch(
+      "https://www.ugc.gov.in/universitydetails/Getuniversity_details?unitypeID=0",
+      {
+        headers: {
+          "User-Agent":
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+          Accept: "application/json, text/plain, */*",
+          Referer: "https://www.ugc.gov.in/universitydetails/university",
+          Origin: "https://www.ugc.gov.in",
+          "X-Requested-With": "XMLHttpRequest",
+        },
+      },
+    );
+
     if (!response.ok) {
       throw new Error(`UGC API returned status: ${response.status}`);
     }
 
     const data = await response.json();
-    
+
     if (!data || !data.List || !Array.isArray(data.List)) {
       throw new Error("Invalid response format from UGC API");
     }
@@ -45,13 +51,8 @@ export const fetchFromUgc = action({
     const rawList: UgcUniversity[] = data.List;
     console.log(`Fetched ${rawList.length} universities from UGC.`);
 
-    // Map fields to our schema and filter
-    const companiesToSync = rawList
-      .filter(item => {
-        const name = item.uni_name.trim().toLowerCase();
-        return name.includes("yenepoya") || name.includes("vit university") || name.includes("vellore institute of technology");
-      })
-      .map(item => ({
+    // Map full UGC payload to our schema
+    const universitiesToSync = rawList.map((item) => ({
       university_name: item.uni_name.trim(),
       state: item.state.trim(),
       address: item.address || undefined,
@@ -62,11 +63,13 @@ export const fetchFromUgc = action({
     }));
 
     // Trigger the mutation to save data
-    const result: { addedCount: number } = await ctx.runMutation(api.universities.bulkSyncUgc, {
-      universities: companiesToSync
+    const result = await ctx.runMutation(api.universities.bulkSyncUgc, {
+      universities: universitiesToSync,
     });
 
-    console.log(`Sync complete. Added ${result.addedCount} new universities.`);
+    console.log(
+      `Sync complete. Added ${result.addedCount}, Updated ${result.updatedCount}.`,
+    );
     return result;
   },
 });

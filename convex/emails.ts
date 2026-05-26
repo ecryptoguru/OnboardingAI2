@@ -1,4 +1,9 @@
-import { mutation, query, internalMutation, internalQuery } from "./_generated/server";
+import {
+  mutation,
+  query,
+  internalMutation,
+  internalQuery,
+} from "./_generated/server";
 import { v } from "convex/values";
 import { validateAuth } from "./lib/auth_utils";
 
@@ -15,12 +20,54 @@ export const listBySequence = query({
 export const getStats = query({
   args: {},
   handler: async (ctx) => {
-    const emails = await ctx.db.query("emailsSent").collect();
-    return {
-      total_sent: emails.filter((e) => e.status !== "queued" && e.status !== "failed").length,
-      total_opened: emails.filter((e) => e.status === "opened" || e.status === "clicked").length,
-      total_bounced: emails.filter((e) => e.status === "bounced").length,
-    };
+    // Use parallel index-scoped queries instead of full-table scan.
+    const [queued, failed, opened, clicked, bounced] = await Promise.all([
+      ctx.db
+        .query("emailsSent")
+        .withIndex("by_status", (q) => q.eq("status", "queued"))
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("emailsSent")
+        .withIndex("by_status", (q) => q.eq("status", "failed"))
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("emailsSent")
+        .withIndex("by_status", (q) => q.eq("status", "opened"))
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("emailsSent")
+        .withIndex("by_status", (q) => q.eq("status", "clicked"))
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("emailsSent")
+        .withIndex("by_status", (q) => q.eq("status", "bounced"))
+        .collect()
+        .then((r) => r.length),
+    ]);
+
+    // total = all statuses; total_sent = total - queued - failed
+    // We don't have a cheap COUNT(*) so we approximate using a sentinel status query.
+    // For accuracy, collect all sent/delivered emails too.
+    const [sent, delivered] = await Promise.all([
+      ctx.db
+        .query("emailsSent")
+        .withIndex("by_status", (q) => q.eq("status", "sent"))
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("emailsSent")
+        .withIndex("by_status", (q) => q.eq("status", "delivered"))
+        .collect()
+        .then((r) => r.length),
+    ]);
+
+    const total_sent = sent + delivered + opened + clicked + bounced;
+    const total_opened = opened + clicked;
+    return { total_sent, total_opened, total_bounced: bounced };
   },
 });
 
@@ -29,14 +76,21 @@ export const listByUniversity = query({
   handler: async (ctx, args) => {
     const emails = await ctx.db
       .query("emailsSent")
-      .filter((q) => q.eq(q.field("university_id"), args.university_id))
+      .withIndex("by_university", (q) =>
+        q.eq("university_id", args.university_id),
+      )
       .order("desc")
       .collect();
     return await Promise.all(
       emails.map(async (e) => {
         const st = await ctx.db.get(e.stakeholder_id);
-        return { ...e, stakeholder_name: st?.name, stakeholder_email: st?.email, stakeholder_role: st?.role };
-      })
+        return {
+          ...e,
+          stakeholder_name: st?.name,
+          stakeholder_email: st?.email,
+          stakeholder_role: st?.role,
+        };
+      }),
     );
   },
 });
@@ -44,12 +98,29 @@ export const listByUniversity = query({
 export const getDetailedStats = query({
   args: {},
   handler: async (ctx) => {
-    const emails = await ctx.db.query("emailsSent").collect();
-    const byStep: Record<number, { sent: number; opened: number; clicked: number; bounced: number }> = {};
+    // Use index query with a safety cap to prevent OOM at massive scale.
+    const MAX_ANALYTICS_ROWS = 5000;
+    const emails = await ctx.db
+      .query("emailsSent")
+      .withIndex("by_step_number")
+      .take(MAX_ANALYTICS_ROWS);
+
+    const byStep: Record<
+      number,
+      { sent: number; opened: number; clicked: number; bounced: number }
+    > = {};
     for (const e of emails) {
-      if (!byStep[e.step_number]) byStep[e.step_number] = { sent: 0, opened: 0, clicked: 0, bounced: 0 };
-      if (e.status === "sent" || e.status === "delivered" || e.status === "opened" || e.status === "clicked") byStep[e.step_number].sent++;
-      if (e.status === "opened" || e.status === "clicked") byStep[e.step_number].opened++;
+      if (!byStep[e.step_number])
+        byStep[e.step_number] = { sent: 0, opened: 0, clicked: 0, bounced: 0 };
+      if (
+        e.status === "sent" ||
+        e.status === "delivered" ||
+        e.status === "opened" ||
+        e.status === "clicked"
+      )
+        byStep[e.step_number].sent++;
+      if (e.status === "opened" || e.status === "clicked")
+        byStep[e.step_number].opened++;
       if (e.status === "clicked") byStep[e.step_number].clicked++;
       if (e.status === "bounced") byStep[e.step_number].bounced++;
     }
@@ -57,14 +128,13 @@ export const getDetailedStats = query({
   },
 });
 
-
 export const getBySendgridId = query({
   args: { sendgrid_message_id: v.string() },
   handler: async (ctx, args) => {
     return await ctx.db
       .query("emailsSent")
       .withIndex("by_sendgrid_id", (q) =>
-        q.eq("sendgrid_message_id", args.sendgrid_message_id)
+        q.eq("sendgrid_message_id", args.sendgrid_message_id),
       )
       .first();
   },
@@ -93,9 +163,13 @@ export const updateStatus = mutation({
     id: v.id("emailsSent"),
     status: v.union(
       v.literal("pending_approval"),
-      v.literal("queued"), v.literal("sent"), v.literal("delivered"),
-      v.literal("opened"), v.literal("clicked"),
-      v.literal("bounced"), v.literal("failed")
+      v.literal("queued"),
+      v.literal("sent"),
+      v.literal("delivered"),
+      v.literal("opened"),
+      v.literal("clicked"),
+      v.literal("bounced"),
+      v.literal("failed"),
     ),
     sendgrid_message_id: v.optional(v.string()),
     sent_at: v.optional(v.number()),
@@ -112,8 +186,11 @@ export const updateStatusBySendgridId = mutation({
   args: {
     sendgrid_message_id: v.string(),
     status: v.union(
-      v.literal("delivered"), v.literal("opened"),
-      v.literal("clicked"), v.literal("bounced"), v.literal("failed")
+      v.literal("delivered"),
+      v.literal("opened"),
+      v.literal("clicked"),
+      v.literal("bounced"),
+      v.literal("failed"),
     ),
     opened_at: v.optional(v.number()),
   },
@@ -122,7 +199,34 @@ export const updateStatusBySendgridId = mutation({
     const email = await ctx.db
       .query("emailsSent")
       .withIndex("by_sendgrid_id", (q) =>
-        q.eq("sendgrid_message_id", args.sendgrid_message_id)
+        q.eq("sendgrid_message_id", args.sendgrid_message_id),
+      )
+      .first();
+    if (!email) return;
+    await ctx.db.patch(email._id, {
+      status: args.status,
+      opened_at: args.opened_at,
+    });
+  },
+});
+
+export const updateStatusBySendgridIdInternal = internalMutation({
+  args: {
+    sendgrid_message_id: v.string(),
+    status: v.union(
+      v.literal("delivered"),
+      v.literal("opened"),
+      v.literal("clicked"),
+      v.literal("bounced"),
+      v.literal("failed"),
+    ),
+    opened_at: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const email = await ctx.db
+      .query("emailsSent")
+      .withIndex("by_sendgrid_id", (q) =>
+        q.eq("sendgrid_message_id", args.sendgrid_message_id),
       )
       .first();
     if (!email) return;
@@ -143,10 +247,15 @@ export const insertInternal = internalMutation({
     html_body: v.optional(v.string()),
     status: v.union(
       v.literal("pending_approval"),
-      v.literal("queued"), v.literal("sent"), v.literal("delivered"),
-      v.literal("opened"), v.literal("clicked"),
-      v.literal("bounced"), v.literal("failed")
+      v.literal("queued"),
+      v.literal("sent"),
+      v.literal("delivered"),
+      v.literal("opened"),
+      v.literal("clicked"),
+      v.literal("bounced"),
+      v.literal("failed"),
     ),
+    sendgrid_message_id: v.optional(v.string()),
     step_number: v.number(),
     sent_at: v.number(),
   },
@@ -167,10 +276,15 @@ export const updateStatusInternal = internalMutation({
     id: v.id("emailsSent"),
     status: v.union(
       v.literal("pending_approval"),
-      v.literal("queued"), v.literal("sent"), v.literal("delivered"),
-      v.literal("opened"), v.literal("clicked"),
-      v.literal("bounced"), v.literal("failed")
+      v.literal("queued"),
+      v.literal("sent"),
+      v.literal("delivered"),
+      v.literal("opened"),
+      v.literal("clicked"),
+      v.literal("bounced"),
+      v.literal("failed"),
     ),
+    sendgrid_message_id: v.optional(v.string()),
     sent_at: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -188,7 +302,7 @@ export const listPending = query({
       .query("emailsSent")
       .filter((q) => q.eq(q.field("status"), "pending_approval"))
       .collect();
-      
+
     // Join with university and stakeholder
     return await Promise.all(
       pendingEmails.map(async (email) => {
@@ -200,7 +314,7 @@ export const listPending = query({
           stakeholder_email: st?.email,
           stakeholder_name: st?.name,
         };
-      })
+      }),
     );
   },
 });
@@ -224,12 +338,12 @@ export const rejectDraft = mutation({
     await validateAuth(ctx);
     const email = await ctx.db.get(args.id);
     if (!email || email.status !== "pending_approval") return;
-    
+
     await ctx.db.patch(args.id, { status: "failed" });
-    
+
     // Resume sequence if applicable
     if (email.sequence_id) {
-       await ctx.db.patch(email.sequence_id, { status: "paused" });
+      await ctx.db.patch(email.sequence_id, { status: "paused" });
     }
   },
 });

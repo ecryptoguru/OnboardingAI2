@@ -1,8 +1,9 @@
 "use client";
 
+import React, { useCallback } from "react";
 import { useQuery, useAction } from "convex/react";
 import { api } from "../convex/_generated/api";
-import { Id } from "../convex/_generated/dataModel";
+import { Doc, Id } from "../convex/_generated/dataModel";
 import {
   XMarkIcon,
   UserGroupIcon,
@@ -19,31 +20,36 @@ interface UniversityDetailProps {
   onClose: () => void;
 }
 
-export function UniversityDetail({ universityId, onClose }: UniversityDetailProps) {
+export function UniversityDetail({
+  universityId,
+  onClose,
+}: UniversityDetailProps) {
   const university = useQuery(
     api.universities.get,
-    universityId ? { id: universityId } : "skip"
+    universityId ? { id: universityId } : "skip",
   );
   const stakeholders = useQuery(
     api.stakeholders.listByUniversity,
-    universityId ? { university_id: universityId } : "skip"
+    universityId ? { university_id: universityId } : "skip",
   );
   const signals = useQuery(
     api.signals.listByUniversity,
-    universityId ? { university_id: universityId } : "skip"
+    universityId ? { university_id: universityId } : "skip",
   );
   const scores = useQuery(
     api.priorityScores.getByUniversity,
-    universityId ? { university_id: universityId } : "skip"
+    universityId ? { university_id: universityId } : "skip",
   );
-  
-  const runEnrichmentChain = useAction(api.actions.orchestrator.runEnrichmentChain);
+
+  const runEnrichmentChain = useAction(
+    api.actions.orchestrator.runEnrichmentChain,
+  );
   const [isDeepEnriching, setIsDeepEnriching] = useState(false);
   const [enrichStep, setEnrichStep] = useState<string | null>(null);
 
   const { withKeyCheck, keyModal } = useRequireGeminiKey();
 
-  const handleDeepEnrich = async () => {
+  const handleDeepEnrich = useCallback(async () => {
     if (!universityId) return;
     setIsDeepEnriching(true);
     setEnrichStep("Scraping NIRF, AISHE & NAAC sources…");
@@ -58,7 +64,7 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
     } finally {
       setIsDeepEnriching(false);
     }
-  };
+  }, [universityId, runEnrichmentChain]);
 
   if (!universityId) return null;
 
@@ -76,23 +82,33 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
           </h2>
           <div className="flex flex-col gap-1 mt-1">
             <p className="text-muted-foreground text-sm">
-              {university?.city ? `${university.city}, ` : ''}{university?.state} {university?.zip_code}
+              {university?.city ? `${university.city}, ` : ""}
+              {university?.state} {university?.zip_code}
             </p>
             {university?.website && (
-              <a 
-                href={university.website.startsWith('http') ? university.website : `https://${university.website}`}
+              <a
+                href={
+                  university.website.startsWith("http")
+                    ? university.website
+                    : `https://${university.website}`
+                }
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-sm text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 w-fit mt-0.5"
               >
-                <span className="font-medium">{university.website.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '')}</span>
+                <span className="font-medium">
+                  {university.website
+                    .replace(/^https?:\/\/(www\.)?/, "")
+                    .replace(/\/$/, "")}
+                </span>
                 <span className="text-xs">↗</span>
               </a>
             )}
-            
+
             <button
               onClick={withKeyCheck(handleDeepEnrich)}
               disabled={isDeepEnriching}
+              aria-label="Run deep enrichment"
               className={`mt-3 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all w-fit shadow-sm ${
                 isDeepEnriching
                   ? "bg-muted text-muted-foreground cursor-not-allowed shadow-none"
@@ -103,9 +119,25 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
             >
               {isDeepEnriching ? (
                 <span className="flex items-center gap-1.5">
-                  <svg className="animate-spin h-3 w-3 text-muted-foreground" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  <svg
+                    className="animate-spin h-3 w-3 text-muted-foreground"
+                    xmlns="http://www.w3.org/2000/svg"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      className="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      strokeWidth="4"
+                    ></circle>
+                    <path
+                      className="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    ></path>
                   </svg>
                   {enrichStep ?? "Enriching…"}
                 </span>
@@ -116,11 +148,11 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
                 </>
               )}
             </button>
-            
           </div>
         </div>
         <button
           onClick={onClose}
+          aria-label="Close details panel"
           className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-full transition-colors self-start"
         >
           <XMarkIcon className="h-6 w-6" />
@@ -130,17 +162,33 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
       <div className="flex-1 overflow-y-auto p-6 space-y-8">
         <div className="grid grid-cols-2 gap-4">
           <div className="bg-card border border-card-border/60 p-4 rounded-xl shadow-sm">
-            <p className="text-muted-foreground text-[10px] uppercase font-bold mb-1 tracking-wider">Students</p>
-            <p className="text-foreground font-semibold">{university?.student_count?.toLocaleString() || "-"}</p>
+            <p className="text-muted-foreground text-[10px] uppercase font-bold mb-1 tracking-wider">
+              Students
+            </p>
+            <p className="text-foreground font-semibold">
+              {university?.student_count?.toLocaleString() || "-"}
+            </p>
           </div>
           <div className="bg-card border border-card-border/60 p-4 rounded-xl shadow-sm">
-            <p className="text-muted-foreground text-[10px] uppercase font-bold mb-1 tracking-wider">UGC Status</p>
-            <p 
+            <p className="text-muted-foreground text-[10px] uppercase font-bold mb-1 tracking-wider">
+              UGC Status
+            </p>
+            <p
               className="text-foreground font-semibold cursor-help"
-              title={university?.ugc_status ? [
-                university.ugc_status.includes('2(f)') ? "Section 2(f) of the UGC Act, 1956: Provision for granting degrees to students." : null,
-                university.ugc_status.includes('12(B)') ? "Section 12(B) of the UGC Act, 1956: Eligibility to receive central assistance (grants) from UGC/Government of India." : null,
-              ].filter(Boolean).join('\n\n') : "UGC Official Recognition Status"}
+              title={
+                university?.ugc_status
+                  ? [
+                      university.ugc_status.includes("2(f)")
+                        ? "Section 2(f) of the UGC Act, 1956: Provision for granting degrees to students."
+                        : null,
+                      university.ugc_status.includes("12(B)")
+                        ? "Section 12(B) of the UGC Act, 1956: Eligibility to receive central assistance (grants) from UGC/Government of India."
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join("\n\n")
+                  : "UGC Official Recognition Status"
+              }
             >
               {university?.ugc_status || "-"}
             </p>
@@ -150,21 +198,33 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
         {/* UGC Leadership & Address */}
         <div className="bg-card border border-card-border/60 rounded-xl overflow-hidden shadow-sm">
           <div className="bg-muted px-5 py-3 border-b border-card-border/60">
-            <h3 className="text-sm font-semibold font-heading tracking-wide text-foreground">UGC Information</h3>
+            <h3 className="text-sm font-semibold font-heading tracking-wide text-foreground">
+              UGC Information
+            </h3>
           </div>
           <div className="p-5 space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div>
-                <p className="text-muted-foreground text-[10px] uppercase font-bold">Vice Chancellor</p>
-                <p className="text-zinc-200 text-sm">{university?.vc_name || "N/A"}</p>
+                <p className="text-muted-foreground text-[10px] uppercase font-bold">
+                  Vice Chancellor
+                </p>
+                <p className="text-zinc-200 text-sm">
+                  {university?.vc_name || "N/A"}
+                </p>
               </div>
               <div>
-                <p className="text-muted-foreground text-[10px] uppercase font-bold">Registrar</p>
-                <p className="text-zinc-200 text-sm">{university?.registrar_name || "N/A"}</p>
+                <p className="text-muted-foreground text-[10px] uppercase font-bold">
+                  Registrar
+                </p>
+                <p className="text-zinc-200 text-sm">
+                  {university?.registrar_name || "N/A"}
+                </p>
               </div>
             </div>
             <div>
-              <p className="text-muted-foreground text-[10px] uppercase font-bold">Full Address</p>
+              <p className="text-muted-foreground text-[10px] uppercase font-bold">
+                Full Address
+              </p>
               <p className="text-zinc-200 text-sm leading-relaxed">
                 {university?.address || "No detailed address recorded."}
               </p>
@@ -173,10 +233,16 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
         </div>
 
         {/* ── CARD 1: NIRF Student Strength (program-wise) ─────────────────── */}
-        {(university?.demographics?.nirf_programs?.length || university?.demographics?.nirf_total) ? (
+        {university?.demographics?.nirf_programs?.length ||
+        university?.demographics?.nirf_total ? (
           <div className="bg-card border border-card-border/60 rounded-xl overflow-hidden shadow-sm">
             <div className="bg-muted px-5 py-3 border-b border-card-border/60 flex justify-between items-center">
-              <h3 className="text-sm font-semibold font-heading tracking-wide text-foreground">Student Strength <span className="text-muted-foreground font-normal">(NIRF)</span></h3>
+              <h3 className="text-sm font-semibold font-heading tracking-wide text-foreground">
+                Student Strength{" "}
+                <span className="text-muted-foreground font-normal">
+                  (NIRF)
+                </span>
+              </h3>
               {university.demographics?.nirf_source && (
                 <span className="text-[10px] uppercase font-bold text-sky-400/80 bg-sky-400/10 px-2 py-0.5 rounded border border-sky-500/20">
                   {university.demographics.nirf_source}
@@ -186,50 +252,88 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
 
             <div className="px-5 py-4 space-y-3">
               {/* Program rows table */}
-              {university.demographics.nirf_programs && university.demographics.nirf_programs.length > 0 && (
-                <div className="w-full text-xs">
-                  {/* Header */}
-                  <div className="grid grid-cols-4 gap-2 text-muted-foreground uppercase font-bold text-[10px] pb-2 border-b border-card-border/60">
-                    <span className="col-span-2">Program</span>
-                    <span className="text-right text-blue-400">Male</span>
-                    <span className="text-right text-pink-400">Female</span>
+              {university.demographics.nirf_programs &&
+                university.demographics.nirf_programs.length > 0 && (
+                  <div className="w-full text-xs">
+                    {/* Header */}
+                    <div className="grid grid-cols-4 gap-2 text-muted-foreground uppercase font-bold text-[10px] pb-2 border-b border-card-border/60">
+                      <span className="col-span-2">Program</span>
+                      <span className="text-right text-blue-400">Male</span>
+                      <span className="text-right text-pink-400">Female</span>
+                    </div>
+                    {/* Program rows */}
+                    {university.demographics.nirf_programs.map(
+                      (
+                        prog: { name: string; male?: number; female?: number },
+                        i: number,
+                      ) => (
+                        <div
+                          key={i}
+                          className="grid grid-cols-4 gap-2 py-1.5 border-b border-card-border/30 last:border-b-0"
+                        >
+                          <span className="col-span-2 text-foreground truncate">
+                            {prog.name}
+                          </span>
+                          <span className="text-right text-zinc-200">
+                            {prog.male?.toLocaleString() ?? "—"}
+                          </span>
+                          <span className="text-right text-zinc-200">
+                            {prog.female?.toLocaleString() ?? "—"}
+                          </span>
+                        </div>
+                      ),
+                    )}
+                    {/* Totals row */}
+                    {(university.demographics.nirf_total ||
+                      university.demographics.nirf_male != null) && (
+                      <div className="grid grid-cols-4 gap-2 py-2 mt-1 border-t-2 border-card-border/50">
+                        <span className="col-span-2 text-foreground font-bold text-[11px]">
+                          Total —{" "}
+                          {(
+                            university.demographics.nirf_total ??
+                            (university.demographics.nirf_male ?? 0) +
+                              (university.demographics.nirf_female ?? 0)
+                          ).toLocaleString()}
+                        </span>
+                        <span className="text-right text-blue-300 font-bold">
+                          {university.demographics.nirf_male?.toLocaleString() ??
+                            "—"}
+                        </span>
+                        <span className="text-right text-pink-300 font-bold">
+                          {university.demographics.nirf_female?.toLocaleString() ??
+                            "—"}
+                        </span>
+                      </div>
+                    )}
                   </div>
-                  {/* Program rows */}
-                  {university.demographics.nirf_programs.map((prog, i) => (
-                    <div key={i} className="grid grid-cols-4 gap-2 py-1.5 border-b border-card-border/30 last:border-b-0">
-                      <span className="col-span-2 text-foreground truncate">{prog.name}</span>
-                      <span className="text-right text-zinc-200">{prog.male?.toLocaleString() ?? "—"}</span>
-                      <span className="text-right text-zinc-200">{prog.female?.toLocaleString() ?? "—"}</span>
-                    </div>
-                  ))}
-                  {/* Totals row */}
-                  {(university.demographics.nirf_total || university.demographics.nirf_male != null) && (
-                    <div className="grid grid-cols-4 gap-2 py-2 mt-1 border-t-2 border-card-border/50">
-                      <span className="col-span-2 text-foreground font-bold text-[11px]">
-                        Total — {(university.demographics.nirf_total ?? (
-                          (university.demographics.nirf_male ?? 0) + (university.demographics.nirf_female ?? 0)
-                        )).toLocaleString()}
-                      </span>
-                      <span className="text-right text-blue-300 font-bold">{university.demographics.nirf_male?.toLocaleString() ?? "—"}</span>
-                      <span className="text-right text-pink-300 font-bold">{university.demographics.nirf_female?.toLocaleString() ?? "—"}</span>
-                    </div>
-                  )}
-                </div>
-              )}
+                )}
 
               {/* Fallback: only totals, no program breakdown */}
-              {(!university.demographics.nirf_programs?.length) && university.demographics.nirf_total && (
-                <div className="flex items-center justify-between">
-                  <div>
-                    <p className="text-muted-foreground text-[10px] uppercase font-bold">Total Students</p>
-                    <p className="text-foreground text-2xl font-bold">{university.demographics.nirf_total.toLocaleString()}</p>
+              {!university.demographics.nirf_programs?.length &&
+                university.demographics.nirf_total && (
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-muted-foreground text-[10px] uppercase font-bold">
+                        Total Students
+                      </p>
+                      <p className="text-foreground text-2xl font-bold">
+                        {university.demographics.nirf_total.toLocaleString()}
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-blue-400 text-xs">
+                        Male:{" "}
+                        {university.demographics.nirf_male?.toLocaleString() ??
+                          "—"}
+                      </p>
+                      <p className="text-pink-400 text-xs">
+                        Female:{" "}
+                        {university.demographics.nirf_female?.toLocaleString() ??
+                          "—"}
+                      </p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <p className="text-blue-400 text-xs">Male: {university.demographics.nirf_male?.toLocaleString() ?? "—"}</p>
-                    <p className="text-pink-400 text-xs">Female: {university.demographics.nirf_female?.toLocaleString() ?? "—"}</p>
-                  </div>
-                </div>
-              )}
+                )}
             </div>
           </div>
         ) : null}
@@ -237,7 +341,12 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
         {/* ── CARD 2: AISHE + NAAC SSR (hostelite breakdown) ──────────────────── */}
         <div className="bg-card border border-card-border/60 rounded-xl overflow-hidden shadow-sm">
           <div className="bg-muted px-5 py-3 border-b border-card-border/60 flex justify-between items-center">
-            <h3 className="text-sm font-semibold font-heading tracking-wide text-foreground">Student Demographics <span className="text-muted-foreground font-normal">(AISHE · NAAC · SSR)</span></h3>
+            <h3 className="text-sm font-semibold font-heading tracking-wide text-foreground">
+              Student Demographics{" "}
+              <span className="text-muted-foreground font-normal">
+                (AISHE · NAAC · SSR)
+              </span>
+            </h3>
             {university?.demographics?.source ? (
               <span className="text-[10px] uppercase font-bold text-emerald-400/80 bg-emerald-400/10 px-2 py-0.5 rounded border border-emerald-500/20">
                 {university.demographics.source}
@@ -255,23 +364,47 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
 
           {!university?.demographics ? (
             <div className="p-5 flex flex-col items-center gap-2 text-center">
-              <p className="text-muted-foreground text-sm">No demographic data available yet.</p>
-              <p className="text-zinc-600 text-xs">Run <span className="text-emerald-400 font-medium">Deep Enrich</span> above to pull the latest NIRF, AISHE &amp; NAAC data.</p>
+              <p className="text-muted-foreground text-sm">
+                No demographic data available yet.
+              </p>
+              <p className="text-zinc-600 text-xs">
+                Run{" "}
+                <span className="text-emerald-400 font-medium">
+                  Deep Enrich
+                </span>{" "}
+                above to pull the latest NIRF, AISHE &amp; NAAC data.
+              </p>
             </div>
-          ) : !(university.demographics.total_students || university.demographics.hostelites || university.demographics.day_scholars) ? (
+          ) : !(
+              university.demographics.total_students ||
+              university.demographics.hostelites ||
+              university.demographics.day_scholars
+            ) ? (
             <div className="p-5 flex flex-col items-center gap-2 text-center">
-              <p className="text-muted-foreground text-sm">Hostelite breakdown not yet available.</p>
-              <p className="text-zinc-600 text-xs">Re-run <span className="text-emerald-400 font-medium">Deep Enrich</span> — the system will search NAAC SSR &amp; AISHE reports.</p>
+              <p className="text-muted-foreground text-sm">
+                Hostelite breakdown not yet available.
+              </p>
+              <p className="text-zinc-600 text-xs">
+                Re-run{" "}
+                <span className="text-emerald-400 font-medium">
+                  Deep Enrich
+                </span>{" "}
+                — the system will search NAAC SSR &amp; AISHE reports.
+              </p>
             </div>
           ) : (
             <div className="p-5">
               <div className="grid grid-cols-3 gap-y-6 gap-x-4">
                 {/* Total Students */}
                 <div className="col-span-1 space-y-2 border-r border-card-border/50 pr-4">
-                  <p className="text-muted-foreground text-[10px] uppercase font-bold">Total Students</p>
+                  <p className="text-muted-foreground text-[10px] uppercase font-bold">
+                    Total Students
+                  </p>
                   <p className="text-foreground text-lg font-bold">
-                    {(university.demographics.total_students ||
-                      ((university.demographics.total_students_male ?? 0) + (university.demographics.total_students_female ?? 0)) ||
+                    {(
+                      university.demographics.total_students ||
+                      (university.demographics.total_students_male ?? 0) +
+                        (university.demographics.total_students_female ?? 0) ||
                       0
                     ).toLocaleString() || "—"}
                   </p>
@@ -279,13 +412,15 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
                     <div className="flex justify-between">
                       <span className="text-blue-400">Male:</span>
                       <span className="text-foreground">
-                        {university.demographics.total_students_male?.toLocaleString() ?? "—"}
+                        {university.demographics.total_students_male?.toLocaleString() ??
+                          "—"}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-pink-400">Female:</span>
                       <span className="text-foreground">
-                        {university.demographics.total_students_female?.toLocaleString() ?? "—"}
+                        {university.demographics.total_students_female?.toLocaleString() ??
+                          "—"}
                       </span>
                     </div>
                   </div>
@@ -293,25 +428,34 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
 
                 {/* Day Scholars */}
                 <div className="col-span-1 space-y-2 border-r border-card-border/50 pr-4">
-                  <p className="text-muted-foreground text-[10px] uppercase font-bold">Day Scholars</p>
+                  <p className="text-muted-foreground text-[10px] uppercase font-bold">
+                    Day Scholars
+                  </p>
                   <p className="text-foreground text-lg font-bold">
                     {university.demographics.day_scholars != null
                       ? university.demographics.day_scholars.toLocaleString()
-                      : ((university.demographics.day_scholars_male ?? 0) + (university.demographics.day_scholars_female ?? 0)) > 0
-                        ? ((university.demographics.day_scholars_male ?? 0) + (university.demographics.day_scholars_female ?? 0)).toLocaleString()
+                      : (university.demographics.day_scholars_male ?? 0) +
+                            (university.demographics.day_scholars_female ?? 0) >
+                          0
+                        ? (
+                            (university.demographics.day_scholars_male ?? 0) +
+                            (university.demographics.day_scholars_female ?? 0)
+                          ).toLocaleString()
                         : "—"}
                   </p>
                   <div className="flex flex-col gap-1 text-xs">
                     <div className="flex justify-between">
                       <span className="text-blue-400">Male:</span>
                       <span className="text-foreground">
-                        {university.demographics.day_scholars_male?.toLocaleString() ?? "—"}
+                        {university.demographics.day_scholars_male?.toLocaleString() ??
+                          "—"}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-pink-400">Female:</span>
                       <span className="text-foreground">
-                        {university.demographics.day_scholars_female?.toLocaleString() ?? "—"}
+                        {university.demographics.day_scholars_female?.toLocaleString() ??
+                          "—"}
                       </span>
                     </div>
                   </div>
@@ -319,25 +463,34 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
 
                 {/* Hostelites */}
                 <div className="col-span-1 space-y-2">
-                  <p className="text-muted-foreground text-[10px] uppercase font-bold">Hostelites</p>
+                  <p className="text-muted-foreground text-[10px] uppercase font-bold">
+                    Hostelites
+                  </p>
                   <p className="text-foreground text-lg font-bold">
                     {university.demographics.hostelites != null
                       ? university.demographics.hostelites.toLocaleString()
-                      : ((university.demographics.hostelites_male ?? 0) + (university.demographics.hostelites_female ?? 0)) > 0
-                        ? ((university.demographics.hostelites_male ?? 0) + (university.demographics.hostelites_female ?? 0)).toLocaleString()
+                      : (university.demographics.hostelites_male ?? 0) +
+                            (university.demographics.hostelites_female ?? 0) >
+                          0
+                        ? (
+                            (university.demographics.hostelites_male ?? 0) +
+                            (university.demographics.hostelites_female ?? 0)
+                          ).toLocaleString()
                         : "—"}
                   </p>
                   <div className="flex flex-col gap-1 text-xs">
                     <div className="flex justify-between">
                       <span className="text-blue-400">Male:</span>
                       <span className="text-foreground">
-                        {university.demographics.hostelites_male?.toLocaleString() ?? "—"}
+                        {university.demographics.hostelites_male?.toLocaleString() ??
+                          "—"}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-pink-400">Female:</span>
                       <span className="text-foreground">
-                        {university.demographics.hostelites_female?.toLocaleString() ?? "—"}
+                        {university.demographics.hostelites_female?.toLocaleString() ??
+                          "—"}
                       </span>
                     </div>
                   </div>
@@ -345,42 +498,54 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
               </div>
 
               {/* Hostelite occupancy bar */}
-              {!!university.demographics.total_students && !!university.demographics.hostelites && (
-                <div className="mt-5 pt-4 border-t border-card-border/50">
-                  <div className="flex items-center justify-between mb-1.5">
-                    <span className="text-muted-foreground text-[10px] uppercase font-bold">Hostelite Occupancy</span>
-                    <span className="text-emerald-400 text-xs font-bold">
-                      {Math.round((university.demographics.hostelites / university.demographics.total_students) * 100)}%
-                    </span>
+              {!!university.demographics.total_students &&
+                !!university.demographics.hostelites && (
+                  <div className="mt-5 pt-4 border-t border-card-border/50">
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="text-muted-foreground text-[10px] uppercase font-bold">
+                        Hostelite Occupancy
+                      </span>
+                      <span className="text-emerald-400 text-xs font-bold">
+                        {Math.round(
+                          (university.demographics.hostelites /
+                            university.demographics.total_students) *
+                            100,
+                        )}
+                        %
+                      </span>
+                    </div>
+                    <div className="w-full bg-muted border border-card-border/60 h-2 rounded-full overflow-hidden">
+                      <div
+                        className="bg-emerald-500 h-full rounded-full"
+                        style={{
+                          width: `${Math.min(100, Math.round((university.demographics.hostelites / university.demographics.total_students) * 100))}%`,
+                        }}
+                      />
+                    </div>
+                    <p className="text-zinc-600 text-[10px] mt-1">
+                      {university.demographics.hostelites.toLocaleString()} of{" "}
+                      {university.demographics.total_students.toLocaleString()}{" "}
+                      students live on campus
+                    </p>
                   </div>
-                  <div className="w-full bg-muted border border-card-border/60 h-2 rounded-full overflow-hidden">
-                    <div
-                      className="bg-emerald-500 h-full rounded-full"
-                      style={{
-                        width: `${Math.min(100, Math.round((university.demographics.hostelites / university.demographics.total_students) * 100))}%`,
-                      }}
-                    />
-                  </div>
-                  <p className="text-zinc-600 text-[10px] mt-1">
-                    {university.demographics.hostelites.toLocaleString()} of{" "}
-                    {university.demographics.total_students.toLocaleString()} students live on campus
-                  </p>
-                </div>
-              )}
+                )}
             </div>
           )}
         </div>
-
 
         {scores && (
           <section>
             <div className="flex items-center gap-2 mb-4">
               <ChartBarIcon className="h-5 w-5 text-blue-400" />
-              <h3 className="text-lg font-semibold font-heading text-foreground">Priority Scoring</h3>
+              <h3 className="text-lg font-semibold font-heading text-foreground">
+                Priority Scoring
+              </h3>
             </div>
             <div className="bg-card border border-card-border/60 shadow-sm rounded-xl p-5 space-y-4">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-muted-foreground font-medium tracking-wide text-sm uppercase">Final Health Score</span>
+                <span className="text-muted-foreground font-medium tracking-wide text-sm uppercase">
+                  Final Health Score
+                </span>
                 <span className="text-3xl font-bold font-heading text-blue-400">
                   {Math.round(scores.final_score)}
                 </span>
@@ -398,18 +563,24 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
         <section>
           <div className="flex items-center gap-2 mb-4">
             <UserGroupIcon className="h-5 w-5 text-blue-400" />
-            <h3 className="text-lg font-semibold font-heading text-foreground">Stakeholders</h3>
+            <h3 className="text-lg font-semibold font-heading text-foreground">
+              Stakeholders
+            </h3>
             {stakeholders && stakeholders.length > 0 && (
-              <span className="ml-auto text-[10px] bg-muted/50 text-muted-foreground px-2 py-0.5 rounded-md font-bold">{stakeholders.length} found</span>
+              <span className="ml-auto text-[10px] bg-muted/50 text-muted-foreground px-2 py-0.5 rounded-md font-bold">
+                {stakeholders.length} found
+              </span>
             )}
           </div>
           <div className="space-y-3">
             {stakeholders === undefined ? (
               <div className="h-20 bg-card/50 animate-pulse rounded-xl" />
             ) : stakeholders.length === 0 ? (
-              <p className="text-muted-foreground text-sm italic">No stakeholders found yet.</p>
+              <p className="text-muted-foreground text-sm italic">
+                No stakeholders found yet.
+              </p>
             ) : (
-              stakeholders.map((s) => (
+              stakeholders.map((s: Doc<"stakeholders">) => (
                 <div
                   key={s._id}
                   className="bg-card border border-card-border/60 p-4 rounded-xl shadow-sm"
@@ -417,18 +588,26 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <p className="text-foreground font-medium">{s.name || "Unspecified Contact"}</p>
+                        <p className="text-foreground font-medium">
+                          {s.name || "Unspecified Contact"}
+                        </p>
                         {s.source && (
-                          <span className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded ${
-                            s.source === "deep_enrichment"
-                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                              : "bg-zinc-700/50 text-muted-foreground"
-                          }`}>
-                            {s.source === "deep_enrichment" ? "AI Enriched" : "UGC"}
+                          <span
+                            className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded ${
+                              s.source === "deep_enrichment"
+                                ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                                : "bg-zinc-700/50 text-muted-foreground"
+                            }`}
+                          >
+                            {s.source === "deep_enrichment"
+                              ? "AI Enriched"
+                              : "UGC"}
                           </span>
                         )}
                       </div>
-                      <p className="text-muted-foreground text-xs mt-0.5">{s.role || "N/A"}</p>
+                      <p className="text-muted-foreground text-xs mt-0.5">
+                        {s.role || "N/A"}
+                      </p>
                     </div>
                     <div className="flex flex-col items-end gap-2 shrink-0">
                       {s.email && (
@@ -471,15 +650,27 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
         <section>
           <div className="flex items-center gap-2 mb-4">
             <SignalIcon className="h-5 w-5 text-blue-400" />
-            <h3 className="text-lg font-semibold font-heading text-foreground">AI Signals</h3>
+            <h3 className="text-lg font-semibold font-heading text-foreground">
+              AI Signals
+            </h3>
           </div>
-          
+
           <div className="flex flex-wrap gap-2 mb-4 items-center">
-            <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">Sources Used:</span>
-            <span className="px-2 py-0.5 bg-blue-500/10 text-blue-400 text-[10px] font-bold uppercase rounded border border-blue-500/20">LinkedIn Data</span>
-            <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[10px] font-bold uppercase rounded border border-emerald-500/20">Google News APIs</span>
-            <span className="px-2 py-0.5 bg-amber-500/10 text-amber-400 text-[10px] font-bold uppercase rounded border border-amber-500/20">Google Images</span>
-            <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[10px] font-bold uppercase rounded border border-emerald-500/20">Serper Search</span>
+            <span className="text-[10px] text-muted-foreground uppercase font-bold tracking-wider">
+              Sources Used:
+            </span>
+            <span className="px-2 py-0.5 bg-blue-500/10 text-blue-400 text-[10px] font-bold uppercase rounded border border-blue-500/20">
+              LinkedIn Data
+            </span>
+            <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[10px] font-bold uppercase rounded border border-emerald-500/20">
+              Google News APIs
+            </span>
+            <span className="px-2 py-0.5 bg-amber-500/10 text-amber-400 text-[10px] font-bold uppercase rounded border border-amber-500/20">
+              Google Images
+            </span>
+            <span className="px-2 py-0.5 bg-emerald-500/10 text-emerald-400 text-[10px] font-bold uppercase rounded border border-emerald-500/20">
+              Serper Search
+            </span>
           </div>
 
           <div className="space-y-4">
@@ -488,43 +679,43 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
             ) : signals.length === 0 ? (
               <></>
             ) : (
-              signals.map((sig) => {
+              signals.map((sig: Doc<"universitySignals">) => {
                 let host = "Source";
                 try {
                   if (sig.source_url) {
-                    host = new URL(sig.source_url).hostname.replace('www.', '');
+                    host = new URL(sig.source_url).hostname.replace("www.", "");
                   }
-                } catch (_e) {}
-                
+                } catch {}
+
                 return (
                   <div
                     key={sig._id}
                     className="bg-card border border-card-border/60 p-4 rounded-xl flex flex-col gap-2 shadow-sm"
                   >
-                     <div className="flex items-center justify-between">
-                       <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">
-                         {sig.signal_type}
-                       </span>
-                       <span className="text-[10px] text-zinc-600">
-                         {new Date(sig.created_at).toLocaleDateString()}
-                       </span>
-                     </div>
-                     <p className="text-foreground text-sm leading-relaxed line-clamp-3">
-                       {sig.content}
-                     </p>
-                     {sig.source_url && (
-                        <a
-                          href={sig.source_url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="flex items-center gap-1.5 mt-1 text-blue-400 hover:text-blue-300 w-fit transition-colors group"
-                        >
-                          <span className="bg-muted border border-card-border/60 text-foreground text-[10px] font-mono px-1.5 py-0.5 rounded group-hover:bg-muted/80 transition-colors">
-                           {host}
-                         </span>
-                         <span className="text-xs font-medium">Link ↗</span>
-                       </a>
-                     )}
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] uppercase tracking-wider font-bold text-muted-foreground">
+                        {sig.signal_type}
+                      </span>
+                      <span className="text-[10px] text-zinc-600">
+                        {new Date(sig.created_at).toLocaleDateString()}
+                      </span>
+                    </div>
+                    <p className="text-foreground text-sm leading-relaxed line-clamp-3">
+                      {sig.content}
+                    </p>
+                    {sig.source_url && (
+                      <a
+                        href={sig.source_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex items-center gap-1.5 mt-1 text-blue-400 hover:text-blue-300 w-fit transition-colors group"
+                      >
+                        <span className="bg-muted border border-card-border/60 text-foreground text-[10px] font-mono px-1.5 py-0.5 rounded group-hover:bg-muted/80 transition-colors">
+                          {host}
+                        </span>
+                        <span className="text-xs font-medium">Link ↗</span>
+                      </a>
+                    )}
                   </div>
                 );
               })
@@ -536,3 +727,5 @@ export function UniversityDetail({ universityId, onClose }: UniversityDetailProp
     </div>
   );
 }
+
+export const UniversityDetailMemo = React.memo(UniversityDetail);

@@ -1,4 +1,9 @@
-import { mutation, query, internalMutation, internalQuery } from "./_generated/server";
+import {
+  mutation,
+  query,
+  internalMutation,
+  internalQuery,
+} from "./_generated/server";
 import { v } from "convex/values";
 import { validateAuth } from "./lib/auth_utils";
 
@@ -9,21 +14,21 @@ export const listAll = query({
     return await Promise.all(
       proposals.map(async (p) => {
         const uni = await ctx.db.get(p.university_id);
-        
+
         let stakeholderText = "General Proposal";
         if (p.stakeholder_id) {
           const st = await ctx.db.get(p.stakeholder_id);
           if (st) {
-             stakeholderText = `${st.name || "Unknown"} ${st.role ? `(${st.role})` : ""}`;
+            stakeholderText = `${st.name || "Unknown"} ${st.role ? `(${st.role})` : ""}`;
           }
         }
 
-        return { 
-          ...p, 
+        return {
+          ...p,
           university_name: uni?.university_name ?? "Unknown",
-          stakeholder_details: stakeholderText
+          stakeholder_details: stakeholderText,
         };
-      })
+      }),
     );
   },
 });
@@ -59,9 +64,9 @@ export const update = mutation({
     proposal_json: v.optional(v.string()),
     recommended_modules: v.optional(v.array(v.string())),
     pdf_storage_id: v.optional(v.id("_storage")),
-    status: v.optional(v.union(
-      v.literal("draft"), v.literal("ready"), v.literal("sent")
-    )),
+    status: v.optional(
+      v.union(v.literal("draft"), v.literal("ready"), v.literal("sent")),
+    ),
   },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
@@ -73,6 +78,18 @@ export const update = mutation({
 export const getInternal = internalQuery({
   args: { id: v.id("proposals") },
   handler: async (ctx, args) => ctx.db.get(args.id),
+});
+
+export const listByUniversityInternal = internalQuery({
+  args: { university_id: v.id("universities") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("proposals")
+      .withIndex("by_university", (q) =>
+        q.eq("university_id", args.university_id),
+      )
+      .collect();
+  },
 });
 
 export const createInternal = internalMutation({
@@ -92,7 +109,6 @@ export const createInternal = internalMutation({
   },
 });
 
-
 export const updateInternal = internalMutation({
   args: {
     id: v.id("proposals"),
@@ -101,9 +117,19 @@ export const updateInternal = internalMutation({
     proposal_json: v.optional(v.string()),
     recommended_modules: v.optional(v.array(v.string())),
     pdf_storage_id: v.optional(v.id("_storage")),
-    status: v.optional(v.union(
-      v.literal("draft"), v.literal("ready"), v.literal("sent")
-    )),
+    status: v.optional(
+      v.union(v.literal("draft"), v.literal("ready"), v.literal("sent")),
+    ),
+    calendar_event_id: v.optional(v.string()),
+    meet_link: v.optional(v.string()),
+    calendar_event_status: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("confirmed"),
+        v.literal("cancelled"),
+      ),
+    ),
+    meeting_date: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const { id, ...fields } = args;
@@ -137,7 +163,6 @@ export const remove = mutation({
     await ctx.db.delete(args.id);
   },
 });
-
 
 export const cleanupOldProposalsInternal = internalMutation({
   args: { days: v.number() },

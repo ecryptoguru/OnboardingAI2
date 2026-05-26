@@ -4,7 +4,8 @@ import { Type, Schema } from "@google/genai";
  * Centralized system prompts for AI agents.
  */
 
-export const SCRAPER_SYSTEM_PROMPT = (targetRoles: string[]) => `
+export const SCRAPER_SYSTEM_PROMPT = (targetRoles: string[]) =>
+  `
 You are a highly accurate data extraction system.
 Your job is to read the provided text from a University website and extract key stakeholders matching or closely related to the following roles:
 ${targetRoles.join(", ")}
@@ -22,15 +23,21 @@ export const SCRAPER_SCHEMA: Schema = {
         type: Type.OBJECT,
         properties: {
           name: { type: Type.STRING, description: "Full Name or null" },
-          role: { type: Type.STRING, description: "Exact role or closest match from the list" },
-          email: { type: Type.STRING, description: "email@example.com or null" },
-          phone: { type: Type.STRING, description: "phone number or null" }
+          role: {
+            type: Type.STRING,
+            description: "Exact role or closest match from the list",
+          },
+          email: {
+            type: Type.STRING,
+            description: "email@example.com or null",
+          },
+          phone: { type: Type.STRING, description: "phone number or null" },
         },
-        required: ["name", "role", "email", "phone"]
-      }
-    }
+        required: ["name", "role", "email", "phone"],
+      },
+    },
   },
-  required: ["stakeholders"]
+  required: ["stakeholders"],
 };
 
 export const SCORING_SYSTEM_PROMPT = `
@@ -48,9 +55,13 @@ export const SCORING_SCHEMA: Schema = {
   type: Type.OBJECT,
   properties: {
     ai_score: { type: Type.NUMBER, description: "Score between 0 and 10" },
-    ai_reasoning: { type: Type.STRING, description: "1-2 sentence justification for this score based on their specific data." }
+    ai_reasoning: {
+      type: Type.STRING,
+      description:
+        "1-2 sentence justification for this score based on their specific data.",
+    },
   },
-  required: ["ai_score", "ai_reasoning"]
+  required: ["ai_score", "ai_reasoning"],
 };
 
 export const FLASH_EXTRACTION_PROMPT = `
@@ -80,16 +91,16 @@ Before finalizing the stakeholders array, you MUST deduplicate entries:
 Output VALID JSON ONLY matching the provided schema. Do not include markdown formatting like \`\`\`json.
 `.trim();
 
-
-// ─── Gemini 3.1 Pro Optimised Deep Enrichment Prompt ─────────────────────────
-// This prompt is designed for Pro's chain-of-thought reasoning and 1M token context.
+// ─── Gemini 3.5 Flash Deep Enrichment Prompt ─────────────────────────
+// Designed for Flash's 1M context window and fast structured extraction.
 // Key optimisations:
-//   1. Numbered reasoning steps — Pro's internal thinking follows these systematically
-//   2. Concrete table format examples — anchors Pro to real NIRF/AISHE data structures
-//   3. Regex-style contact extraction patterns — Pro pattern-matches across the full context
+//   1. Numbered reasoning steps — model follows these systematically
+//   2. Concrete table format examples — anchors to real NIRF/AISHE data structures
+//   3. Regex-style contact extraction patterns — pattern-matches across the full context
 //   4. Explicit deduplication rules — prevents same person appearing multiple times
 
-export const DEEP_ENRICHMENT_SYNTHESIS_PROMPT = (targetRoles: string[]) => `
+export const DEEP_ENRICHMENT_SYNTHESIS_PROMPT = (targetRoles: string[]) =>
+  `
 You are a world-class Indian higher education data analyst with access to data sources including NIRF, AISHE, NAAC SSR, Anti-Ragging Statutory Disclosures, and university websites. You have been given raw scraped text from MULTIPLE web sources about one specific university.
 
 Your mission: extract the most complete, accurate JSON profile possible — using ONLY information present in the context. Never hallucinate, never invent numbers. Think step by step.
@@ -263,58 +274,129 @@ export const DEEP_ENRICHMENT_SCHEMA: Schema = {
   properties: {
     demographics: {
       type: Type.OBJECT,
-      description: "Student population data extracted from NIRF and AISHE/NAAC sources. Two independent blocks: nirf_* fields from NIRF program-wise tables, and the remaining fields from AISHE/NAAC SSR. All numeric fields are integers. Use null when data not found — NEVER use 0 for a missing field.",
+      description:
+        "Student population data extracted from NIRF and AISHE/NAAC sources. Two independent blocks: nirf_* fields from NIRF program-wise tables, and the remaining fields from AISHE/NAAC SSR. All numeric fields are integers. Use null when data not found — NEVER use 0 for a missing field.",
       properties: {
         // ── NIRF Block: program-wise student strength ───────────────────────
-        nirf_source: { type: Type.STRING, nullable: true, description: "NIRF data year, e.g. 'NIRF 2023-24' or 'NIRF 2024-25'" },
-        nirf_total: { type: Type.STRING, nullable: true, description: "Sum of all program rows Male+Female. Compute this by adding every row." },
-        nirf_male: { type: Type.STRING, nullable: true, description: "Sum of all Male values across all program rows." },
-        nirf_female: { type: Type.STRING, nullable: true, description: "Sum of all Female values across all program rows." },
+        nirf_source: {
+          type: Type.STRING,
+          nullable: true,
+          description: "NIRF data year, e.g. 'NIRF 2023-24' or 'NIRF 2024-25'",
+        },
+        nirf_total: {
+          type: Type.NUMBER,
+          nullable: true,
+          description:
+            "Sum of all program rows Male+Female. Compute this by adding every row.",
+        },
+        nirf_male: {
+          type: Type.NUMBER,
+          nullable: true,
+          description: "Sum of all Male values across all program rows.",
+        },
+        nirf_female: {
+          type: Type.NUMBER,
+          nullable: true,
+          description: "Sum of all Female values across all program rows.",
+        },
         nirf_programs: {
           type: Type.ARRAY,
           nullable: true,
-          description: "One entry per NIRF program row. Extract every row — UG (4 Years), UG (5 Years), PG (2 Years), PG-Integrated, PhD, etc.",
+          description:
+            "One entry per NIRF program row. Extract every row — UG (4 Years), UG (5 Years), PG (2 Years), PG-Integrated, PhD, etc.",
           items: {
             type: Type.OBJECT,
             properties: {
-              name: { type: Type.STRING, description: "Program name exactly as in NIRF table, e.g. UG (4 Years), PG (2 Years), PhD" },
-              male: { type: Type.STRING, nullable: true },
-              female: { type: Type.STRING, nullable: true },
-              total: { type: Type.STRING, nullable: true, description: "male + female for this row" },
-            }
-          }
+              name: {
+                type: Type.STRING,
+                description:
+                  "Program name exactly as in NIRF table, e.g. UG (4 Years), PG (2 Years), PhD",
+              },
+              male: { type: Type.NUMBER, nullable: true },
+              female: { type: Type.NUMBER, nullable: true },
+              total: {
+                type: Type.NUMBER,
+                nullable: true,
+                description: "male + female for this row",
+              },
+            },
+          },
         },
         // ── AISHE / NAAC SSR Block: hostelite breakdown ──────────────────────
-        total_students: { type: Type.STRING, nullable: true, description: "Total enrolled students from AISHE or NAAC SSR data." },
-        total_students_male: { type: Type.STRING, nullable: true },
-        total_students_female: { type: Type.STRING, nullable: true },
-        day_scholars: { type: Type.STRING, nullable: true, description: "Day scholars from NAAC SSR Criterion 2.1, anti-ragging page, or Mandatory Disclosure. Do NOT output 0 if not found." },
-        day_scholars_male: { type: Type.STRING, nullable: true },
-        day_scholars_female: { type: Type.STRING, nullable: true },
-        hostelites: { type: Type.STRING, nullable: true, description: "Hostelites from NAAC SSR Criterion 2.1 or AISHE. Do NOT output 0 if not found." },
-        hostelites_male: { type: Type.STRING, nullable: true },
-        hostelites_female: { type: Type.STRING, nullable: true },
-        source: { type: Type.STRING, nullable: true, description: "AISHE/NAAC data provenance, e.g. 'AISHE 2022-23' or 'NAAC SSR 2023'" },
-      }
+        total_students: {
+          type: Type.NUMBER,
+          nullable: true,
+          description: "Total enrolled students from AISHE or NAAC SSR data.",
+        },
+        total_students_male: { type: Type.NUMBER, nullable: true },
+        total_students_female: { type: Type.NUMBER, nullable: true },
+        day_scholars: {
+          type: Type.NUMBER,
+          nullable: true,
+          description:
+            "Day scholars from NAAC SSR Criterion 2.1, anti-ragging page, or Mandatory Disclosure. Do NOT output 0 if not found.",
+        },
+        day_scholars_male: { type: Type.NUMBER, nullable: true },
+        day_scholars_female: { type: Type.NUMBER, nullable: true },
+        hostelites: {
+          type: Type.NUMBER,
+          nullable: true,
+          description:
+            "Hostelites from NAAC SSR Criterion 2.1 or AISHE. Do NOT output 0 if not found.",
+        },
+        hostelites_male: { type: Type.NUMBER, nullable: true },
+        hostelites_female: { type: Type.NUMBER, nullable: true },
+        source: {
+          type: Type.STRING,
+          nullable: true,
+          description:
+            "AISHE/NAAC data provenance, e.g. 'AISHE 2022-23' or 'NAAC SSR 2023'",
+        },
+      },
     },
     stakeholders: {
       type: Type.ARRAY,
-      description: "All university officials found for target roles. Include every person found - do not limit count.",
+      description:
+        "All university officials found for target roles. Include every person found - do not limit count.",
       items: {
         type: Type.OBJECT,
         properties: {
-          name: { type: Type.STRING, nullable: true, description: "Full name with academic title e.g. Dr. K.S. Gangadhara Somaji, Prof. Aswini Dutt R." },
-          role: { type: Type.STRING, nullable: true, description: "Official designation e.g. Vice Chancellor, Registrar, Dean Student Affairs, Pro Vice Chancellor, Chief Warden, Controller of Examinations, Dy Registrar, Chairman" },
-          email: { type: Type.STRING, nullable: true, description: "Official email found anywhere in context - department emails like vc@, registrar@, coe@, dean@, chiefwarden@" },
-          phone: { type: Type.STRING, nullable: true, description: "Phone number - Indian mobile 10-digit or landline. Usually found on anti-ragging committee pages." },
-          linkedin_url: { type: Type.STRING, nullable: true, description: "Full LinkedIn URL from search results e.g. https://linkedin.com/in/username" }
-        }
-      }
-    }
+          name: {
+            type: Type.STRING,
+            nullable: true,
+            description:
+              "Full name with academic title e.g. Dr. K.S. Gangadhara Somaji, Prof. Aswini Dutt R.",
+          },
+          role: {
+            type: Type.STRING,
+            nullable: true,
+            description:
+              "Official designation e.g. Vice Chancellor, Registrar, Dean Student Affairs, Pro Vice Chancellor, Chief Warden, Controller of Examinations, Dy Registrar, Chairman",
+          },
+          email: {
+            type: Type.STRING,
+            nullable: true,
+            description:
+              "Official email found anywhere in context - department emails like vc@, registrar@, coe@, dean@, chiefwarden@",
+          },
+          phone: {
+            type: Type.STRING,
+            nullable: true,
+            description:
+              "Phone number - Indian mobile 10-digit or landline. Usually found on anti-ragging committee pages.",
+          },
+          linkedin_url: {
+            type: Type.STRING,
+            nullable: true,
+            description:
+              "Full LinkedIn URL from search results e.g. https://linkedin.com/in/username",
+          },
+        },
+      },
+    },
   },
-  required: ["demographics", "stakeholders"]
+  required: ["demographics", "stakeholders"],
 };
-
 
 export const REPLY_CLASSIFIER_SCHEMA: Schema = {
   type: Type.OBJECT,
@@ -336,7 +418,8 @@ export const REPLY_CLASSIFIER_SCHEMA: Schema = {
   required: ["category"],
 };
 
-export const REPLY_CLASSIFIER_SYSTEM_PROMPT = (rawReply: string) => `
+export const REPLY_CLASSIFIER_SYSTEM_PROMPT = (rawReply: string) =>
+  `
 You are an expert lead qualification assistant. Your task is to classify an incoming email reply from a university stakeholder.
 The outreach was about Fretbox, a campus management platform.
 
@@ -354,12 +437,13 @@ ${rawReply}
 export const OPENER_SYSTEM_PROMPT = ({
   stakeholderName,
   universityName,
-  signalContext
+  signalContext,
 }: {
   stakeholderName: string;
   universityName: string;
   signalContext: string;
-}) => `
+}) =>
+  `
 You are an expert sales development representative for Fretbox, a campus management platform.
 Your task is to write a 2-sentence personalized opener for an email to a university stakeholder.
 
@@ -376,41 +460,75 @@ Rules:
 `.trim();
 
 // ─── Role-Aware Persona Selector ─────────────────────────────────────────────
-function getStakeholderPersona(role?: string): { lens: string; priorities: string; cta: string } {
+function getStakeholderPersona(role?: string): {
+  lens: string;
+  priorities: string;
+  cta: string;
+} {
   const r = (role || "").toLowerCase();
 
-  if (r.includes("vice chancellor") || r.includes("chancellor") || r.includes("rector") || r.includes("president")) {
+  if (
+    r.includes("vice chancellor") ||
+    r.includes("chancellor") ||
+    r.includes("rector") ||
+    r.includes("president")
+  ) {
     return {
       lens: "strategic institutional",
-      priorities: "NAAC/NIRF rankings improvement, accreditation readiness, institutional reputation, competitive edge against peer universities, and long-term digital transformation vision",
+      priorities:
+        "NAAC/NIRF rankings improvement, accreditation readiness, institutional reputation, competitive edge against peer universities, and long-term digital transformation vision",
       cta: "a strategic partnership that positions your institution as a technology leader in Indian higher education",
     };
   }
-  if (r.includes("registrar") || r.includes("deputy registrar") || r.includes("dy. registrar")) {
+  if (
+    r.includes("registrar") ||
+    r.includes("deputy registrar") ||
+    r.includes("dy. registrar")
+  ) {
     return {
       lens: "operational compliance",
-      priorities: "data accuracy for regulatory submissions, compliance with UGC/AICTE mandates, workload reduction for administrative staff, audit-ready record-keeping, and reducing manual error rates",
+      priorities:
+        "data accuracy for regulatory submissions, compliance with UGC/AICTE mandates, workload reduction for administrative staff, audit-ready record-keeping, and reducing manual error rates",
       cta: "a platform that makes compliance effortless and gives your team time back",
     };
   }
-  if (r.includes("dean") || r.includes("chief warden") || r.includes("warden") || r.includes("student welfare") || r.includes("student affairs")) {
+  if (
+    r.includes("dean") ||
+    r.includes("chief warden") ||
+    r.includes("warden") ||
+    r.includes("student welfare") ||
+    r.includes("student affairs")
+  ) {
     return {
       lens: "student welfare and safety",
-      priorities: "hostel safety, real-time student tracking, grievance resolution turnaround, anti-ragging compliance, and improving the overall residential student experience",
+      priorities:
+        "hostel safety, real-time student tracking, grievance resolution turnaround, anti-ragging compliance, and improving the overall residential student experience",
       cta: "a platform that puts student safety and well-being at the centre of campus operations",
     };
   }
-  if (r.includes("finance") || r.includes("treasurer") || r.includes("accounts")) {
+  if (
+    r.includes("finance") ||
+    r.includes("treasurer") ||
+    r.includes("accounts")
+  ) {
     return {
       lens: "financial efficiency and ROI",
-      priorities: "fee collection recovery rates, reduction of payment defaults, automated reconciliation, real-time financial dashboards, and hard cost savings from eliminating legacy software",
+      priorities:
+        "fee collection recovery rates, reduction of payment defaults, automated reconciliation, real-time financial dashboards, and hard cost savings from eliminating legacy software",
       cta: "a platform that pays for itself within the first semester through improved collections and cost avoidance",
     };
   }
-  if (r.includes("it") || r.includes("cto") || r.includes("technology") || r.includes("systems") || r.includes("director")) {
+  if (
+    r.includes("it") ||
+    r.includes("cto") ||
+    r.includes("technology") ||
+    r.includes("systems") ||
+    r.includes("director")
+  ) {
     return {
       lens: "technical architecture and integration",
-      priorities: "seamless API integration with existing ERP systems, data security (ISO 27001 aligned), 99.9% uptime SLAs, cloud-native scalability, and minimal IT overhead for deployment",
+      priorities:
+        "seamless API integration with existing ERP systems, data security (ISO 27001 aligned), 99.9% uptime SLAs, cloud-native scalability, and minimal IT overhead for deployment",
       cta: "a platform built for modern cloud infrastructure with developer-friendly integrations",
     };
   }
@@ -418,7 +536,8 @@ function getStakeholderPersona(role?: string): { lens: string; priorities: strin
   // Default: balanced executive
   return {
     lens: "institutional and operational",
-    priorities: "academic excellence, operational efficiency, student safety, financial sustainability, and digital transformation",
+    priorities:
+      "academic excellence, operational efficiency, student safety, financial sustainability, and digital transformation",
     cta: "a comprehensive platform that transforms every dimension of campus operations",
   };
 }
@@ -437,31 +556,37 @@ export const PROPOSAL_SCHEMA: Schema = {
       properties: {
         hook: {
           type: Type.STRING,
-          description: "2-3 sentences: open with a specific insight about this university and their situation.",
+          description:
+            "2-3 sentences: open with a specific insight about this university and their situation.",
         },
         why_now: {
           type: Type.STRING,
-          description: "2-3 sentences: why this moment is the right time — reference industry trends, regulatory pressures, or signals.",
+          description:
+            "2-3 sentences: why this moment is the right time — reference industry trends, regulatory pressures, or signals.",
         },
         vision_statement: {
           type: Type.STRING,
-          description: "2 sentences: paint a picture of what success looks like with Fretbox.",
+          description:
+            "2 sentences: paint a picture of what success looks like with Fretbox.",
         },
       },
       required: ["hook", "why_now", "vision_statement"],
     },
     problem_statement: {
       type: Type.ARRAY,
-      description: "4-6 specific pain points this institution likely faces, grounded in their signals and type.",
+      description:
+        "4-6 specific pain points this institution likely faces, grounded in their signals and type.",
       items: { type: Type.STRING },
     },
     solution_overview: {
       type: Type.STRING,
-      description: "2-3 sentence narrative bridge from problems to Fretbox's recommended modules.",
+      description:
+        "2-3 sentence narrative bridge from problems to Fretbox's recommended modules.",
     },
     key_benefits: {
       type: Type.ARRAY,
-      description: "3-5 outcome-based benefit statements. Quantify where possible.",
+      description:
+        "3-5 outcome-based benefit statements. Quantify where possible.",
       items: { type: Type.STRING },
     },
     roi_summary: {
@@ -473,7 +598,8 @@ export const PROPOSAL_SCHEMA: Schema = {
         },
         bullets: {
           type: Type.ARRAY,
-          description: "3 specific ROI points (savings, efficiency gains, risk reduction).",
+          description:
+            "3 specific ROI points (savings, efficiency gains, risk reduction).",
           items: { type: Type.STRING },
         },
       },
@@ -515,7 +641,7 @@ export const PROPOSAL_SYSTEM_PROMPT = ({
   stakeholderName?: string;
   stakeholderRole?: string;
 }) => {
-  const { lens, priorities, cta } = getStakeholderPersona(stakeholderRole);
+  const { lens, priorities } = getStakeholderPersona(stakeholderRole);
   const addressedTo = stakeholderName
     ? `${stakeholderName}${stakeholderRole ? `, ${stakeholderRole}` : ""} at ${universityName}`
     : `the leadership team at ${universityName}`;
@@ -540,6 +666,11 @@ ${signals.length > 0 ? signals.map((s, i) => `${i + 1}. ${s}`).join("\n") : "No 
 <rules>
 - Tone: Write as a trusted peer, not a vendor. Confident, warm, peer-to-peer.
 - Be SPECIFIC: Reference the university by name. Reference real challenges suggested by the signals.
+- FACTUAL GROUNDING (NON-NEGOTIABLE):
+  • ONLY cite facts present in the intelligence_signals or university profile above.
+  • NEVER invent ROI percentages, cost savings, or revenue numbers that are not in the signals.
+  • If no quantitative data exists for ROI or benefits, write qualitative statements instead.
+  • If a signal is outdated or vague, do not present it as a current fact.
 - Forbidden Words: NEVER use generic filler phrases like "cutting-edge", "innovative solution", "world-class", "leverage synergies", or "paradigm shift".
 - Brevity: Every sentence must earn its place. No padding. No boilerplate.
 - Level: Write at C-suite reading level. Formal but not stiff.

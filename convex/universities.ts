@@ -1,44 +1,76 @@
-import { mutation, query, internalQuery, internalMutation } from "./_generated/server";
+import {
+  mutation,
+  query,
+  internalQuery,
+  internalMutation,
+} from "./_generated/server";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { validateAuth } from "./lib/auth_utils";
+import { namesMatch } from "./lib/universityUtils";
+
+const websiteStatusValidator = v.optional(
+  v.union(
+    v.literal("pending"),
+    v.literal("valid"),
+    v.literal("invalid"),
+    v.literal("discovered"),
+    v.literal("discovered_weak"),
+  ),
+);
+
+const outreachStageValidator = v.optional(
+  v.union(
+    v.literal("new"),
+    v.literal("enriching"),
+    v.literal("enriched"),
+    v.literal("sequencing"),
+    v.literal("outreach_active"),
+    v.literal("replied"),
+    v.literal("meeting_booked"),
+    v.literal("proposal_sent"),
+    v.literal("closed"),
+    v.literal("not_interested"),
+    v.literal("skipped"),
+  ),
+);
 
 export const listPaginated = query({
   args: {
     paginationOpts: paginationOptsValidator,
-    status: v.optional(v.string()),
+    status: websiteStatusValidator,
     tier: v.optional(v.string()),
-    stage: v.optional(v.string()),
+    stage: outreachStageValidator,
     type: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
-    
+
     if (args.type && args.type !== "All") {
       return await ctx.db
         .query("universities")
         .withIndex("by_type", (q) => q.eq("type", args.type))
         .paginate(args.paginationOpts);
     }
-    
+
     if (args.status) {
       return await ctx.db
         .query("universities")
         .withIndex("by_website_status", (q) =>
-          q.eq("website_status", args.status as any)
+          q.eq("website_status", args.status!),
         )
         .paginate(args.paginationOpts);
     }
-    
+
     if (args.stage) {
       return await ctx.db
         .query("universities")
         .withIndex("by_outreach_stage", (q) =>
-          q.eq("outreach_stage", args.stage as any)
+          q.eq("outreach_stage", args.stage!),
         )
         .paginate(args.paginationOpts);
     }
-    
+
     return await ctx.db
       .query("universities")
       .withIndex("by_created_at")
@@ -48,39 +80,39 @@ export const listPaginated = query({
 });
 export const list = query({
   args: {
-    status: v.optional(v.string()),
+    status: websiteStatusValidator,
     tier: v.optional(v.string()),
-    stage: v.optional(v.string()),
+    stage: outreachStageValidator,
     type: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
-    
+
     if (args.type && args.type !== "All") {
       return await ctx.db
         .query("universities")
         .withIndex("by_type", (q) => q.eq("type", args.type))
         .collect();
     }
-    
+
     if (args.status) {
       return await ctx.db
         .query("universities")
         .withIndex("by_website_status", (q) =>
-          q.eq("website_status", args.status as any)
+          q.eq("website_status", args.status!),
         )
         .collect();
     }
-    
+
     if (args.stage) {
       return await ctx.db
         .query("universities")
         .withIndex("by_outreach_stage", (q) =>
-          q.eq("outreach_stage", args.stage as any)
+          q.eq("outreach_stage", args.stage!),
         )
         .collect();
     }
-    
+
     return await ctx.db
       .query("universities")
       .withIndex("by_created_at")
@@ -93,17 +125,41 @@ export const getStats = query({
   handler: async (ctx) => {
     await validateAuth(ctx);
 
-    // Run 5 index-scoped counts in parallel instead of collecting all documents.
-    // Each query only touches the relevant index slice — O(type_count) per bucket,
-    // not O(total_universities). At 1200+ records this avoids a full table fetch
-    // on every dashboard render.
-    const [all, central, state, priv, deemed] = await Promise.all([
-      ctx.db.query("universities").collect().then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_type", (q) => q.eq("type", "Central")).collect().then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_type", (q) => q.eq("type", "State")).collect().then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_type", (q) => q.eq("type", "Private")).collect().then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_type", (q) => q.eq("type", "Deemed")).collect().then((r) => r.length),
+    // Use index-scoped collects per type to avoid a full table scan.
+    const [central, state, priv, deemed, other] = await Promise.all([
+      ctx.db
+        .query("universities")
+        .withIndex("by_type", (q) => q.eq("type", "Central"))
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("universities")
+        .withIndex("by_type", (q) => q.eq("type", "State"))
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("universities")
+        .withIndex("by_type", (q) => q.eq("type", "Private"))
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("universities")
+        .withIndex("by_type", (q) => q.eq("type", "Deemed"))
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("universities")
+        .withIndex("by_type", (q) => q.eq("type", "Other"))
+        .collect()
+        .then((r) => r.length),
     ]);
+
+    // Count universities with no type or types not in the standard set
+    const allWithType = central + state + priv + deemed + other;
+    const all = await ctx.db
+      .query("universities")
+      .collect()
+      .then((r) => r.length);
 
     return {
       All: all,
@@ -111,7 +167,7 @@ export const getStats = query({
       State: state,
       Private: priv,
       Deemed: deemed,
-      Other: all - central - state - priv - deemed,
+      Other: all - allWithType + other,
     };
   },
 });
@@ -120,20 +176,116 @@ export const getFunnelStats = query({
   args: {},
   handler: async (ctx) => {
     await validateAuth(ctx);
-    const universities = await ctx.db.query("universities").collect();
-    const total = universities.length;
-    const enriched = universities.filter(u =>
-      u.outreach_stage && !["new", "enriching", "skipped"].includes(u.outreach_stage)
-    ).length;
-    const outreachActive = universities.filter(u => u.outreach_stage === "outreach_active").length;
-    const replied = universities.filter(u => u.outreach_stage === "replied").length;
-    const meetingBooked = universities.filter(u => u.outreach_stage === "meeting_booked").length;
-    const proposalSent = universities.filter(u => u.outreach_stage === "proposal_sent").length;
-    const closed = universities.filter(u => u.outreach_stage === "closed").length;
-    const notInterested = universities.filter(u => u.outreach_stage === "not_interested").length;
-    const highTier = universities.filter(u => u.lead_tier === "High").length;
-    const mediumTier = universities.filter(u => u.lead_tier === "Medium").length;
-    return { total, enriched, outreachActive, replied, meetingBooked, proposalSent, closed, notInterested, highTier, mediumTier };
+    // Use parallel index-scoped queries instead of full-table scans.
+    // Compute total as sum of all stage counts to avoid full table scan.
+    const [
+      newCount,
+      enriching,
+      skipped,
+      outreachActive,
+      replied,
+      meetingBooked,
+      proposalSent,
+      closed,
+      notInterested,
+      highTier,
+      mediumTier,
+    ] = await Promise.all([
+      ctx.db
+        .query("universities")
+        .withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "new"))
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("universities")
+        .withIndex("by_outreach_stage", (q) =>
+          q.eq("outreach_stage", "enriching"),
+        )
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("universities")
+        .withIndex("by_outreach_stage", (q) =>
+          q.eq("outreach_stage", "skipped"),
+        )
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("universities")
+        .withIndex("by_outreach_stage", (q) =>
+          q.eq("outreach_stage", "outreach_active"),
+        )
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("universities")
+        .withIndex("by_outreach_stage", (q) =>
+          q.eq("outreach_stage", "replied"),
+        )
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("universities")
+        .withIndex("by_outreach_stage", (q) =>
+          q.eq("outreach_stage", "meeting_booked"),
+        )
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("universities")
+        .withIndex("by_outreach_stage", (q) =>
+          q.eq("outreach_stage", "proposal_sent"),
+        )
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("universities")
+        .withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "closed"))
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("universities")
+        .withIndex("by_outreach_stage", (q) =>
+          q.eq("outreach_stage", "not_interested"),
+        )
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("universities")
+        .withIndex("by_lead_tier", (q) => q.eq("lead_tier", "High"))
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("universities")
+        .withIndex("by_lead_tier", (q) => q.eq("lead_tier", "Medium"))
+        .collect()
+        .then((r) => r.length),
+    ]);
+
+    // Total is sum of all tracked stages (excluding 'enriching' which is transient)
+    const total =
+      newCount +
+      skipped +
+      outreachActive +
+      replied +
+      meetingBooked +
+      proposalSent +
+      closed +
+      notInterested;
+    const enriched = total - newCount - enriching - skipped;
+
+    return {
+      total,
+      enriched,
+      outreachActive,
+      replied,
+      meetingBooked,
+      proposalSent,
+      closed,
+      notInterested,
+      highTier,
+      mediumTier,
+    };
   },
 });
 
@@ -195,19 +347,34 @@ export const create = mutation({
 export const update = mutation({
   args: {
     id: v.id("universities"),
-    website_status: v.optional(v.union(
-      v.literal("pending"), v.literal("valid"),
-      v.literal("invalid"), v.literal("discovered")
-    )),
+    website_status: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("valid"),
+        v.literal("invalid"),
+        v.literal("discovered"),
+        v.literal("discovered_weak"),
+      ),
+    ),
     website: v.optional(v.string()),
-    lead_tier: v.optional(v.union(
-      v.literal("High"), v.literal("Medium"), v.literal("Low")
-    )),
-    outreach_stage: v.optional(v.union(
-      v.literal("new"), v.literal("enriching"), v.literal("enriched"),
-      v.literal("sequencing"), v.literal("replied"), v.literal("meeting_booked"),
-      v.literal("proposal_sent"), v.literal("closed"), v.literal("not_interested"), v.literal("skipped")
-    )),
+    lead_tier: v.optional(
+      v.union(v.literal("High"), v.literal("Medium"), v.literal("Low")),
+    ),
+    outreach_stage: v.optional(
+      v.union(
+        v.literal("new"),
+        v.literal("enriching"),
+        v.literal("enriched"),
+        v.literal("sequencing"),
+        v.literal("outreach_active"),
+        v.literal("replied"),
+        v.literal("meeting_booked"),
+        v.literal("proposal_sent"),
+        v.literal("closed"),
+        v.literal("not_interested"),
+        v.literal("skipped"),
+      ),
+    ),
     notes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -219,15 +386,17 @@ export const update = mutation({
 
 export const bulkInsert = mutation({
   args: {
-    rows: v.array(v.object({
-      university_name: v.string(),
-      state: v.optional(v.string()),
-      city: v.optional(v.string()),
-      website: v.optional(v.string()),
-      student_count: v.optional(v.number()),
-      type: v.optional(v.string()),
-      naac_grade: v.optional(v.string()),
-    })),
+    rows: v.array(
+      v.object({
+        university_name: v.string(),
+        state: v.optional(v.string()),
+        city: v.optional(v.string()),
+        website: v.optional(v.string()),
+        student_count: v.optional(v.number()),
+        type: v.optional(v.string()),
+        naac_grade: v.optional(v.string()),
+      }),
+    ),
   },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
@@ -240,8 +409,8 @@ export const bulkInsert = mutation({
           outreach_stage: "new",
           created_at: now,
           updated_at: now,
-        })
-      )
+        }),
+      ),
     );
     return ids;
   },
@@ -256,6 +425,7 @@ export const remove = mutation({
 });
 
 export const generateUploadUrl = mutation(async (ctx) => {
+  await validateAuth(ctx);
   return await ctx.storage.generateUploadUrl();
 });
 
@@ -266,11 +436,13 @@ export const search = query({
   handler: async (ctx, args) => {
     await validateAuth(ctx);
     if (!args.query) return [];
-    
+
     // Using search index on university_name
     return await ctx.db
       .query("universities")
-      .withSearchIndex("search_name", (q) => q.search("university_name", args.query))
+      .withSearchIndex("search_name", (q) =>
+        q.search("university_name", args.query),
+      )
       .take(10);
   },
 });
@@ -283,16 +455,16 @@ export const skipUniversity = mutation({
       outreach_stage: "skipped",
       updated_at: Date.now(),
     });
-    
+
     // Pause any active sequence for this university
     const sequences = await ctx.db
-       .query("outreachSequences")
-       .withIndex("by_university", (q) => q.eq("university_id", args.id))
-       .filter((q) => q.eq(q.field("status"), "active"))
-       .collect();
-       
+      .query("outreachSequences")
+      .withIndex("by_university", (q) => q.eq("university_id", args.id))
+      .filter((q) => q.eq(q.field("status"), "active"))
+      .collect();
+
     for (const seq of sequences) {
-       await ctx.db.patch(seq._id, { status: "paused", updated_at: Date.now() });
+      await ctx.db.patch(seq._id, { status: "paused", updated_at: Date.now() });
     }
   },
 });
@@ -315,7 +487,7 @@ export const revertStage = mutation({
     const uni = await ctx.db.get(args.id);
     if (!uni) return;
 
-    let prevStage: any = uni.outreach_stage;
+    let prevStage: string | null | undefined = uni.outreach_stage;
 
     // Define the reverse flow
     if (uni.outreach_stage === "outreach_active") {
@@ -337,7 +509,18 @@ export const revertStage = mutation({
     }
 
     await ctx.db.patch(args.id, {
-      outreach_stage: prevStage,
+      outreach_stage: prevStage as
+        | "new"
+        | "enriching"
+        | "enriched"
+        | "sequencing"
+        | "outreach_active"
+        | "replied"
+        | "meeting_booked"
+        | "proposal_sent"
+        | "closed"
+        | "not_interested"
+        | "skipped",
       updated_at: Date.now(),
     });
   },
@@ -367,9 +550,17 @@ export const updateOutreachStageInternal = internalMutation({
   args: {
     universityId: v.id("universities"),
     stage: v.union(
-      v.literal("new"), v.literal("enriching"), v.literal("enriched"),
-      v.literal("sequencing"), v.literal("outreach_active"), v.literal("replied"), 
-      v.literal("meeting_booked"), v.literal("proposal_sent"), v.literal("closed"), v.literal("not_interested"), v.literal("skipped")
+      v.literal("new"),
+      v.literal("enriching"),
+      v.literal("enriched"),
+      v.literal("sequencing"),
+      v.literal("outreach_active"),
+      v.literal("replied"),
+      v.literal("meeting_booked"),
+      v.literal("proposal_sent"),
+      v.literal("closed"),
+      v.literal("not_interested"),
+      v.literal("skipped"),
     ),
   },
   handler: async (ctx, args) => {
@@ -383,7 +574,11 @@ export const updateOutreachStageInternal = internalMutation({
 export const updateLeadTierInternal = internalMutation({
   args: {
     universityId: v.id("universities"),
-    lead_tier: v.union(v.literal("High"), v.literal("Medium"), v.literal("Low")),
+    lead_tier: v.union(
+      v.literal("High"),
+      v.literal("Medium"),
+      v.literal("Low"),
+    ),
   },
   handler: async (ctx, args) => {
     await ctx.db.patch(args.universityId, {
@@ -418,14 +613,15 @@ export const updateDemographicsInternal = internalMutation({
             male: v.optional(v.number()),
             female: v.optional(v.number()),
             total: v.optional(v.number()),
-          })
-        )
+          }),
+        ),
       ),
     }),
   },
   handler: async (ctx, args) => {
     const existing = await ctx.db.get(args.universityId);
-    const existingDemo = (existing as any)?.demographics ?? {};
+    const existingDemo =
+      (existing as Record<string, unknown> | null)?.demographics ?? {};
     // Merge: only overwrite fields that the new run actually found (non-null/undefined)
     const incoming = args.demographics as Record<string, unknown>;
     const merged: Record<string, unknown> = { ...existingDemo };
@@ -439,14 +635,15 @@ export const updateDemographicsInternal = internalMutation({
     // After merging old + new data, validate numeric coherence.
     // Old data can contain stale bad values (e.g. hostelites > total from a
     // previous buggy run). Discard them here before saving.
-    const total = (merged.total_students as number | undefined)
-      ?? (merged.nirf_total as number | undefined);
+    const total =
+      (merged.total_students as number | undefined) ??
+      (merged.nirf_total as number | undefined);
 
     if (total && typeof total === "number" && total > 0) {
       const hostelites = merged.hostelites as number | undefined;
       if (hostelites && hostelites > total) {
         console.warn(
-          `[UpdateDemo] REJECTED hostelites (${hostelites}) — exceeds total/nirf (${total}). Removing.`
+          `[UpdateDemo] REJECTED hostelites (${hostelites}) — exceeds total/nirf (${total}). Removing.`,
         );
         delete merged.hostelites;
         delete merged.hostelites_male;
@@ -455,7 +652,7 @@ export const updateDemographicsInternal = internalMutation({
       const dayScholars = merged.day_scholars as number | undefined;
       if (dayScholars && dayScholars > total) {
         console.warn(
-          `[UpdateDemo] REJECTED day_scholars (${dayScholars}) — exceeds total/nirf (${total}). Removing.`
+          `[UpdateDemo] REJECTED day_scholars (${dayScholars}) — exceeds total/nirf (${total}). Removing.`,
         );
         delete merged.day_scholars;
         delete merged.day_scholars_male;
@@ -482,42 +679,83 @@ export const bulkSyncUgc = mutation({
         address: v.optional(v.string()),
         zip_code: v.optional(v.string()),
         ugc_status: v.optional(v.string()),
-      })
+      }),
     ),
   },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
-    
-    // Fetch all existing university keys for efficient deduplication
+
+    const BATCH_SIZE_LIMIT = 2000;
+    if (args.universities.length > BATCH_SIZE_LIMIT) {
+      throw new Error(
+        `Batch too large: ${args.universities.length} universities. Max ${BATCH_SIZE_LIMIT} per sync.`,
+      );
+    }
+
+    const now = Date.now();
+
+    // ─── Distributed rate limit enforcement ─────────────────────────────────
+    const userIdentity = await ctx.auth.getUserIdentity();
+    const userKey = userIdentity?.email ?? "anonymous";
+    const rateKey = `bulkSyncUgc:${userKey}`;
+    const rateRecord = await ctx.db
+      .query("rateLimits")
+      .withIndex("by_key", (q) => q.eq("key", rateKey))
+      .first();
+    const RATE_WINDOW_MS = 300000; // 5 min
+    const RATE_MAX = 5; // 5 syncs per 5 min
+    if (
+      rateRecord &&
+      now < rateRecord.resetAt &&
+      rateRecord.count >= RATE_MAX
+    ) {
+      throw new Error("Rate limit exceeded. Please wait before syncing again.");
+    }
+    if (rateRecord && now < rateRecord.resetAt) {
+      await ctx.db.patch(rateRecord._id, { count: rateRecord.count + 1 });
+    } else if (rateRecord) {
+      await ctx.db.patch(rateRecord._id, {
+        count: 1,
+        resetAt: now + RATE_WINDOW_MS,
+      });
+    } else {
+      await ctx.db.insert("rateLimits", {
+        key: rateKey,
+        count: 1,
+        resetAt: now + RATE_WINDOW_MS,
+      });
+    }
+
+    // Fetch all existing universities and index by state for O(n * avg_state_size)
+    // fuzzy matching instead of O(n * total_universities).
     const existingUniversities = await ctx.db.query("universities").collect();
+    const stateMap = new Map<string, typeof existingUniversities>();
+    for (const record of existingUniversities) {
+      const key = (record.state || "unknown").toLowerCase().trim();
+      const list = stateMap.get(key) ?? [];
+      list.push(record);
+      stateMap.set(key, list);
+    }
 
     let addedCount = 0;
     let updatedCount = 0;
-    const now = Date.now();
 
     for (const uni of args.universities) {
-      // Find matching university by name text search rather than exact string
-      const uniNameLower = uni.university_name.toLowerCase();
+      // Only compare against universities in the same state (or "unknown")
+      const stateKey = (uni.state || "unknown").toLowerCase().trim();
+      const candidates = stateMap.get(stateKey) ?? [];
       const existingRecords = [];
-      
-      for (const record of existingUniversities) {
-        const recordNameLower = record.university_name.toLowerCase();
-        
-        // Exact and precise matching for Yenepoya and VIT
-        const isYenepoya = uniNameLower.includes("yenepoya") && recordNameLower.includes("yenepoya");
-        const isVITQuery = uniNameLower.includes("vit") || uniNameLower.includes("vellore");
-        const isVITRecord = recordNameLower === "vit university" || recordNameLower === "vellore institute of technology" || recordNameLower === "vit";
-        const isVIT = Boolean(isVITQuery && isVITRecord);
 
-        if (isYenepoya || isVIT || (recordNameLower === uniNameLower)) {
+      for (const record of candidates) {
+        if (namesMatch(uni.university_name, record.university_name)) {
           existingRecords.push(record);
         }
       }
-      
+
       console.log(`Processing UGC uni: ${uni.university_name}`);
       if (existingRecords.length === 0) {
         console.log(`-> No match found. Inserting new.`);
-        await ctx.db.insert("universities", {
+        const inserted = await ctx.db.insert("universities", {
           ...uni,
           website_status: uni.website ? "valid" : "pending",
           outreach_stage: "new",
@@ -526,23 +764,43 @@ export const bulkSyncUgc = mutation({
         });
         addedCount++;
         // Refresh local cache to prevent duplicates within the same batch
-        existingUniversities.push({ ...uni, _id: "temp" as any, _creationTime: now } as any);
+        const newRecord = { ...uni, _id: inserted, _creationTime: now };
+        existingUniversities.push(
+          newRecord as (typeof existingUniversities)[0],
+        );
+        const list = stateMap.get(stateKey) ?? [];
+        list.push(newRecord as (typeof existingUniversities)[0]);
+        stateMap.set(stateKey, list);
       } else {
-        console.log(`-> Found ${existingRecords.length} match(es) for: ${uni.university_name}`);
-        const normalizeStr = (val: any) => val ? String(val).trim() : undefined;
-        
+        console.log(
+          `-> Found ${existingRecords.length} match(es) for: ${uni.university_name}`,
+        );
+        const normalizeStr = (val: unknown) =>
+          val ? String(val).trim() : undefined;
+
         for (const existingRecord of existingRecords) {
-          // Check if data is missing or different
-          const hasUpdates = 
-            (uni.website && normalizeStr(existingRecord.website) !== normalizeStr(uni.website)) ||
-            (uni.type && normalizeStr(existingRecord.type) !== normalizeStr(uni.type)) ||
-            (uni.state && normalizeStr(existingRecord.state) !== normalizeStr(uni.state)) ||
-            (uni.address && normalizeStr(existingRecord.address) !== normalizeStr(uni.address)) ||
-            (uni.zip_code && normalizeStr(existingRecord.zip_code) !== normalizeStr(uni.zip_code)) ||
-            (uni.ugc_status && normalizeStr(existingRecord.ugc_status) !== normalizeStr(uni.ugc_status));
+          const hasUpdates =
+            (uni.website &&
+              normalizeStr(existingRecord.website) !==
+                normalizeStr(uni.website)) ||
+            (uni.type &&
+              normalizeStr(existingRecord.type) !== normalizeStr(uni.type)) ||
+            (uni.state &&
+              normalizeStr(existingRecord.state) !== normalizeStr(uni.state)) ||
+            (uni.address &&
+              normalizeStr(existingRecord.address) !==
+                normalizeStr(uni.address)) ||
+            (uni.zip_code &&
+              normalizeStr(existingRecord.zip_code) !==
+                normalizeStr(uni.zip_code)) ||
+            (uni.ugc_status &&
+              normalizeStr(existingRecord.ugc_status) !==
+                normalizeStr(uni.ugc_status));
 
           if (hasUpdates) {
-            console.log(`-> Updating record: ${existingRecord.university_name} (${existingRecord._id})`);
+            console.log(
+              `-> Updating record: ${existingRecord.university_name} (${existingRecord._id})`,
+            );
             await ctx.db.patch(existingRecord._id, {
               website: uni.website || existingRecord.website,
               type: uni.type || existingRecord.type,

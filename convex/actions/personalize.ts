@@ -22,43 +22,68 @@ export const generateOpener = action({
       const uni = await ctx.runQuery(internal.universities.getInternal, {
         universityId: args.universityId,
       });
-      
+
       // Fetch dynamic API key
       const apiKey = await ctx.runQuery(internal.settings.getInternalGeminiKey);
       if (uni) uniName = uni.university_name;
       if (!uni) throw new Error("University not found");
 
-      const stakeholder = await ctx.runQuery(internal.stakeholders.getByIdInternal, {
-        id: args.stakeholderId,
-      });
+      const stakeholder = await ctx.runQuery(
+        internal.stakeholders.getByIdInternal,
+        {
+          id: args.stakeholderId,
+        },
+      );
       if (!stakeholder) throw new Error("Stakeholder not found");
 
-      const signals = await ctx.runQuery(internal.signals.listByUniversityInternal, {
-        university_id: args.universityId,
-      });
+      const signals = await ctx.runQuery(
+        internal.signals.listByUniversityInternal,
+        {
+          university_id: args.universityId,
+        },
+      );
+
+      const ninetyDaysAgo = Date.now() - 90 * 24 * 60 * 60 * 1000;
+      const recentSignals = signals
+        .filter(
+          (s: { created_at?: number }) => (s.created_at ?? 0) >= ninetyDaysAgo,
+        )
+        .sort(
+          (a: { created_at?: number }, b: { created_at?: number }) =>
+            (b.created_at ?? 0) - (a.created_at ?? 0),
+        )
+        .slice(0, 5);
 
       const systemPrompt = OPENER_SYSTEM_PROMPT({
         stakeholderName: stakeholder.name || stakeholder.role || "there",
         universityName: uni.university_name,
-        signalContext: signals
-          .map((s: any) => `- [${s.signal_type.toUpperCase()}] ${s.content}`)
+        signalContext: recentSignals
+          .map(
+            (s: { signal_type: string; content: string }) =>
+              `- [${s.signal_type.toUpperCase()}] ${s.content}`,
+          )
           .join("\n"),
       });
 
       const userPrompt = "Write the personalized opener now.";
 
+      const startMs = Date.now();
       const opener = await callGemini({
         apiKey,
         systemPrompt,
         userPrompt,
         temperature: TEMP.balanced,
       });
+      console.log(`[Personalize] Gemini latency: ${Date.now() - startMs}ms`);
 
       return opener.trim();
     } catch (e) {
       console.error("[Personalization] Fatal error:", e);
       Sentry.captureException(e, {
-        extra: { universityId: args.universityId, stakeholderId: args.stakeholderId },
+        extra: {
+          universityId: args.universityId,
+          stakeholderId: args.stakeholderId,
+        },
       });
       // Fallback opener
       return `I've been following the recent developments at ${uniName} and am impressed by your institution's commitment to excellence.`;

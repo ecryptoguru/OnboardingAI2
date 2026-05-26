@@ -18,14 +18,20 @@ import {
 import { ErrorBoundary } from "../../components/ErrorBoundary";
 import { ThemeToggle } from "../../components/ThemeToggle";
 
-export default function DashboardLayout({ children }: { children: React.ReactNode }) {
+export default function DashboardLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   const pathname = usePathname();
   const { signOut } = useAuthActions();
   const pendingEmails = useQuery(api.emails.listPending);
   const replies = useQuery(api.replies.list);
 
   const pendingCount = pendingEmails?.length ?? 0;
-  const unclassifiedReplies = replies?.filter(r => !r.classification).length ?? 0;
+  const unclassifiedReplies =
+    replies?.filter((r: { classification?: string }) => !r.classification)
+      .length ?? 0;
 
   interface NavItem {
     href: string;
@@ -36,13 +42,42 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   }
 
   const NAV: NavItem[] = [
-    { href: "/dashboard", label: "Universities", icon: BuildingLibraryIcon, section: "CORE" },
+    {
+      href: "/dashboard",
+      label: "Universities",
+      icon: BuildingLibraryIcon,
+      section: "CORE",
+    },
     { href: "/dashboard/enrichment", label: "Enrichment", icon: ChartBarIcon },
-    { href: "/dashboard/analytics", label: "Analytics", icon: PresentationChartLineIcon, section: "PIPELINE" },
-    { href: "/dashboard/outreach", label: "Outreach", icon: EnvelopeIcon, badge: unclassifiedReplies },
-    { href: "/dashboard/proposals", label: "Proposals", icon: DocumentTextIcon },
-    { href: "/dashboard/approvals", label: "Approvals", icon: InboxArrowDownIcon, badge: pendingCount },
-    { href: "/dashboard/settings", label: "Settings", icon: Cog6ToothIcon, section: "SYSTEM" },
+    {
+      href: "/dashboard/analytics",
+      label: "Analytics",
+      icon: PresentationChartLineIcon,
+      section: "PIPELINE",
+    },
+    {
+      href: "/dashboard/outreach",
+      label: "Outreach",
+      icon: EnvelopeIcon,
+      badge: unclassifiedReplies,
+    },
+    {
+      href: "/dashboard/proposals",
+      label: "Proposals",
+      icon: DocumentTextIcon,
+    },
+    {
+      href: "/dashboard/approvals",
+      label: "Approvals",
+      icon: InboxArrowDownIcon,
+      badge: pendingCount,
+    },
+    {
+      href: "/dashboard/settings",
+      label: "Settings",
+      icon: Cog6ToothIcon,
+      section: "SYSTEM",
+    },
   ];
 
   let currentSection = "";
@@ -69,7 +104,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
         {/* Nav */}
         <nav className="flex-1 py-4 px-3 space-y-0.5">
           {NAV.map(({ href, label, icon: Icon, badge, section }) => {
-            const active = pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
+            const active =
+              pathname === href ||
+              (href !== "/dashboard" && pathname.startsWith(href));
             const showSection = section && section !== currentSection;
             if (showSection) currentSection = section ?? "";
             return (
@@ -81,6 +118,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 )}
                 <Link
                   href={href}
+                  aria-current={active ? "page" : undefined}
                   className={`relative flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 group ${
                     active
                       ? "bg-blue-500/12 text-blue-400"
@@ -96,9 +134,13 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                     {label}
                   </div>
                   {badge != null && badge > 0 && (
-                    <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center ${
-                      href === "/dashboard/approvals" ? "bg-amber-500 text-white" : "bg-blue-500 text-white"
-                    }`}>
+                    <span
+                      className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full min-w-[18px] text-center ${
+                        href === "/dashboard/approvals"
+                          ? "bg-amber-500 text-white"
+                          : "bg-blue-500 text-white"
+                      }`}
+                    >
                       {badge}
                     </span>
                   )}

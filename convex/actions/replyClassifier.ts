@@ -3,19 +3,27 @@
 import { action } from "../_generated/server";
 import { internal, api } from "../_generated/api";
 import { v } from "convex/values";
-import { callGemini, TEMP, MODELS } from "../lib/llm";
-import { REPLY_CLASSIFIER_SYSTEM_PROMPT, REPLY_CLASSIFIER_SCHEMA } from "../lib/prompts";
+import { callFlash, TEMP } from "../lib/llm";
+import {
+  REPLY_CLASSIFIER_SYSTEM_PROMPT,
+  REPLY_CLASSIFIER_SCHEMA,
+} from "../lib/prompts";
+import { sanitizeLlmInput } from "../lib/utils";
 import * as Sentry from "@sentry/nextjs";
 
 /**
  * Classifies an incoming email reply and updates the reply record.
- * Uses Gemini 3.1 Pro at temperature=0 for deterministic classification.
+ * Uses Gemini 3.1 Flash-Lite at temperature=0 for deterministic classification.
+ * Flash-Lite is ~6x cheaper than 3.5 Flash for this 7-class classification task.
  */
 export const classifyReply = action({
   args: {
     replyId: v.id("replyLogs"),
   },
-  handler: async (ctx, args): Promise<{ success: boolean; classification?: string; error?: string }> => {
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ success: boolean; classification?: string; error?: string }> => {
     try {
       // 1. Fetch the reply
       const reply = await ctx.runQuery(internal.replies.getInternal, {
@@ -23,20 +31,25 @@ export const classifyReply = action({
       });
       if (!reply) throw new Error("Reply log not found");
 
-      const systemPrompt = REPLY_CLASSIFIER_SYSTEM_PROMPT(reply.raw_reply);
+      const sanitizedReply = sanitizeLlmInput(reply.raw_reply);
+      const systemPrompt = REPLY_CLASSIFIER_SYSTEM_PROMPT(sanitizedReply);
       const userMessage = "Classify this email.";
 
-      const apiKey = await ctx.runQuery(internal.settings.getInternalGeminiKey) as string | null;
-      const response = await callGemini({
+      const apiKey = (await ctx.runQuery(
+        internal.settings.getInternalGeminiKey,
+      )) as string | null;
+      const startMs = Date.now();
+      const response = await callFlash({
         apiKey,
         systemPrompt,
         userPrompt: userMessage,
         temperature: TEMP.deterministic,
-        maxOutputTokens: 50,
-        model: MODELS.complex,
+        maxOutputTokens: 32, // classification needs only a few tokens
         responseAsJson: true,
         responseSchema: REPLY_CLASSIFIER_SCHEMA,
       });
+      const latencyMs = Date.now() - startMs;
+      console.log(`[ReplyClassifier] Flash-Lite latency: ${latencyMs}ms`);
 
       const classificationData = JSON.parse(response);
 
@@ -52,14 +65,14 @@ export const classifyReply = action({
 
       let result = classificationData.category;
       // Compute confidence: direct valid match = high confidence, fallback = low
-      let confidence = 0.90;
+      let confidence = 0.9;
 
       if (!result || !validCategories.includes(result)) {
         console.warn(
-          `[ReplyClassifier] Invalid classification returned: ${result}. Falling back to other.`
+          `[ReplyClassifier] Invalid classification returned: ${result}. Falling back to other.`,
         );
         result = "other";
-        confidence = 0.50; // Low confidence when we had to fall back
+        confidence = 0.5; // Low confidence when we had to fall back
       }
 
       // 2. Update classification in database
@@ -77,33 +90,52 @@ export const classifyReply = action({
       });
 
       // 4. Update university outreach stage based on classification
-      let newStage: any = null;
+      let newStage: string | null = null;
       if (result === "meeting_request") newStage = "meeting_booked";
-      else if (result === "opt_out" || result === "not_interested") newStage = "not_interested";
+      else if (result === "opt_out" || result === "not_interested")
+        newStage = "not_interested";
       else newStage = "replied";
 
       if (newStage) {
-        await ctx.runMutation(internal.universities.updateOutreachStageInternal, {
-          universityId: reply.university_id,
-          stage: newStage,
-        });
+        await ctx.runMutation(
+          internal.universities.updateOutreachStageInternal,
+          {
+            universityId: reply.university_id,
+            stage: newStage as "meeting_booked" | "not_interested" | "replied",
+          },
+        );
       }
 
       // 5. Create a draft proposal record when a meeting is booked.
-      // ⚠️ HITL GATE: We do NOT auto-trigger generateProposal.
-      // A human must click "Generate Proposal" from the University detail panel
-      // after reviewing the meeting context. This prevents misclassifications
-      // from firing proposals to the wrong person at the wrong time.
+      // ⚠️ HITL GATE: We do NOT auto-trigger generateProposal or auto-book a calendar event.
+      // A human must review the meeting request, confirm a time, and click "Generate Proposal"
+      // from the University detail panel. This prevents misclassifications from firing
+      // proposals to the wrong person at the wrong time and avoids arbitrary calendar invites.
       if (result === "meeting_request") {
         try {
-          await ctx.runMutation(internal.proposals.createInternal, {
-            university_id: reply.university_id,
-            stakeholder_id: reply.stakeholder_id,
-            meeting_date: Date.now(),
+          const proposalId = await ctx.runMutation(
+            internal.proposals.createInternal,
+            {
+              university_id: reply.university_id,
+              stakeholder_id: reply.stakeholder_id,
+              meeting_date: Date.now(),
+            },
+          );
+
+          // Flag the proposal as awaiting human time-confirmation instead of auto-creating a calendar event
+          await ctx.runMutation(internal.proposals.updateInternal, {
+            id: proposalId,
+            calendar_event_status: "pending",
           });
-          console.log(`[ReplyClassifier] Created draft proposal for ${reply.university_id} — awaiting human approval to generate.`);
+
+          console.log(
+            `[ReplyClassifier] Created draft proposal for ${reply.university_id} — human must confirm meeting time before generating.`,
+          );
         } catch (pErr) {
-          console.warn("[ReplyClassifier] Draft proposal creation failed (non-fatal):", pErr);
+          console.warn(
+            "[ReplyClassifier] Draft proposal creation failed (non-fatal):",
+            pErr,
+          );
         }
       }
 

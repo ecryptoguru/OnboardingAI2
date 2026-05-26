@@ -6,8 +6,9 @@ import { UploadCsvButton } from "../../../components/UploadCsvButton";
 import { SyncUgcButton } from "../../../components/SyncUgcButton";
 import { UniversityDetail } from "../../../components/UniversityDetail";
 import { useState, useRef, useEffect } from "react";
-import { Id } from "../../../convex/_generated/dataModel";
+import { Id, Doc } from "../../../convex/_generated/dataModel";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+import { useToast } from "../../../components/Toast";
 
 export default function UniversitiesPage() {
   const [selectedId, setSelectedId] = useState<Id<"universities"> | null>(null);
@@ -15,6 +16,7 @@ export default function UniversitiesPage() {
   const [validating, setValidating] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
+  const { show, toastElement } = useToast();
 
   // Debounce search input — wait 300ms after user stops typing before firing a Convex query.
   // Without this, every keystroke fires a new query (e.g. "vit" = 3 queries per character).
@@ -25,8 +27,11 @@ export default function UniversitiesPage() {
 
   const isSearching = debouncedSearch.length >= 2;
 
-  const searchResults = useQuery(api.universities.search, isSearching ? { query: debouncedSearch } : "skip");
-  
+  const searchResults = useQuery(
+    api.universities.search,
+    isSearching ? { query: debouncedSearch } : "skip",
+  );
+
   const {
     results: tabUniversities,
     status: listStatus,
@@ -34,9 +39,9 @@ export default function UniversitiesPage() {
   } = usePaginatedQuery(
     api.universities.listPaginated,
     isSearching ? "skip" : { type: activeTab },
-    { initialNumItems: 100 }
+    { initialNumItems: 100 },
   );
-  
+
   const observerTarget = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -54,23 +59,28 @@ export default function UniversitiesPage() {
           loadMore(100);
         }
       },
-      { threshold: 0.1 }
+      { threshold: 0.1 },
     );
 
     observer.observe(target);
     return () => observer.unobserve(target);
   }, [listStatus, loadMore, isSearching]);
-  
+
   const stats = useQuery(api.universities.getStats);
-  const dispatchValidation = useMutation(api.dispatcher.dispatchWebsiteValidation);
+  const dispatchValidation = useMutation(
+    api.dispatcher.dispatchWebsiteValidation,
+  );
 
   const handleValidate = async () => {
     setValidating(true);
     try {
       const result = await dispatchValidation({ limit: 50 });
-      alert(`Scheduled validation for ${result.scheduled} universities.`);
+      show(
+        `Scheduled validation for ${result.scheduled} universities.`,
+        "success",
+      );
     } catch (e) {
-      alert(`Error: ${e}`);
+      show(`Error: ${e}`, "error");
     } finally {
       setValidating(false);
     }
@@ -78,31 +88,66 @@ export default function UniversitiesPage() {
 
   const filteredUniversities = isSearching ? searchResults : tabUniversities;
 
-  const tabs = ["All", "Central", "State", "Private", "Deemed"];
+  const tabs = [
+    "All",
+    "Central",
+    "State",
+    "Private",
+    "Deemed",
+    "Other",
+  ] as const;
 
   return (
     <div className="p-8 relative">
       <div className="flex items-start justify-between mb-8">
         <div>
-          <h1 className="text-3xl font-heading font-bold text-foreground tracking-tight">Universities</h1>
+          <h1 className="text-3xl font-heading font-bold text-foreground tracking-tight">
+            Universities
+          </h1>
           <p className="text-muted-foreground text-sm mt-1.5 font-medium">
             Manage and track all university leads
           </p>
         </div>
         <div className="flex items-center gap-3">
           <button
+            type="button"
             onClick={handleValidate}
             disabled={validating}
             className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium bg-card border border-card-border text-foreground hover:border-zinc-600 hover:text-foreground transition-all duration-200 disabled:opacity-50 shadow-sm"
           >
             {validating ? (
-              <svg className="animate-spin h-3.5 w-3.5" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+              <svg
+                className="animate-spin h-3.5 w-3.5"
+                fill="none"
+                viewBox="0 0 24 24"
+              >
+                <circle
+                  className="opacity-25"
+                  cx="12"
+                  cy="12"
+                  r="10"
+                  stroke="currentColor"
+                  strokeWidth="4"
+                />
+                <path
+                  className="opacity-75"
+                  fill="currentColor"
+                  d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                />
               </svg>
             ) : (
-              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" />
+              <svg
+                className="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"
+                />
               </svg>
             )}
             Validate Websites
@@ -126,11 +171,13 @@ export default function UniversitiesPage() {
             >
               <span>{tab}</span>
               {stats && (
-                <span className={`text-[10px] px-1.5 py-0.5 rounded-md transition-colors font-bold ${
-                  activeTab === tab 
-                    ? "bg-zinc-700/50 text-white" 
-                    : "bg-muted/50 text-muted-foreground"
-                }`}>
+                <span
+                  className={`text-[10px] px-1.5 py-0.5 rounded-md transition-colors font-bold ${
+                    activeTab === tab
+                      ? "bg-zinc-700/50 text-white"
+                      : "bg-muted/50 text-muted-foreground"
+                  }`}
+                >
                   {stats[tab] || 0}
                 </span>
               )}
@@ -157,10 +204,13 @@ export default function UniversitiesPage() {
           <div className="h-4 w-full bg-muted animate-pulse rounded opacity-50" />
           <div className="h-10 w-full bg-muted animate-pulse rounded mt-8" />
           {[...Array(5)].map((_, i) => (
-            <div key={i} className="h-16 w-full bg-card border border-card-border animate-pulse rounded" />
+            <div
+              key={i}
+              className="h-16 w-full bg-card border border-card-border animate-pulse rounded"
+            />
           ))}
         </div>
-      ) : (filteredUniversities?.length === 0) ? (
+      ) : filteredUniversities?.length === 0 ? (
         <div className="flex flex-col items-center justify-center py-24 text-center">
           <div className="text-5xl mb-4">{isSearching ? "🔍" : "🏛️"}</div>
           <h3 className="text-lg font-medium text-foreground mb-2">
@@ -172,8 +222,8 @@ export default function UniversitiesPage() {
             {isSearching
               ? "Try a different search term or clear the search to browse all universities."
               : activeTab === "All"
-              ? "Upload a CSV or sync from UGC to get started."
-              : `There are currently no universities categorized as ${activeTab}.`}
+                ? "Upload a CSV or sync from UGC to get started."
+                : `There are currently no universities categorized as ${activeTab}.`}
           </p>
         </div>
       ) : (
@@ -189,57 +239,87 @@ export default function UniversitiesPage() {
               </tr>
             </thead>
             <tbody className="divide-y divide-zinc-800/60">
-              {filteredUniversities?.map((uni) => (
-                <tr 
-                  key={uni._id} 
+              {filteredUniversities?.map((uni: Doc<"universities">) => (
+                <tr
+                  key={uni._id}
                   onClick={() => setSelectedId(uni._id)}
                   className={`hover:bg-card/40 cursor-pointer transition-colors ${
                     selectedId === uni._id ? "bg-muted/30" : ""
                   }`}
                 >
-                  <td className="px-6 py-4 font-medium text-foreground group-hover:text-blue-400 transition-colors truncate max-w-[300px]" title={uni.university_name}>
+                  <td
+                    className="px-6 py-4 font-medium text-foreground group-hover:text-blue-400 transition-colors truncate max-w-[300px]"
+                    title={uni.university_name}
+                  >
                     {uni.university_name}
                   </td>
-                  <td className="px-6 py-4 truncate max-w-[180px]" title={uni.city && uni.state ? `${uni.city}, ${uni.state}` : uni.state || ''}>
-                    {uni.city && uni.state ? `${uni.city}, ${uni.state}` : uni.state || '-'}
+                  <td
+                    className="px-6 py-4 truncate max-w-[180px]"
+                    title={
+                      uni.city && uni.state
+                        ? `${uni.city}, ${uni.state}`
+                        : uni.state || ""
+                    }
+                  >
+                    {uni.city && uni.state
+                      ? `${uni.city}, ${uni.state}`
+                      : uni.state || "-"}
                   </td>
                   <td className="px-6 py-4">
-                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                      uni.type === 'Central' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                      uni.type === 'State' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' :
-                      uni.type === 'Private' ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' :
-                      uni.type === 'Deemed' ? 'bg-orange-500/10 text-orange-400 border border-orange-500/20' :
-                      'bg-muted text-muted-foreground border border-card-border/50'
-                    }`}>
-                      {uni.type || 'Other'}
+                    <span
+                      className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                        uni.type === "Central"
+                          ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                          : uni.type === "State"
+                            ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
+                            : uni.type === "Private"
+                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
+                              : uni.type === "Deemed"
+                                ? "bg-orange-500/10 text-orange-400 border border-orange-500/20"
+                                : "bg-muted text-muted-foreground border border-card-border/50"
+                      }`}
+                    >
+                      {uni.type || "Other"}
                     </span>
                   </td>
                   <td className="px-6 py-4">
                     {uni.ugc_status ? (
-                      <span 
-                        title={[
-                          uni.ugc_status.includes('2(f)') ? "Section 2(f) of the UGC Act, 1956: Provision for granting degrees to students." : null,
-                          uni.ugc_status.includes('12(B)') ? "Section 12(B) of the UGC Act, 1956: Eligibility to receive central assistance (grants) from UGC/Government of India." : null,
-                        ].filter(Boolean).join('\n\n') || "UGC Official Recognition Status"}
+                      <span
+                        title={
+                          [
+                            uni.ugc_status.includes("2(f)")
+                              ? "Section 2(f) of the UGC Act, 1956: Provision for granting degrees to students."
+                              : null,
+                            uni.ugc_status.includes("12(B)")
+                              ? "Section 12(B) of the UGC Act, 1956: Eligibility to receive central assistance (grants) from UGC/Government of India."
+                              : null,
+                          ]
+                            .filter(Boolean)
+                            .join("\n\n") || "UGC Official Recognition Status"
+                        }
                         className="text-foreground text-[10px] font-mono bg-muted/80 px-2 py-0.5 rounded border border-card-border hover:border-zinc-500 transition-colors cursor-help"
                       >
                         {uni.ugc_status}
                       </span>
                     ) : (
-                      <span className="text-zinc-600 italic text-xs">Not Synced</span>
+                      <span className="text-zinc-600 italic text-xs">
+                        Not Synced
+                      </span>
                     )}
                   </td>
                   <td className="px-6 py-4 capitalize">
-                    <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${
-                      uni.outreach_stage === 'enriching' 
-                        ? 'bg-amber-500/10 text-amber-500 border border-amber-500/30'
-                        : uni.outreach_stage === 'enriched'
-                        ? 'bg-emerald-500/10 text-emerald-500 border border-emerald-500/30'
-                        : uni.outreach_stage === 'skipped'
-                        ? 'bg-red-500/10 text-red-500 border border-red-500/30'
-                        : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
-                    }`}>
-                      {(uni.outreach_stage || 'new').replace('_', ' ')}
+                    <span
+                      className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wide ${
+                        uni.outreach_stage === "enriching"
+                          ? "bg-amber-500/10 text-amber-500 border border-amber-500/30"
+                          : uni.outreach_stage === "enriched"
+                            ? "bg-emerald-500/10 text-emerald-500 border border-emerald-500/30"
+                            : uni.outreach_stage === "skipped"
+                              ? "bg-red-500/10 text-red-500 border border-red-500/30"
+                              : "bg-blue-500/10 text-blue-400 border border-blue-500/20"
+                      }`}
+                    >
+                      {(uni.outreach_stage || "new").replace("_", " ")}
                     </span>
                   </td>
                 </tr>
@@ -248,14 +328,32 @@ export default function UniversitiesPage() {
           </table>
         </div>
       )}
-      
+
       {/* Infinite Scroll Trigger — only active in tab/paginated mode */}
       {!isSearching && (
-        <div ref={observerTarget} className="h-10 mt-4 flex items-center justify-center">
+        <div
+          ref={observerTarget}
+          className="h-10 mt-4 flex items-center justify-center"
+        >
           {listStatus === "LoadingMore" && (
-            <svg className="animate-spin h-5 w-5 text-muted-foreground" fill="none" viewBox="0 0 24 24">
-              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+            <svg
+              className="animate-spin h-5 w-5 text-muted-foreground"
+              fill="none"
+              viewBox="0 0 24 24"
+            >
+              <circle
+                className="opacity-25"
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="4"
+              />
+              <path
+                className="opacity-75"
+                fill="currentColor"
+                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+              />
             </svg>
           )}
         </div>
@@ -263,16 +361,16 @@ export default function UniversitiesPage() {
 
       {/* Detail Overlay / Side Panel */}
       {selectedId && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/40 backdrop-blur-sm z-40 transition-opacity duration-300"
           onClick={() => setSelectedId(null)}
         />
       )}
-      <UniversityDetail 
-        universityId={selectedId} 
-        onClose={() => setSelectedId(null)} 
+      <UniversityDetail
+        universityId={selectedId}
+        onClose={() => setSelectedId(null)}
       />
+      {toastElement}
     </div>
   );
 }
-

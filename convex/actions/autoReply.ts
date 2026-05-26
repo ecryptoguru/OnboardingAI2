@@ -3,8 +3,23 @@
 import { action } from "../_generated/server";
 import { internal, api } from "../_generated/api";
 import { v } from "convex/values";
+import { Id } from "../_generated/dataModel";
 import { TEMPLATES } from "../lib/emailTemplates";
 import { withRetry } from "../lib/utils";
+
+// Narrow interfaces for internal query results (fallback when generated types are stale)
+interface SequenceDoc {
+  _id: string;
+  stakeholder_id: string;
+  status: string;
+}
+
+interface ProposalDoc {
+  _id: string;
+  stakeholder_id?: string;
+  created_at?: number;
+  meet_link?: string;
+}
 
 export const sendAutoReply = action({
   args: {
@@ -21,47 +36,111 @@ export const sendAutoReply = action({
       id: args.stakeholderId,
     });
 
-    if (!uni || !st || !st.email) return { success: false, reason: "Missing data" };
+    if (!uni || !st || !st.email)
+      return { success: false, reason: "Missing data" };
 
     // 2. Fetch active sequence (optional)
-    const seq = await ctx.runQuery(internal.sequences.listByUniversityInternal, {
-      university_id: args.universityId,
-    });
-    const activeSeq = (seq as any[]).find((s: any) => s.stakeholder_id === args.stakeholderId && s.status === "active");
+    const seq = await ctx.runQuery(
+      internal.sequences.listByUniversityInternal,
+      {
+        university_id: args.universityId,
+      },
+    );
+    const activeSeq = (Array.isArray(seq) ? (seq as SequenceDoc[]) : []).find(
+      (s) => s.stakeholder_id === args.stakeholderId && s.status === "active",
+    );
 
-    // 3. Select Template
-    let emailData: { subject: string; body: string } | null = null;
-    if (args.classification === "meeting_request" || args.classification === "positive_interest") {
-        emailData = TEMPLATES.MEETING_REQUEST_ACK(st.name || st.role || "there", uni.university_name);
-    } else if (args.classification === "request_info") {
-        emailData = TEMPLATES.POSITIVE_INTEREST(st.name || st.role || "there", uni.university_name);
+    // 3. Look up latest proposal for Meet link (used when classification is meeting_request)
+    let meetLink: string | undefined;
+    if (args.classification === "meeting_request") {
+      const proposals = await ctx.runQuery(
+        internal.proposals.listByUniversityInternal,
+        {
+          university_id: args.universityId,
+        },
+      );
+      const latestProposal = (
+        Array.isArray(proposals) ? (proposals as ProposalDoc[]) : []
+      )
+        .filter(
+          (p) => p.stakeholder_id === args.stakeholderId || !p.stakeholder_id,
+        )
+        .sort((a, b) => (b.created_at ?? 0) - (a.created_at ?? 0))[0];
+      meetLink = latestProposal?.meet_link;
     }
 
-    if (!emailData) return { success: true, reason: "No auto-reply needed for this category" };
+    // 4. Select Template
+    let emailData: { subject: string; body: string; html?: string } | null =
+      null;
+    if (
+      args.classification === "meeting_request" ||
+      args.classification === "positive_interest"
+    ) {
+      emailData = TEMPLATES.MEETING_REQUEST_ACK(
+        st.name || st.role || "there",
+        uni.university_name,
+        meetLink,
+      );
+    } else if (args.classification === "request_info") {
+      emailData = TEMPLATES.POSITIVE_INTEREST(
+        st.name || st.role || "there",
+        uni.university_name,
+        meetLink,
+      );
+    }
 
-    // 3. Send Email
-    console.log(`[AutoReply] Sending ${args.classification} reply to ${st.email}`);
-    const sendResult = await withRetry(async (): Promise<{ success: boolean; error?: string }> => {
-      return await ctx.runAction(api.actions.email.sendEmail, {
-        to: st.email!,
-        subject: emailData!.subject,
-        text: emailData!.body,
-        html: (emailData as any).html ?? undefined,
-      });
-    });
+    if (!emailData)
+      return {
+        success: true,
+        reason: "No auto-reply needed for this category",
+      };
 
-    // 4. Record the email
-    if (sendResult.success) {
-        await ctx.runMutation(internal.emails.insertInternal, {
-            sequence_id: activeSeq?._id as any,
-            university_id: args.universityId,
-            stakeholder_id: args.stakeholderId,
-            subject: emailData.subject,
-            body: emailData.body,
-            status: "sent",
-            step_number: 99, // Special step for auto-replies
-            sent_at: Date.now(),
+    // 5. Build threading headers for proper email threading
+    const parentEmailId = activeSeq?._id
+      ? `<fretbox-seq-${activeSeq._id}@reply.fretbox.in>`
+      : undefined;
+
+    // 6. Send Email
+    console.log(
+      `[AutoReply] Sending ${args.classification} reply to ${st.email}`,
+    );
+    const sendResult = await withRetry(
+      async (): Promise<{
+        success: boolean;
+        messageId?: string;
+        error?: string;
+      }> => {
+        return await ctx.runAction(api.actions.email.sendEmail, {
+          to: st.email!,
+          subject: emailData!.subject,
+          text: emailData!.body,
+          html: emailData.html ?? undefined,
+          ...(parentEmailId
+            ? {
+                messageIdHeader: `<fretbox-autoreply-${Date.now()}@reply.fretbox.in>`,
+                inReplyTo: parentEmailId,
+                references: parentEmailId,
+              }
+            : {}),
         });
+      },
+    );
+
+    // 6. Record the email with SendGrid message ID for tracking
+    if (sendResult.success) {
+      const normalizedMessageId = sendResult.messageId?.split(".")[0];
+      await ctx.runMutation(internal.emails.insertInternal, {
+        sequence_id: activeSeq?._id as unknown as Id<"outreachSequences">,
+        university_id: args.universityId,
+        stakeholder_id: args.stakeholderId,
+        subject: emailData.subject,
+        body: emailData.body,
+        html_body: emailData.html,
+        status: "sent",
+        sendgrid_message_id: normalizedMessageId,
+        step_number: 99, // Special step for auto-replies
+        sent_at: Date.now(),
+      });
     }
 
     return { success: sendResult.success };

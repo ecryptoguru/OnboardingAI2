@@ -3,9 +3,18 @@
 import { action } from "../_generated/server";
 import { v } from "convex/values";
 import { internal, api } from "../_generated/api";
-import { callGemini, callFlash, THINKING } from "../lib/llm";
+import { callGemini, THINKING } from "../lib/llm";
 import { withRetry } from "../lib/utils";
-import { DEEP_ENRICHMENT_SYNTHESIS_PROMPT, DEEP_ENRICHMENT_SCHEMA, FLASH_EXTRACTION_PROMPT } from "../lib/prompts";
+import {
+  DEEP_ENRICHMENT_SYNTHESIS_PROMPT,
+  DEEP_ENRICHMENT_SCHEMA,
+} from "../lib/prompts";
+import {
+  firecrawlMap,
+  firecrawlScrape,
+  filterHighYieldUrls,
+  extractContactsFromMarkdown,
+} from "../lib/scrapers";
 import * as Sentry from "@sentry/nextjs";
 
 const TARGET_ROLES = [
@@ -14,22 +23,29 @@ const TARGET_ROLES = [
   "Chairman",
   "Chancellor",
   "Vice Chancellor",
+  "Pro Vice Chancellor",
   "Registrar",
   "Dy Registrar",
   "Dean Student Welfare",
   "Dean Student Affairs",
   "Director Administration",
   "Chief Warden",
+  "Controller of Examinations",
+  "Finance Officer",
+  "Librarian",
+  "Head of Department",
+  "Placement Officer",
+  "Public Relations Officer",
 ];
 
-// ─── Cost constants ───────────────────────────────────────────────────────────
-const JINA_CHARS_PER_SOURCE = 5_000;   // General sources — compact
-const JINA_CHARS_NIRF = 12_000;        // NIRF pages have program-wise tables — need more room
-const MAX_CONTEXT_CHARS = 60_000;      // Pro 3.1 handles 60k easily; raised from 40k to stop NIRF truncation
+// ─── Constants ─────────────────────────────────────────────────────────────
+const MAX_CONTEXT_CHARS = 100_000; // Gemini 3.5 Flash handles 1M context; use 100k for speed
+const MAX_URLS_TO_SCRAPE = 6; // Limit Firecrawl API calls per enrichment
+const MAX_CHARS_PER_SOURCE = 15_000; // Truncate each scraped source
+const MIN_BLOCK_LENGTH = 200; // Minimum length for a block to be considered valid
+const MAX_REGEX_CONTACTS = 30; // Cap to avoid bloating the prompt
 
 // ─── Content normalizer ───────────────────────────────────────────────────────
-// Strips HTML entities, nav boilerplate, and repeated whitespace.
-// FIX: line filter uses > 0 (not > 3) — short lines like "830" are real NIRF data.
 function normalizeContent(raw: string): string {
   return raw
     .replace(/&nbsp;/gi, " ")
@@ -38,87 +54,33 @@ function normalizeContent(raw: string): string {
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
     .replace(/!\[.*?\]\(data:.*?\)/g, "")
-    .replace(/\[(?:Home|About|Contact|Menu|Login|Register|Apply|Skip to|Back to top|Toggle navigation|Search|Read more|Click here|Download|View all)\]/gi, "")
-    // ─── Prompt injection stripping ─────────────────────────────────────────
-    // Adversarial web pages may embed instruction override payloads in content.
-    // The responseSchema is the primary defense, but belt-and-suspenders is warranted
-    // given 60k of raw web content flowing into the model context.
-    .replace(/(?:disregard|ignore|forget|override)\s+(?:all\s+)?(?:previous|above|prior)\s+(?:instructions?|prompts?|context)/gi, "[FILTERED]")
-    .replace(/(?:you are now|act as|pretend to be|roleplay as|new persona)/gi, "[FILTERED]")
-    // ────────────────────────────────────────────────────────────────────────
+    .replace(
+      /\[(?:Home|About|Contact|Menu|Login|Register|Apply|Skip to|Back to top|Toggle navigation|Search|Read more|Click here|Download|View all)\]/gi,
+      "",
+    )
+    .replace(
+      /(?:disregard|ignore|forget|override)\s+(?:all\s+)?(?:previous|above|prior)\s+(?:instructions?|prompts?|context)/gi,
+      "[FILTERED]",
+    )
+    .replace(
+      /(?:you are now|act as|pretend to be|roleplay as|new persona)/gi,
+      "[FILTERED]",
+    )
     .replace(/\n{3,}/g, "\n\n")
     .replace(/ {2,}/g, " ")
     .split("\n")
-    .filter(line => {
+    .filter((line) => {
       const t = line.trim();
-      // FIX: was > 3, which dropped single-number lines like "830" from NIRF tables
       return t.length > 0 && !/^[-=_|*#]{3,}$/.test(t);
     })
     .join("\n")
     .trim();
 }
 
-// ─── Jina scraper ─────────────────────────────────────────────────────────────
-async function jinaScrape(url: string, prefix: string, charLimit = JINA_CHARS_PER_SOURCE): Promise<string> {
-  if (!url) return "";
-  try {
-    const raw = await withRetry(async () => {
-      const response = await fetch(`https://r.jina.ai/${url}`, {
-        headers: { Accept: "text/event-stream, text/plain" },
-      });
-      if (!response.ok) throw new Error(`Status ${response.status}`);
-      return await response.text();
-    });
-    const normalized = normalizeContent(raw).substring(0, charLimit);
-    return `\n=== SOURCE: ${prefix} ===\n${normalized}\n`;
-  } catch (error) {
-    console.error(`[DeepEnrichment] Jina scrape failed for ${url}:`, error);
-    return "";
-  }
-}
-
-// ─── Serper search ────────────────────────────────────────────────────────────
-async function serperSearch(query: string, prefix: string, serperKey: string): Promise<string> {
-  try {
-    const data = await withRetry(async () => {
-      const response = await fetch("https://google.serper.dev/search", {
-        method: "POST",
-        headers: { "X-API-KEY": serperKey, "Content-Type": "application/json" },
-        body: JSON.stringify({ q: query, num: 5 }),
-      });
-      if (!response.ok) throw new Error(`Status ${response.status}`);
-      return await response.json();
-    });
-
-    const snippets = (data.organic || [])
-      .map((res: any) => `${res.title}: ${res.snippet}`)
-      .join("\n");
-    return `\n=== SOURCE: ${prefix} ===\n${snippets || "NO RESULTS"}\n`;
-  } catch (error) {
-    console.error(`[DeepEnrichment] Serper failed for "${query}":`, error);
-    return "";
-  }
-}
-
-// ─── Serper raw fetch (used inline with withRetry) ────────────────────────────
-async function serperFetch(query: string, num: number, serperKey: string): Promise<any> {
-  return withRetry(async () => {
-    const r = await fetch("https://google.serper.dev/search", {
-      method: "POST",
-      headers: { "X-API-KEY": serperKey, "Content-Type": "application/json" },
-      body: JSON.stringify({ q: query, num }),
-    });
-    if (!r.ok) throw new Error(`Serper ${r.status}`);
-    return r.json();
-  });
-}
-
 // ─── Context deduplicator ─────────────────────────────────────────────────────
-// Removes identical lines seen across multiple sources — no repeated snippets sent to LLM.
 function deduplicateContext(sources: string[]): string {
   const seenLines = new Set<string>();
   const deduped: string[] = [];
-
   for (const block of sources) {
     if (!block.trim()) continue;
     const lines = block.split("\n");
@@ -129,7 +91,6 @@ function deduplicateContext(sources: string[]): string {
         keptLines.push(line);
         continue;
       }
-      // Never deduplicate lines that are purely numeric / tabular data (NIRF student counts)
       if (/^[\d\s\t,.|%-]+$/.test(key)) {
         keptLines.push(line);
         continue;
@@ -141,7 +102,6 @@ function deduplicateContext(sources: string[]): string {
     }
     if (keptLines.length > 0) deduped.push(keptLines.join("\n"));
   }
-
   return deduped.join("\n\n");
 }
 
@@ -149,363 +109,198 @@ export const runDeepEnrichment = action({
   args: {
     universityId: v.id("universities"),
   },
-  handler: async (ctx, args): Promise<{ success: boolean; skipped?: boolean; reason?: string; stakeholdersSynthesized?: number; demographicsIncluded?: boolean; contextChars?: number; estimatedTokens?: { flash: number; pro: number }; error?: string }> => {
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    success: boolean;
+    skipped?: boolean;
+    reason?: string;
+    stakeholdersSynthesized?: number;
+    demographicsIncluded?: boolean;
+    contextChars?: number;
+    estimatedTokens?: { flash: number; pro: number };
+    error?: string;
+  }> => {
     try {
       const university = await ctx.runQuery(internal.universities.getInternal, {
         universityId: args.universityId,
       });
-      
+
       // Fetch dynamic API key
       const apiKey = await ctx.runQuery(internal.settings.getInternalGeminiKey);
 
       if (!university) throw new Error("University not found");
       const uniName = university.university_name;
-      const url = typeof university.website === "string" ? university.website : "";
+      const url =
+        typeof university.website === "string" ? university.website : "";
 
-      // ─── Pre-Enrichment Cleanup ───────────────────────────────────────────
-      // If we are artificially running deep enrichment again, clear out the 
-      // previous AI signals, demographics, and stakeholders first.
-      await ctx.runMutation(internal.wipeEnrichment.clearSingleUniversityEnrichmentInternal, {
-        universityId: args.universityId,
-      });
+      if (!url) {
+        throw new Error(
+          `University ${uniName} has no website. Cannot run enrichment.`,
+        );
+      }
 
       console.log(`[DeepEnrichment] Starting for ${uniName}...`);
-      const serperKey = await ctx.runQuery(internal.settings.getInternalSerperKey);
-      if (!serperKey) throw new Error("SERPER API KEY is not set tightly in env variables");
 
-      // ─── Disambiguation fields ────────────────────────────────────────────
-      // Use address + state + zip_code to uniquely identify among campuses.
-      // E.g. "VIT University" → "Vellore" + "Tamil Nadu" + "632014" 
-      const state = university.state ?? "";
-      const zip = university.zip_code ?? "";
-      const address = university.address ?? "";
-      // Extract city from address (first meaningful word that looks like a city)
-      const cityMatch = address.match(/([A-Z][a-z]+(?:[\s-][A-Z][a-z]+)*)/g);
-      const city = cityMatch?.[0] ?? state;
-      // Unique qualifier: prefers zip (most precise), falls back to city, then state
-      const locationQualifier = zip ? zip : city ? city : state;
-      // For search: use both name and location to disambiguate
-      const disambigQuery = `"${uniName}" ${locationQualifier ? `"${locationQualifier}"` : ""}`.trim();
+      const firecrawlKey = await ctx.runQuery(
+        internal.settings.getInternalFirecrawlKey,
+      );
+      if (!firecrawlKey) {
+        throw new Error(
+          "FIRECRAWL API KEY is not set. Please configure it in Settings.",
+        );
+      }
 
       // ─── Domain extraction ────────────────────────────────────────────────
       const rawDomain = url.replace(/^https?:\/\//, "").replace(/\/$/, "");
       const domain = rawDomain.replace(/^www\./, "");
 
-      console.log(`[DeepEnrichment] Disambiguation: name="${uniName}", location="${locationQualifier}", domain="${domain}"`);
+      console.log(
+        `[DeepEnrichment] Domain="${domain}", starting Firecrawl pipeline...`,
+      );
 
-      // ─── Phase 0: Find NIRF institution code ─────────────────────────────
-      // This is critical: searching NIRF with just the name returns other campuses.
-      // Finding the institution code first enables precise data page scraping.
-      let nirfCode: string | null = null;
-      let nirfDataUrl: string | null = null;
+      // ─── Phase 1: Firecrawl Map → Discover high-yield URLs ───────────────
+      let highYieldUrls: string[] = [];
+      let mapResult: Awaited<ReturnType<typeof firecrawlMap>> | null = null;
       try {
-        const nirfCodeSearch = await serperFetch(
-          `site:nirfindia.org "${uniName}" ${locationQualifier} "IR-" institution code 2024 OR 2025`,
-          3, serperKey
+        mapResult = await withRetry(
+          async () => firecrawlMap(url, firecrawlKey),
+          { maxRetries: 2 },
         );
-        for (const result of (nirfCodeSearch.organic || [])) {
-          const snippet = (result.snippet || "") + (result.link || "");
-          const codeMatch = snippet.match(/IR-[A-Z]-U-\d{4}/);
-          if (codeMatch) {
-            nirfCode = codeMatch[0];
-            break;
-          }
-        }
-        // Also try extracting from snippet of NIRF ranking pages
-        if (!nirfCode) {
-          const nirfRankSearch = await serperFetch(
-            `nirfindia.org "${uniName}" ${locationQualifier} ranking student strength`,
-            5, serperKey
+        highYieldUrls = filterHighYieldUrls(mapResult, MAX_URLS_TO_SCRAPE);
+        console.log(
+          `[DeepEnrichment] Firecrawl map found ${mapResult.links?.length ?? 0} URLs; selected ${highYieldUrls.length} high-yield targets.`,
+        );
+      } catch (e) {
+        console.error("[DeepEnrichment] Firecrawl map failed:", e);
+        // Fallback: guess common subpages
+        highYieldUrls = [
+          `${url}/contact`,
+          `${url}/administration`,
+          `${url}/about`,
+          `${url}/anti-ragging`,
+          `${url}/mandatory-disclosure`,
+        ];
+      }
+
+      // ─── Phase 2: Firecrawl Scrape → Get clean Markdown ──────────────────
+      const scrapePromises = highYieldUrls.map(async (targetUrl) => {
+        try {
+          const result = await withRetry(
+            async () => firecrawlScrape(targetUrl, firecrawlKey),
+            { maxRetries: 1 },
           );
-          for (const result of (nirfRankSearch.organic || [])) {
-            const snippet = (result.snippet || "") + (result.link || "");
-            const codeMatch = snippet.match(/IR-[A-Z]-U-\d{4}/);
-            if (codeMatch) {
-              nirfCode = codeMatch[0];
-              nirfDataUrl = result.link;
-              break;
-            }
-          }
+          const markdown = result.data?.markdown || "";
+          const normalized = normalizeContent(markdown).substring(
+            0,
+            MAX_CHARS_PER_SOURCE,
+          );
+          return `\n=== SOURCE: ${targetUrl} ===\n${normalized}\n`;
+        } catch (e) {
+          console.error(`[DeepEnrichment] Scrape failed for ${targetUrl}:`, e);
+          return "";
         }
-        if (nirfCode) {
-          console.log(`[DeepEnrichment] Found NIRF code: ${nirfCode}`);
-        }
-      } catch { /* non-fatal */ }
+      });
 
-      // ─── Phase 1: Parallel Gather (12 targeted sources) ──────────────────
-      // ORDER MATTERS: Demographics sources first so they're never truncated by the 60k cap.
-      const gatheringPromises = [
-        // SOURCE 1: NIRF — use institution code if found, otherwise search with location
-        (async () => {
-          try {
-            const sources: string[] = [];
+      const scrapedBlocks = await Promise.all(scrapePromises);
+      const validBlocks = scrapedBlocks.filter(
+        (b) => b.length > MIN_BLOCK_LENGTH,
+      );
 
-            if (nirfCode) {
-              // Scrape institution-specific NIRF data pages
-              const nirfPages = await Promise.all([
-                jinaScrape(
-                  `https://www.nirfindia.org/Rankings/2025/UniversityRanking.html`,
-                  "NIRF 2025 University Page", JINA_CHARS_NIRF
-                ),
-                jinaScrape(nirfDataUrl || `https://www.nirfindia.org/Rankings/2024/UniversityRanking.html`,
-                  "NIRF 2024 Page", JINA_CHARS_NIRF
-                ),
-              ]);
-              sources.push(...nirfPages);
-            }
+      // ─── Phase 2b: Zero-Cost Regex Fallback Extraction ───────────────────
+      // If contacts exist in raw Markdown, they are physically impossible to miss.
+      const regexEmails = new Set<string>();
+      const regexPhones = new Set<string>();
+      for (const block of validBlocks) {
+        const result = extractContactsFromMarkdown(block);
+        result.emails.forEach((e) => regexEmails.add(e));
+        result.phones.forEach((p) => regexPhones.add(p));
+      }
+      // Cap to avoid bloating the prompt (rare edge case: pages with hundreds of emails)
+      const uniqueRegexEmails = Array.from(regexEmails).slice(
+        0,
+        MAX_REGEX_CONTACTS,
+      );
+      const uniqueRegexPhones = Array.from(regexPhones).slice(
+        0,
+        MAX_REGEX_CONTACTS,
+      );
+      console.log(
+        `[DeepEnrichment] Regex fallback found ${uniqueRegexEmails.length} emails, ${uniqueRegexPhones.length} phones.`,
+      );
 
-            // Also do targeted keyword search using disambig query
-            const [nirfSearch, nirfSnippets] = await Promise.all([
-              serperFetch(
-                `${disambigQuery} site:nirfindia.org "Student Strength" OR "Hostellers" OR "Day Scholars" 2023 OR 2024`,
-                4, serperKey
-              ),
-              serperSearch(
-                `NIRF 2023 OR 2024 ${disambigQuery} "Total Students" OR "Hostellers" OR "Day Scholars"`,
-                "NIRF Snippets", serperKey
-              ),
-            ]);
-
-            // Filter NIRF links to only institution-specific data pages (not overall report PDFs)
-            const nirfLinks: string[] = (nirfSearch.organic || [])
-              .slice(0, 4)
-              .map((r: any) => r.link)
-              .filter((l: string | undefined): l is string =>
-                !!l && !l.endsWith(".pdf") && (
-                  l.includes("nirfindia.org") || l.includes("nirf")
-                )
-              );
-
-            const nirfScrapes = await Promise.all(
-              nirfLinks.map((l: string) => jinaScrape(l, "NIRF Page", JINA_CHARS_NIRF))
-            );
-            sources.push(...nirfScrapes, nirfSnippets);
-            return sources.join("\n");
-          } catch { return ""; }
-        })(),
-
-        // SOURCE 2: AISHE/NAAC data snippets — include name variations for XIM (XUB)
-        serperSearch(
-          `${disambigQuery} OR "XUB" OR "Xavier University Bhubaneswar" AISHE "2022-23" OR "2023-24" "Total Students" "Hostellers" "Day Scholars"`,
-          "AISHE/NAAC Data", serperKey
-        ),
-
-        // SOURCE 3: Student strength with location qualifier + capacity keywords
-        serperSearch(
-          `${disambigQuery} "student strength" OR "total enrollment" OR "hostel capacity" OR "hostel intake" 2023 OR 2024`,
-          "Student Strength & Capacity", serperKey
-        ),
-
-        // SOURCE 4: Mandatory Disclosure — search university domain specifically
-        (async () => {
-          try {
-            const [discSearch, naacSnippets] = await Promise.all([
-              serperFetch(
-                domain
-                  ? `site:${rawDomain} "mandatory disclosure" OR "UGC" "hostel" OR "day scholars" OR "total students"`
-                  : `${disambigQuery} "Mandatory Disclosure" 2023 OR 2024 "Total Students" "Hostellers" "Day Scholars"`,
-                3, serperKey
-              ),
-              serperSearch(
-                `${disambigQuery} OR "XUB" "NAAC SSR" OR "AQAR" 2022 OR 2023 OR 2024 "Criterion 4.1.1" OR "hostel blocks" OR "accommodation"`,
-                "NAAC/AQAR Snippets", serperKey
-              ),
-            ]);
-            const discLink = discSearch.organic?.[0]?.link;
-            const discScrape = discLink && !discLink.endsWith(".pdf")
-              ? await jinaScrape(discLink, "Mandatory Disclosure")
-              : discSearch.organic?.[0]
-                ? `=== SOURCE: Mandatory Disclosure ===\n${discSearch.organic[0].title}: ${discSearch.organic[0].snippet}\n`
-                : "";
-            return discScrape + naacSnippets;
-          } catch { return ""; }
-        })(),
-
-        // SOURCE 5: NAAC SSR hostelite data — include domain-specific search
-        (async () => {
-          try {
-            const [naacSearch, hostelSnippets] = await Promise.all([
-              serperFetch(
-                domain
-                  ? `site:${rawDomain} "hostelites" OR "hostel facilities" OR "Criterion 2" students OR capacity`
-                  : `${disambigQuery} NAAC SSR "hostelites" OR "day scholars" "boys hostel" OR "girls hostel"`,
-                3, serperKey
-              ),
-              serperSearch(
-                `${disambigQuery} "hostelites" OR "hostellers" OR "day scholars" male female capacity 2023 OR 2024 OR 2025`,
-                "Hostelite Snippets", serperKey
-              ),
-            ]);
-            const naacLinks: string[] = (naacSearch.organic || [])
-              .slice(0, 2).map((r: any) => r.link).filter((l: string) => l && !l.endsWith(".pdf"));
-            const naacScrapes = await Promise.all(
-              naacLinks.map((l: string) => jinaScrape(l, "NAAC SSR Hostelites"))
-            );
-            return naacScrapes.join("\n") + hostelSnippets;
-          } catch { return ""; }
-        })(),
-
-        // SOURCE 6: Official Website Homepage
-        jinaScrape(url, "Official Website"),
-
-        // SOURCE 7: Internal Admin/Contact — search within domain for contact emails
-        (async () => {
-          try {
-            const contactPages = domain
-              ? [`${url}/administration`, `${url}/contact`, `${url}/about/administration`]
-              : [];
-            const searchData = await serperFetch(
-              domain
-                ? `site:${rawDomain} "Vice Chancellor" OR "Registrar" OR "contact" email phone`
-                : `${disambigQuery} "Vice Chancellor" OR "Registrar" contact email phone`,
-              2, serperKey
-            );
-            const links = [
-              ...(searchData.organic || []).slice(0, 2).map((r: any) => r.link).filter((l: string) => l && l !== url),
-              ...contactPages,
-            ].slice(0, 3);
-            return (await Promise.all(links.map((l: string) => jinaScrape(l, "Admin/Contact Page")))).join("\n");
-          } catch { return ""; }
-        })(),
-
-        // SOURCE 8: LinkedIn profiles — use name + location for disambiguation
-        serperSearch(
-          `site:linkedin.com/in/ "Vice Chancellor" OR "Registrar" OR "Chief Warden" "${uniName}" ${locationQualifier}`,
-          "LinkedIn Profiles", serperKey
-        ),
-
-        // SOURCE 9: Internal site email/phone using domain
-        serperSearch(
-          domain
-            ? `site:${rawDomain} "@${domain}" OR "Phone:" "Vice Chancellor" OR "Registrar" OR "Dean"`
-            : `${disambigQuery} "Vice Chancellor" OR "Registrar" email phone "@" contact`,
-          "Internal Contacts", serperKey
-        ),
-
-        // SOURCE 10: External directory listing with location
-        serperSearch(
-          `${disambigQuery} "Vice Chancellor" OR "Registrar" "email" OR "mobile" "@"`,
-          "External Directory", serperKey
-        ),
-
-        // SOURCE 11: Anti-ragging statutory disclosure — best source for hostelites + committee contacts
-        (async () => {
-          try {
-            const [antiRagSearch, antiRagSnippets] = await Promise.all([
-              serperFetch(
-                domain
-                  ? `site:${rawDomain} "anti-ragging" "hostelites" OR "day scholars" committee`
-                  : `${disambigQuery} "anti-ragging" "hostelites" OR "day scholars" committee`,
-                3, serperKey
-              ),
-              serperSearch(
-                `"anti-ragging" ${disambigQuery} "hostelites" OR "day scholars" contact committee email phone mobile`,
-                "Anti-Ragging + Hostelites", serperKey
-              ),
-            ]);
-            const arLinks: string[] = (antiRagSearch.organic || [])
-              .slice(0, 2).map((r: any) => r.link).filter((l: string) => l && !l.endsWith(".pdf"));
-            const arScrapes = await Promise.all(
-              arLinks.map((l: string) => jinaScrape(l, "Anti-Ragging Page"))
-            );
-            return arScrapes.join("\n") + antiRagSnippets;
-          } catch { return ""; }
-        })(),
-
-        // SOURCE 12: UGC HEI Portal — official data including hostelite stats
-        (async () => {
-          try {
-            const ugcSearch = await serperFetch(
-              `site:hei.ugc.ac.in "${uniName}" ${locationQualifier} "hostelites" OR "total students" OR "day scholars"`,
-              2, serperKey
-            );
-            const ugcLink = ugcSearch.organic?.[0]?.link;
-            if (ugcLink) {
-              return await jinaScrape(ugcLink, "UGC HEI Portal");
-            }
-            // UGC HEI portal hostelite search
-            return await serperSearch(
-              `hei.ugc.ac.in ${disambigQuery} "hostelites" OR "enrolled" OR "total students"`,
-              "UGC HEI Portal", serperKey
-            );
-          } catch { return ""; }
-        })(),
-      ];
-
-      const gatheredResults = await Promise.all(gatheringPromises);
-
-      // ─── Normalise + Deduplicate before sending to LLM ───────────────────
-      const rawContext = deduplicateContext(gatheredResults);
+      // ─── Phase 3: Deduplicate & Cap context ──────────────────────────────
+      const rawContext = deduplicateContext(validBlocks);
       const finalContext = rawContext.substring(0, MAX_CONTEXT_CHARS);
 
       console.log(
-        `[DeepEnrichment] Context: ${rawContext.length} chars → capped at ${finalContext.length} chars`
+        `[DeepEnrichment] Context: ${rawContext.length} chars → capped at ${finalContext.length} chars (${validBlocks.length} sources).`,
       );
 
-      // ─── Phase 1: Parallel Flash Pre-Extraction ───────────────────────────
-      // Send each raw source to Flash to extract structured facts first.
-      console.log(`[DeepEnrichment] Phase 1: Running parallel Flash extraction on ${gatheredResults.length} sources`);
-      const flashPromises = gatheredResults.map(async (sourceText) => {
-        if (!sourceText || sourceText.trim().length < 100) return null;
-        try {
-          const factsStr = await callFlash({
-            apiKey,
-            systemPrompt: FLASH_EXTRACTION_PROMPT,
-            userPrompt: sourceText.substring(0, 8000), // Keep input tight for max speed
-            responseAsJson: true,
-            responseSchema: DEEP_ENRICHMENT_SCHEMA, // CRITICAL FIX: Force strict structured output in Phase 1
-            temperature: 0,
-          });
-          return JSON.parse(factsStr);
-        } catch (e) {
-          console.error("[DeepEnrichment] Phase 1 Extraction Error on chunk:", e);
-          return null; // Ignore errors from individual source extractions
-        }
-      });
-      const extractedFactsArray = await Promise.all(flashPromises);
-      const validFacts = extractedFactsArray.filter(Boolean);
-      const factsContext = JSON.stringify(validFacts, null, 2);
-      console.log(`[DeepEnrichment] Phase 1 Complete. Extracted ${validFacts.length} fact objects.`);
-
-      // ─── Phase 2: Pro Synthesis ───────────────────────────────────────────
-      // Give Pro the pre-extracted facts JSON (high confidence) + raw context (fallback)
-      const synthesisPrompt = `
+      // ─── Phase 4: Single-Pass Gemini 3.5 Flash Extraction ─────────────────
+      // Replaces the old 12× Flash + Pro two-phase pipeline.
+      // Gemini 3.5 Flash has 1M context, stable structured output, and is 25% cheaper than Pro.
+      const extractionPrompt = `
 UNIVERSITY BEING ENRICHED:
   Name: ${uniName}
-  Location: ${state ? state + ", " : ""}India${zip ? ` (ZIP: ${zip})` : ""}${address ? `\n  Address: ${address}` : ""}
   Website: ${url || "unknown"}
-${nirfCode ? `  NIRF Code: ${nirfCode}` : ""}
 
-⚠️ DISAMBIGUATION ALERT: Multiple institutions may share a similar name (e.g. VIT Vellore vs VIT-AP vs VIT Chennai, or Yenepoya University vs Yenepoya Medical College, or SRM University vs SRM IST).
-ONLY extract data that belongs to the EXACT institution above (matching name + location).
-If you see data for another campus, IGNORE it completely.
+EXTRACT EVERY STAKEHOLDER AND DEMOGRAPHIC FACT from the web pages below.
+Rules:
+- Extract ALL emails and phone numbers found — do not stop at target roles.
+- Include administrative staff, secretaries, office assistants, committee members.
+- If a list has 10 names with 10 phones, extract all 10.
+- Use null for missing values, never 0.
+- Indian phone format: +91XXXXXXXXXX
 
-PRE-EXTRACTED FACTS (High Confidence):
-${factsContext}
+ALSO EXTRACT:
+- total_students, hostelites, day_scholars (with gender splits if available)
+- NIRF program-wise student data if present
+- NAAC / IQAC / Mandatory Disclosure hostelite numbers
 
-RAW SOURCE CONTEXT (For verification & fallback):
-${finalContext.substring(0, 20000)}
+PRE-DISCOVERED CONTACTS (from regex scan — verify and merge):
+Emails: ${uniqueRegexEmails.join(", ") || "none"}
+Phones: ${uniqueRegexPhones.join(", ") || "none"}
 
-Synthesize the final result using the PRE-EXTRACTED FACTS. Only pull from RAW SOURCE CONTEXT if data is missing or conflicting.
+WEB PAGE CONTENT:
+${finalContext.substring(0, 90_000)}
       `.trim();
 
       let synthesizedJson;
       try {
-        console.log(`[DeepEnrichment] Phase 2: Running Pro synthesis`);
+        console.log(
+          `[DeepEnrichment] Phase 4: Running Gemini 3.5 Flash extraction (model: gemini-3.5-flash)`,
+        );
+        const startMs = Date.now();
         const resultText = await callGemini({
           apiKey,
+          model: "gemini-3.5-flash",
           systemPrompt: DEEP_ENRICHMENT_SYNTHESIS_PROMPT(TARGET_ROLES),
-          userPrompt: synthesisPrompt,
-          temperature: 0.1,
+          userPrompt: extractionPrompt,
+          temperature: 0.05,
           responseAsJson: true,
           responseSchema: DEEP_ENRICHMENT_SCHEMA,
-          thinkingBudget: THINKING.low, // Dropped from 1024 to 512, since facts are largely pre-structured
+          thinkingBudget: THINKING.off, // Flash: thinking off for speed
+          maxOutputTokens: 8192,
         });
+        console.log(
+          `[DeepEnrichment] Gemini latency: ${Date.now() - startMs}ms`,
+        );
 
-    const cleanedText = resultText.replace(/^```(json)?\n?/, "").replace(/\n?```$/, "").trim();
-    synthesizedJson = JSON.parse(cleanedText);
-    console.log("[DeepEnrichment] Synthesized:", JSON.stringify(synthesizedJson, null, 2));
-  } catch (e) {
+        const cleanedText = resultText
+          .replace(/^```(json)?\n?/, "")
+          .replace(/\n?```$/, "")
+          .trim();
+        synthesizedJson = JSON.parse(cleanedText);
+        if (!synthesizedJson || typeof synthesizedJson !== "object") {
+          throw new Error("Malformed synthesis: expected object");
+        }
+        console.log(
+          "[DeepEnrichment] Synthesized:",
+          JSON.stringify(synthesizedJson, null, 2),
+        );
+      } catch (e) {
         console.error("[DeepEnrichment] Failed to parse Gemini output:", e);
         throw new Error("Failed to synthesize intelligence data");
       }
@@ -538,20 +333,36 @@ Synthesize the final result using the PRE-EXTRACTED FACTS. Only pull from RAW SO
         hostelites_female: toNumStrict(demographics.hostelites_female),
         source: demographics.source ?? undefined,
         // NIRF block
-        nirf_source: typeof demographics.nirf_source === "string" ? demographics.nirf_source : undefined,
+        nirf_source:
+          typeof demographics.nirf_source === "string"
+            ? demographics.nirf_source
+            : undefined,
         nirf_total: toNum(demographics.nirf_total),
         nirf_male: toNum(demographics.nirf_male),
         nirf_female: toNum(demographics.nirf_female),
         nirf_programs: Array.isArray(demographics.nirf_programs)
           ? demographics.nirf_programs
-              .filter((p: any) => typeof p.name === "string" && p.name.trim())
-              .map((p: any) => ({
-                name: p.name.trim(),
-                male: toNum(p.male),
-                female: toNum(p.female),
-                total: toNum(p.total) ?? (toNum(p.male) != null && toNum(p.female) != null
-                  ? (toNum(p.male) ?? 0) + (toNum(p.female) ?? 0) : undefined),
-              }))
+              .filter(
+                (p: { name?: string }) =>
+                  typeof p.name === "string" && p.name.trim(),
+              )
+              .map(
+                (p: {
+                  name: string;
+                  male?: number | string;
+                  female?: number | string;
+                  total?: number | string;
+                }) => ({
+                  name: p.name.trim(),
+                  male: toNum(p.male),
+                  female: toNum(p.female),
+                  total:
+                    toNum(p.total) ??
+                    (toNum(p.male) != null && toNum(p.female) != null
+                      ? (toNum(p.male) ?? 0) + (toNum(p.female) ?? 0)
+                      : undefined),
+                }),
+              )
           : undefined,
       };
 
@@ -559,19 +370,32 @@ Synthesize the final result using the PRE-EXTRACTED FACTS. Only pull from RAW SO
         // Inference chain — run in order so each inferred value can feed the next
 
         // 1. Compute totals from splits if missing
-        if (!demo.total_students && demo.total_students_male && demo.total_students_female)
-          demo.total_students = demo.total_students_male + demo.total_students_female;
+        if (
+          !demo.total_students &&
+          demo.total_students_male &&
+          demo.total_students_female
+        )
+          demo.total_students =
+            demo.total_students_male + demo.total_students_female;
         if (!demo.hostelites && demo.hostelites_male && demo.hostelites_female)
           demo.hostelites = demo.hostelites_male + demo.hostelites_female;
-        if (!demo.day_scholars && demo.day_scholars_male && demo.day_scholars_female)
+        if (
+          !demo.day_scholars &&
+          demo.day_scholars_male &&
+          demo.day_scholars_female
+        )
           demo.day_scholars = demo.day_scholars_male + demo.day_scholars_female;
 
         // 2. ⚠️ SANITY GATE: hostelites CANNOT exceed total_students.
         // If it happens, total_students was likely extracted from a subset/single college.
         // → DISCARD the invalid total, DO NOT discard the valid hostelites!
-        if (demo.hostelites && demo.total_students && demo.hostelites > demo.total_students) {
+        if (
+          demo.hostelites &&
+          demo.total_students &&
+          demo.hostelites > demo.total_students
+        ) {
           console.warn(
-            `[DeepEnrichment] REJECTED total_students (${demo.total_students}) — smaller than hostelites (${demo.hostelites}). Discarding invalid total.`
+            `[DeepEnrichment] REJECTED total_students (${demo.total_students}) — smaller than hostelites (${demo.hostelites}). Discarding invalid total.`,
           );
           demo.total_students = undefined;
           demo.total_students_male = undefined;
@@ -579,9 +403,13 @@ Synthesize the final result using the PRE-EXTRACTED FACTS. Only pull from RAW SO
         }
 
         // Similarly: day_scholars cannot exceed total_students
-        if (demo.day_scholars && demo.total_students && demo.day_scholars > demo.total_students) {
+        if (
+          demo.day_scholars &&
+          demo.total_students &&
+          demo.day_scholars > demo.total_students
+        ) {
           console.warn(
-            `[DeepEnrichment] REJECTED total_students (${demo.total_students}) — smaller than day_scholars (${demo.day_scholars}). Discarding invalid total.`
+            `[DeepEnrichment] REJECTED total_students (${demo.total_students}) — smaller than day_scholars (${demo.day_scholars}). Discarding invalid total.`,
           );
           demo.total_students = undefined;
           demo.total_students_male = undefined;
@@ -591,10 +419,10 @@ Synthesize the final result using the PRE-EXTRACTED FACTS. Only pull from RAW SO
         // 3. If total is unknown but we have hostelites, use it only as a reasonable floor.
         //    Guard: reject if hostelites itself seems implausible vs. NIRF (>2× nirf_total)
         if (!demo.total_students && demo.hostelites) {
-          const nerfFloor = demo.nirf_total;
-          if (nerfFloor && demo.hostelites > nerfFloor * 2) {
+          const nirfFloor = demo.nirf_total;
+          if (nirfFloor && demo.hostelites > nirfFloor * 2) {
             console.warn(
-              `[DeepEnrichment] REJECTED hostelites (${demo.hostelites}) — >2× NIRF total (${nerfFloor}). Likely hostel capacity data.`
+              `[DeepEnrichment] REJECTED hostelites (${demo.hostelites}) — >2× NIRF total (${nirfFloor}). Likely hostel capacity data.`,
             );
             demo.hostelites = undefined;
           } else {
@@ -605,50 +433,90 @@ Synthesize the final result using the PRE-EXTRACTED FACTS. Only pull from RAW SO
 
         // Case: total missing but day_scholars present (and reasonable)
         if (!demo.total_students && demo.day_scholars) {
-          const nerfFloor = demo.nirf_total;
-          if (!nerfFloor || demo.day_scholars <= nerfFloor * 2) {
+          const nirfFloor = demo.nirf_total;
+          if (!nirfFloor || demo.day_scholars <= nirfFloor * 2) {
             demo.total_students = demo.day_scholars;
           }
         }
 
         // 4. Infer day_scholars from total - hostelites (or vice versa)
         if (!demo.day_scholars && demo.total_students && demo.hostelites)
-          demo.day_scholars = Math.max(0, demo.total_students - demo.hostelites);
+          demo.day_scholars = Math.max(
+            0,
+            demo.total_students - demo.hostelites,
+          );
         if (!demo.hostelites && demo.total_students && demo.day_scholars)
-          demo.hostelites = Math.max(0, demo.total_students - demo.day_scholars);
+          demo.hostelites = Math.max(
+            0,
+            demo.total_students - demo.day_scholars,
+          );
 
         // 5. Infer gender splits for day_scholars if not found
-        if (!demo.day_scholars_male && demo.total_students_male && demo.hostelites_male)
-          demo.day_scholars_male = Math.max(0, demo.total_students_male - demo.hostelites_male);
-        if (!demo.day_scholars_female && demo.total_students_female && demo.hostelites_female)
-          demo.day_scholars_female = Math.max(0, demo.total_students_female - demo.hostelites_female);
+        if (
+          !demo.day_scholars_male &&
+          demo.total_students_male &&
+          demo.hostelites_male
+        )
+          demo.day_scholars_male = Math.max(
+            0,
+            demo.total_students_male - demo.hostelites_male,
+          );
+        if (
+          !demo.day_scholars_female &&
+          demo.total_students_female &&
+          demo.hostelites_female
+        )
+          demo.day_scholars_female = Math.max(
+            0,
+            demo.total_students_female - demo.hostelites_female,
+          );
       }
 
-
-      if (demo && Object.values(demo).some(val => typeof val === "number" && val > 0)) {
-        console.log("[DeepEnrichment] Saving demographics:", JSON.stringify(demo));
-        await ctx.runMutation(internal.universities.updateDemographicsInternal, {
-          universityId: args.universityId,
-          demographics: demo,
-        });
+      if (
+        demo &&
+        Object.values(demo).some((val) => typeof val === "number" && val > 0)
+      ) {
+        console.log(
+          "[DeepEnrichment] Saving demographics:",
+          JSON.stringify(demo),
+        );
+        await ctx.runMutation(
+          internal.universities.updateDemographicsInternal,
+          {
+            universityId: args.universityId,
+            demographics: demo,
+          },
+        );
       } else {
-        console.warn("[DeepEnrichment] No demographics. Raw:", JSON.stringify(demographics));
+        console.warn(
+          "[DeepEnrichment] No demographics. Raw:",
+          JSON.stringify(demographics),
+        );
       }
 
-      // FIX: Sort by data richness before slicing to keep the 10 most complete records.
-      // Previously .slice(0,10) cut by model output order — could discard records with email+phone.
-      const richness = (st: any) =>
-        (st.email ? 2 : 0) + (st.phone ? 1 : 0) + (st.linkedin_url ? 1 : 0) + (st.name ? 1 : 0);
+      // Sort by data richness so highest-quality stakeholders are upserted first
+      interface StakeholderCandidate {
+        name?: string;
+        email?: string;
+        phone?: string;
+        linkedin_url?: string;
+        role?: string;
+      }
 
-      const validStakeholders = (stakeholders || [])
-        .filter((st: any) => st.name || st.email)
-        .sort((a: any, b: any) => richness(b) - richness(a))
-        .slice(0, 10);
+      const richness = (st: StakeholderCandidate) =>
+        (st.email ? 2 : 0) +
+        (st.phone ? 1 : 0) +
+        (st.linkedin_url ? 1 : 0) +
+        (st.name ? 1 : 0);
+
+      const validStakeholders = ((stakeholders as StakeholderCandidate[]) || [])
+        .filter((st) => st.name || st.email)
+        .sort((a, b) => richness(b) - richness(a));
 
       if (validStakeholders.length > 0) {
         await ctx.runMutation(internal.stakeholders.upsertBulkInternal, {
           university_id: args.universityId,
-          stakeholders: validStakeholders.map((st: any) => ({
+          stakeholders: validStakeholders.map((st) => ({
             name: st.name || undefined,
             role: st.role || undefined,
             email: st.email || undefined,
@@ -670,17 +538,14 @@ Synthesize the final result using the PRE-EXTRACTED FACTS. Only pull from RAW SO
 
       // ─── Cost / Usage Logging ─────────────────────────────────────────────
       // Rough token estimate: 1 token ≈ 4 chars. Log for spend awareness.
-      const phase1Calls = gatheredResults.filter(s => s && s.trim().length >= 100).length;
-      const phase1InputChars = gatheredResults.reduce((sum, s) => sum + Math.min((s || "").length, 8000), 0);
-      const phase2InputChars = synthesisPrompt.length;
-      const estimatedFlashTokens = Math.round(phase1InputChars / 4);
-      const estimatedProTokens = Math.round((phase2InputChars + finalContext.substring(0, 20000).length) / 4);
+      const firecrawlCredits = 1 + validBlocks.length; // 1 map + N scrapes
+      const flashInputChars = extractionPrompt.length;
+      const estimatedFlashTokens = Math.round(flashInputChars / 4);
       console.log(
         `[DeepEnrichment] COST ESTIMATE for ${uniName}:\n` +
-        `  Serper queries: 12 (fixed)\n` +
-        `  Flash Phase 1 calls: ${phase1Calls}, ~${estimatedFlashTokens.toLocaleString()} input tokens\n` +
-        `  Pro Phase 2: 1 call, ~${estimatedProTokens.toLocaleString()} input tokens\n` +
-        `  Context: ${finalContext.length.toLocaleString()} chars (raw: ${rawContext.length.toLocaleString()})`
+          `  Firecrawl credits: ${firecrawlCredits} (1 map + ${validBlocks.length} scrapes)\n` +
+          `  Gemini 3.5 Flash: 1 call, ~${estimatedFlashTokens.toLocaleString()} input tokens\n` +
+          `  Context: ${finalContext.length.toLocaleString()} chars (raw: ${rawContext.length.toLocaleString()})`,
       );
 
       return {
@@ -688,13 +553,17 @@ Synthesize the final result using the PRE-EXTRACTED FACTS. Only pull from RAW SO
         stakeholdersSynthesized: validStakeholders.length,
         demographicsIncluded: !!demographics,
         contextChars: finalContext.length,
-        estimatedTokens: { flash: estimatedFlashTokens, pro: estimatedProTokens },
+        estimatedTokens: {
+          flash: estimatedFlashTokens,
+          pro: 0, // legacy field — we no longer use Pro
+        },
       };
-
     } catch (e) {
       console.error("[DeepEnrichment] Fatal error:", e);
-      Sentry.captureException(e, { extra: { universityId: args.universityId } });
+      Sentry.captureException(e, {
+        extra: { universityId: args.universityId },
+      });
       return { success: false, error: String(e) };
     }
-  }
+  },
 });

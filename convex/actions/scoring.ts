@@ -17,23 +17,33 @@ export const scoreUniversity = action({
       const uni = await ctx.runQuery(internal.universities.getInternal, {
         universityId: args.universityId,
       });
-      
+
       // Fetch dynamic API key
       const apiKey = await ctx.runQuery(internal.settings.getInternalGeminiKey);
       if (!uni) throw new Error("University not found");
 
-      const signals = await ctx.runQuery(internal.signals.listByUniversityInternal, {
-        university_id: args.universityId,
-      });
+      const signals = await ctx.runQuery(
+        internal.signals.listByUniversityInternal,
+        {
+          university_id: args.universityId,
+        },
+      );
 
-      const stakeholders = await ctx.runQuery(internal.stakeholders.getByUniversityInternal, {
-        university_id: args.universityId,
-      });
+      const stakeholders = await ctx.runQuery(
+        internal.stakeholders.getByUniversityInternal,
+        {
+          university_id: args.universityId,
+        },
+      );
 
       console.log(`[Scoring] Starting scoring for ${uni.university_name}`);
 
       // 1. Deterministic Score (Now includes stakeholder count)
-      const { deterministic_score, factors } = calculateDeterministicScore(uni, signals, stakeholders.length);
+      const { deterministic_score, factors } = calculateDeterministicScore(
+        uni,
+        signals,
+        stakeholders.length,
+      );
 
       // 2. AI Score (Gemini 3 Flash)
       let ai_score = 5; // default fallback
@@ -42,11 +52,17 @@ export const scoreUniversity = action({
         // We now always call the LLM if we have some data (demographics, stakeholders, or signals)
         if (signals.length > 0 || uni.demographics || stakeholders.length > 0) {
           const signalText = signals
-            .map((s: any) => `[${s.signal_type.toUpperCase()}] ${s.content}`)
+            .map(
+              (s: { signal_type: string; content: string }) =>
+                `[${s.signal_type.toUpperCase()}] ${s.content}`,
+            )
             .join("\n");
-            
+
           const stakeholderText = stakeholders
-            .map((s: any) => `- ${s.name} (${s.role})`)
+            .map(
+              (s: { name?: string; role?: string }) =>
+                `- ${s.name || "Unnamed"} (${s.role || "Unknown role"})`,
+            )
             .join("\n");
 
           const prompt = `
@@ -64,6 +80,7 @@ Web/News Signals:
 ${signalText || "None found"}
 `.trim();
 
+          const startMs = Date.now();
           const resultText = await callFlash({
             apiKey,
             systemPrompt: SCORING_SYSTEM_PROMPT,
@@ -73,15 +90,22 @@ ${signalText || "None found"}
             temperature: 0.1, // low temp for objective scoring
             // Flash default — no thinkingBudget needed, fast & cheap
           });
+          console.log(
+            `[Scoring] Flash-Lite latency: ${Date.now() - startMs}ms`,
+          );
 
           const parsed = JSON.parse(resultText);
           if (typeof parsed.ai_score === "number") {
             ai_score = Math.min(10, Math.max(0, parsed.ai_score));
             ai_reasoning = parsed.ai_reasoning || ai_reasoning;
-            console.log(`[Scoring] AI Score from Gemini: ${ai_score}/10. Reasoning: ${ai_reasoning}`);
+            console.log(
+              `[Scoring] AI Score from Gemini: ${ai_score}/10. Reasoning: ${ai_reasoning}`,
+            );
           }
         } else {
-           console.log(`[Scoring] No signals, demographics, or stakeholders found, using default AI score: 5/10`);
+          console.log(
+            `[Scoring] No signals, demographics, or stakeholders found, using default AI score: 5/10`,
+          );
         }
       } catch (e) {
         console.error("[Scoring] Gemini scoring failed, using default:", e);
@@ -90,7 +114,9 @@ ${signalText || "None found"}
       // 3. Final Score
       // Deterministic is out of 100. AI is 0-10 (scale up to 100).
       // Let's use 70% deterministic, 30% AI.
-      const final_score = Math.round(deterministic_score * 0.7 + ai_score * 10 * 0.3);
+      const final_score = Math.round(
+        deterministic_score * 0.7 + ai_score * 10 * 0.3,
+      );
 
       // 4. Determine Lead Tier (Adjusted thresholds based on new formula)
       let lead_tier: "High" | "Medium" | "Low" = "Low";
@@ -109,7 +135,7 @@ ${signalText || "None found"}
       });
 
       console.log(
-        `[Scoring] Completed for ${uni.university_name}. Final: ${final_score}, Tier: ${lead_tier}`
+        `[Scoring] Completed for ${uni.university_name}. Final: ${final_score}, Tier: ${lead_tier}`,
       );
 
       return {

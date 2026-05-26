@@ -1,19 +1,21 @@
-import { mutation, query, internalMutation, internalQuery } from "./_generated/server";
+import {
+  mutation,
+  query,
+  internalMutation,
+  internalQuery,
+} from "./_generated/server";
 import { v } from "convex/values";
 import { validateAuth } from "./lib/auth_utils";
 
 export const list = query({
   args: {},
   handler: async (ctx, args) => {
-    const logs = await ctx.db
-      .query("replyLogs")
-      .order("desc")
-      .take(50);
+    const logs = await ctx.db.query("replyLogs").order("desc").take(50);
     return await Promise.all(
       logs.map(async (log) => {
         const uni = await ctx.db.get(log.university_id);
         return { ...log, university_name: uni?.university_name ?? "Unknown" };
-      })
+      }),
     );
   },
 });
@@ -23,7 +25,9 @@ export const listByUniversity = query({
   handler: async (ctx, args) => {
     return await ctx.db
       .query("replyLogs")
-      .withIndex("by_university", (q) => q.eq("university_id", args.university_id))
+      .withIndex("by_university", (q) =>
+        q.eq("university_id", args.university_id),
+      )
       .collect();
   },
 });
@@ -54,7 +58,7 @@ export const classify = internalMutation({
       v.literal("not_interested"),
       v.literal("opt_out"),
       v.literal("out_of_office"),
-      v.literal("other")
+      v.literal("other"),
     ),
     confidence: v.optional(v.number()),
   },
@@ -68,8 +72,7 @@ export const insertInternal = internalMutation({
   args: {
     university_id: v.id("universities"),
     stakeholder_id: v.id("stakeholders"),
-    from_email: v.string(),
-    subject: v.string(),
+    email_id: v.optional(v.id("emailsSent")),
     raw_reply: v.string(),
     received_at: v.number(),
   },
@@ -88,7 +91,7 @@ export const updateClassificationInternal = internalMutation({
       v.literal("not_interested"),
       v.literal("opt_out"),
       v.literal("out_of_office"),
-      v.literal("other")
+      v.literal("other"),
     ),
     action_taken: v.optional(v.string()),
   },

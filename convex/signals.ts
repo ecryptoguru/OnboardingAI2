@@ -1,4 +1,10 @@
-import { mutation, query, action, internalMutation, internalQuery } from "./_generated/server";
+import {
+  mutation,
+  query,
+  action,
+  internalMutation,
+  internalQuery,
+} from "./_generated/server";
 import { v } from "convex/values";
 import { validateAuth } from "./lib/auth_utils";
 
@@ -7,7 +13,9 @@ export const listByUniversity = query({
   handler: async (ctx, args) => {
     return await ctx.db
       .query("universitySignals")
-      .withIndex("by_university", (q) => q.eq("university_id", args.university_id))
+      .withIndex("by_university", (q) =>
+        q.eq("university_id", args.university_id),
+      )
       .collect();
   },
 });
@@ -20,7 +28,7 @@ export const insert = mutation({
       v.literal("linkedin"),
       v.literal("website"),
       v.literal("manual"),
-      v.literal("image")
+      v.literal("image"),
     ),
     content: v.string(),
     source_url: v.optional(v.string()),
@@ -46,7 +54,9 @@ export const vectorSearch = action({
     const universityId = args.university_id;
     return await ctx.vectorSearch("universitySignals", "by_embedding", {
       vector: args.embedding,
-      filter: universityId ? (q) => q.eq("university_id", universityId) : undefined,
+      filter: universityId
+        ? (q) => q.eq("university_id", universityId)
+        : undefined,
       limit: args.limit ?? 10,
     });
   },
@@ -60,13 +70,28 @@ export const insertInternal = internalMutation({
       v.literal("linkedin"),
       v.literal("website"),
       v.literal("manual"),
-      v.literal("image")
+      v.literal("image"),
     ),
     content: v.string(),
     source_url: v.optional(v.string()),
     embedding: v.array(v.float64()),
   },
   handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("universitySignals")
+      .withIndex("by_university", (q) =>
+        q.eq("university_id", args.university_id),
+      )
+      .collect();
+    const isDup = existing.some(
+      (s) =>
+        s.signal_type === args.signal_type &&
+        s.source_url === args.source_url &&
+        s.source_url != null,
+    );
+    if (isDup) {
+      return null;
+    }
     return await ctx.db.insert("universitySignals", {
       ...args,
       created_at: Date.now(),
@@ -79,7 +104,9 @@ export const listByUniversityInternal = internalQuery({
   handler: async (ctx, args) => {
     return await ctx.db
       .query("universitySignals")
-      .withIndex("by_university", (q) => q.eq("university_id", args.university_id))
+      .withIndex("by_university", (q) =>
+        q.eq("university_id", args.university_id),
+      )
       .collect();
   },
 });
@@ -93,23 +120,45 @@ export const batchInsertInternal = internalMutation({
           v.literal("linkedin"),
           v.literal("website"),
           v.literal("manual"),
-          v.literal("image")
+          v.literal("image"),
         ),
         content: v.string(),
         source_url: v.optional(v.string()),
         embedding: v.array(v.float64()),
-      })
+      }),
     ),
   },
   handler: async (ctx, args) => {
     const now = Date.now();
+    // Load existing signals for all universities in this batch once
+    const universityIds = [
+      ...new Set(args.signals.map((s) => s.university_id)),
+    ];
+    const existingByUni = new Map<string, typeof args.signals>();
+    for (const uniId of universityIds) {
+      const rows = await ctx.db
+        .query("universitySignals")
+        .withIndex("by_university", (q) => q.eq("university_id", uniId))
+        .collect();
+      existingByUni.set(uniId, rows as typeof args.signals);
+    }
+
     const ids = [];
     for (const s of args.signals) {
+      const existing = existingByUni.get(s.university_id) ?? [];
+      const isDup = existing.some(
+        (e) =>
+          e.signal_type === s.signal_type &&
+          e.source_url === s.source_url &&
+          e.source_url != null,
+      );
+      if (isDup) continue;
       const id = await ctx.db.insert("universitySignals", {
         ...s,
         created_at: now,
       });
       ids.push(id);
+      existing.push(s);
     }
     return ids;
   },
@@ -118,26 +167,34 @@ export const batchInsertInternal = internalMutation({
 export const deleteByTypeInternal = internalMutation({
   args: {
     university_id: v.id("universities"),
-    signal_types: v.array(v.union(
-      v.literal("news"),
-      v.literal("linkedin"),
-      v.literal("website"),
-      v.literal("manual"),
-      v.literal("image")
-    )),
+    signal_types: v.array(
+      v.union(
+        v.literal("news"),
+        v.literal("linkedin"),
+        v.literal("website"),
+        v.literal("manual"),
+        v.literal("image"),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
     const existingSignals = await ctx.db
       .query("universitySignals")
-      .withIndex("by_university", (q) => q.eq("university_id", args.university_id))
+      .withIndex("by_university", (q) =>
+        q.eq("university_id", args.university_id),
+      )
       .collect();
 
     for (const signal of existingSignals) {
-      if (args.signal_types.includes(signal.signal_type as any)) {
+      if (
+        args.signal_types.includes(
+          signal.signal_type as (typeof args.signal_types)[number],
+        )
+      ) {
         await ctx.db.delete(signal._id);
       }
     }
-  }
+  },
 });
 
 // ─── Migration helpers ────────────────────────────────────────────────────────

@@ -8,6 +8,7 @@ yarn-error.log*
 .next/
 out/
 .vscode
+.windsurf
 
 # Convex
 .convex/

@@ -46,6 +46,7 @@ import type * as lib_scoring from "../lib/scoring.js";
 import type * as lib_utils from "../lib/utils.js";
 import type * as priorityScores from "../priorityScores.js";
 import type * as proposals from "../proposals.js";
+import type * as rateLimits from "../rateLimits.js";
 import type * as removeDuplicates from "../removeDuplicates.js";
 import type * as replies from "../replies.js";
 import type * as sequences from "../sequences.js";
@@ -100,6 +101,7 @@ declare const fullApi: ApiFromModules<{
   "lib/scoring": typeof lib_scoring;
   "lib/utils": typeof lib_utils;
   priorityScores: typeof priorityScores;
+  rateLimits: typeof rateLimits;
   proposals: typeof proposals;
   removeDuplicates: typeof removeDuplicates;
   replies: typeof replies;

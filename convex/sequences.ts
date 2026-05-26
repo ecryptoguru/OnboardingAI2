@@ -1,4 +1,9 @@
-import { mutation, query, internalMutation, internalQuery } from "./_generated/server";
+import {
+  mutation,
+  query,
+  internalMutation,
+  internalQuery,
+} from "./_generated/server";
 import { v, ConvexError } from "convex/values";
 import { validateAuth } from "./lib/auth_utils";
 import { api } from "./_generated/api";
@@ -8,7 +13,9 @@ export const listByUniversity = query({
   handler: async (ctx, args) => {
     return await ctx.db
       .query("outreachSequences")
-      .withIndex("by_university", (q) => q.eq("university_id", args.university_id))
+      .withIndex("by_university", (q) =>
+        q.eq("university_id", args.university_id),
+      )
       .collect();
   },
 });
@@ -18,7 +25,9 @@ export const listByUniversityInternal = internalQuery({
   handler: async (ctx, args) => {
     return await ctx.db
       .query("outreachSequences")
-      .withIndex("by_university", (q) => q.eq("university_id", args.university_id))
+      .withIndex("by_university", (q) =>
+        q.eq("university_id", args.university_id),
+      )
       .collect();
   },
 });
@@ -31,7 +40,7 @@ export const getDue = query({
     return await ctx.db
       .query("outreachSequences")
       .withIndex("by_status_next_send", (q) =>
-        q.eq("status", "active").lte("next_send_at", now)
+        q.eq("status", "active").lte("next_send_at", now),
       )
       .collect();
   },
@@ -61,13 +70,15 @@ export const advance = mutation({
   args: {
     id: v.id("outreachSequences"),
     next_send_at: v.optional(v.number()),
-    status: v.optional(v.union(
-      v.literal("active"),
-      v.literal("paused"),
-      v.literal("pending_approval"),
-      v.literal("completed"),
-      v.literal("opted_out")
-    )),
+    status: v.optional(
+      v.union(
+        v.literal("active"),
+        v.literal("paused"),
+        v.literal("pending_approval"),
+        v.literal("completed"),
+        v.literal("opted_out"),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
@@ -95,7 +106,10 @@ export const optOut = mutation({
   args: { id: v.id("outreachSequences") },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
-    await ctx.db.patch(args.id, { status: "opted_out", updated_at: Date.now() });
+    await ctx.db.patch(args.id, {
+      status: "opted_out",
+      updated_at: Date.now(),
+    });
   },
 });
 
@@ -115,7 +129,7 @@ export const advanceInternal = internalMutation({
       v.literal("paused"),
       v.literal("pending_approval"),
       v.literal("completed"),
-      v.literal("opted_out")
+      v.literal("opted_out"),
     ),
   },
   handler: async (ctx, args) => {
@@ -155,28 +169,41 @@ export const enroll = mutation({
     // 1. Find primary stakeholder or fallback to any valid stakeholder
     let stakeholder = await ctx.db
       .query("stakeholders")
-      .withIndex("by_university", (q) => q.eq("university_id", args.university_id))
-      .filter((q) => q.eq(q.field("is_primary"), true))
+      .withIndex("by_university_primary", (q) =>
+        q.eq("university_id", args.university_id).eq("is_primary", true),
+      )
       .first();
 
     if (!stakeholder) {
       // Fallback: get the first stakeholder with an email
       const allStakeholders = await ctx.db
         .query("stakeholders")
-        .withIndex("by_university", (q) => q.eq("university_id", args.university_id))
+        .withIndex("by_university", (q) =>
+          q.eq("university_id", args.university_id),
+        )
         .collect();
-        
-      stakeholder = allStakeholders.find(s => s.email && s.email.trim() !== "" && s.email.trim().toLowerCase() !== "null") ?? null;
+
+      stakeholder =
+        allStakeholders.find(
+          (s) =>
+            s.email &&
+            s.email.trim() !== "" &&
+            s.email.trim().toLowerCase() !== "null",
+        ) ?? null;
     }
 
     if (!stakeholder) {
-      throw new ConvexError("No valid stakeholder found for this university with a valid email address.");
+      throw new ConvexError(
+        "No valid stakeholder found for this university with a valid email address.",
+      );
     }
 
     // 2. Check if sequence already exists
     const existing = await ctx.db
       .query("outreachSequences")
-      .withIndex("by_university", (q) => q.eq("university_id", args.university_id))
+      .withIndex("by_university", (q) =>
+        q.eq("university_id", args.university_id),
+      )
       .filter((q) => q.eq(q.field("stakeholder_id"), stakeholder._id))
       .first();
 
@@ -198,7 +225,7 @@ export const enroll = mutation({
     });
 
     // 4. Schedule the first email immediately — this is what kicks off the outreach pipeline
-    await ctx.scheduler.runAfter(0, (api.actions as any).outreach.processSequenceStep, {
+    await ctx.scheduler.runAfter(0, api.actions.outreach.processSequenceStep, {
       sequenceId,
     });
 

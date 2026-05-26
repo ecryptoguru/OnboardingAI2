@@ -7,6 +7,8 @@ import { api } from "../convex/_generated/api";
 export function UploadCsvButton() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [status, setStatus] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   const generateUploadUrl = useMutation(api.universities.generateUploadUrl);
   const parseCsv = useAction(api.actions.ingest.parseCsv);
@@ -16,6 +18,8 @@ export function UploadCsvButton() {
     if (!file) return;
 
     setIsUploading(true);
+    setStatus(null);
+    setError(null);
     try {
       // 1. Generate a short-lived upload URL
       const postUrl = await generateUploadUrl();
@@ -26,15 +30,18 @@ export function UploadCsvButton() {
         headers: { "Content-Type": file.type },
         body: file,
       });
+      if (!result.ok) {
+        throw new Error(`Upload failed (${result.status})`);
+      }
       const { storageId } = await result.json();
 
       // 3. Trigger the action to parse and ingest the CSV
       const response = await parseCsv({ storageId });
-      alert(`Success! Imported ${response.count} universities.`);
+      setStatus(`Imported ${response.count} universities.`);
 
     } catch (error) {
       console.error("Upload failed:", error);
-      alert("Failed to upload and parse CSV. Check console for details.");
+      setError(error instanceof Error ? error.message : "Failed to upload and parse file.");
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
@@ -51,13 +58,17 @@ export function UploadCsvButton() {
         ref={fileInputRef}
         onChange={handleFileChange}
       />
-      <button
-        onClick={() => fileInputRef.current?.click()}
-        disabled={isUploading}
-        className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50 shadow-sm"
-      >
-        {isUploading ? "Uploading..." : "+ Upload CSV"}
-      </button>
+      <div className="flex flex-col items-end gap-1.5">
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={isUploading}
+          className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg transition-colors disabled:opacity-50 shadow-sm"
+        >
+          {isUploading ? "Uploading..." : "+ Upload CSV"}
+        </button>
+        {status && <span className="text-[10px] text-emerald-400 font-medium">{status}</span>}
+        {error && <span className="text-[10px] text-red-400 font-medium">{error}</span>}
+      </div>
     </>
   );
 }
