@@ -47,11 +47,13 @@ export const sendEmail = action({
       };
     }
 
-    const apiKey = process.env.SENDGRID_API_KEY;
+    // Fetch SendGrid key from settings DB first, fall back to env for backward compatibility
+    const dbKey = await ctx.runQuery(internal.settings.getInternalSendgridKey);
+    const apiKey = dbKey || process.env.SENDGRID_API_KEY;
     const fromEmail = process.env.SENDGRID_FROM_EMAIL || "outreach@fretbox.in";
 
     if (!apiKey) {
-      console.error("[Email Action] SENDGRID_API_KEY is not set");
+      console.error("[Email Action] SENDGRID_API_KEY is not configured");
       return { success: false, error: "SENDGRID_API_KEY_MISSING" };
     }
 
@@ -66,6 +68,7 @@ export const sendEmail = action({
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       },
+      signal: AbortSignal.timeout(15000),
       body: JSON.stringify({
         personalizations: [
           {

@@ -1,23 +1,3 @@
-export const SCORING_FACTORS = {
-  naac: {
-    "A++": 25,
-    "A+": 20,
-    A: 15,
-    "B++": 10,
-    "B+": 5,
-    B: 0,
-    C: 0,
-  } as Record<string, number>,
-  universityType: {
-    private: 15, // High willingness to adopt SAAS
-    deemed: 10, // Good budgets, moderate speed
-    state: 5, // Government, slow procurement
-    central: 5, // Government, slow procurement
-    ini: 5, // Institutes of National Importance (IITs, NITs), autonomous but govt-tied
-    public: 5, // Fallback for generic public
-  } as Record<string, number>,
-};
-
 interface Demographics {
   hostelites?: number;
   total_students?: number;

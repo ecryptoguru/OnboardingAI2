@@ -96,9 +96,23 @@ export const sendAutoReply = action({
       };
 
     // 5. Build threading headers for proper email threading
-    const parentEmailId = activeSeq?._id
-      ? `<fretbox-seq-${activeSeq._id}@reply.fretbox.in>`
-      : undefined;
+    // Look up the most recent sent email in the active sequence so In-Reply-To
+    // matches the actual Message-ID that was delivered (<fretbox-{emailId}@reply.fretbox.in>).
+    let parentEmailId: string | undefined;
+    if (activeSeq) {
+      const seqEmails = await ctx.runQuery(
+        internal.emails.listBySequenceInternal,
+        {
+          sequence_id: activeSeq._id as unknown as Id<"outreachSequences">,
+        },
+      );
+      const originalEmail = (seqEmails as { _id: string; step_number: number; status: string }[])
+        .filter((e) => e.step_number !== 99 && e.status === "sent")
+        .sort((a, b) => b.step_number - a.step_number)[0];
+      if (originalEmail) {
+        parentEmailId = `<fretbox-${originalEmail._id}@reply.fretbox.in>`;
+      }
+    }
 
     // 6. Send Email
     console.log(

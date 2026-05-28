@@ -9,7 +9,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 async function ensureAuth(ctx: any) {
   const isDev = process.env.NODE_ENV === "development";
   const bypassSecret = process.env.DEV_AUTH_BYPASS_SECRET;
-  const bypassEnabled = isDev && bypassSecret === "fretbox-dev-only-override";
+  const bypassEnabled = isDev && !!bypassSecret;
   if (bypassEnabled) return;
   const userId = await getAuthUserId(ctx);
   if (!userId) throw new Error("Unauthenticated");
@@ -303,6 +303,82 @@ export const removeFirecrawlKey = mutation({
     const doc = await ctx.db
       .query("systemSettings")
       .withIndex("by_key", (q) => q.eq("configKey", "firecrawlApiKey"))
+      .first();
+
+    if (doc) {
+      await ctx.db.delete(doc._id);
+    }
+    return { success: true };
+  },
+});
+
+// --- SENDGRID API KEY ---
+
+export const getSendgridKeyStatus = query({
+  handler: async (ctx) => {
+    await ensureAuth(ctx);
+
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "sendgridApiKey"))
+      .first();
+
+    return {
+      hasSendgridKey: !!doc?.value,
+    };
+  },
+});
+
+export const getInternalSendgridKey = internalQuery({
+  handler: async (ctx) => {
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "sendgridApiKey"))
+      .first();
+    if (!doc?.value) return null;
+    try {
+      return deobfuscate(doc.value);
+    } catch {
+      return doc.value;
+    }
+  },
+});
+
+export const setSendgridKey = mutation({
+  args: { apiKey: v.string() },
+  handler: async (ctx, args) => {
+    await ensureAuth(ctx);
+
+    if (!args.apiKey.startsWith("SG.")) {
+      throw new Error("Invalid SendGrid API Key format");
+    }
+
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "sendgridApiKey"))
+      .first();
+
+    const cipher = obfuscate(args.apiKey);
+    if (doc) {
+      await ctx.db.patch(doc._id, { value: cipher });
+    } else {
+      await ctx.db.insert("systemSettings", {
+        configKey: "sendgridApiKey",
+        value: cipher,
+      });
+    }
+    return { success: true };
+  },
+});
+
+export const removeSendgridKey = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await ensureAuth(ctx);
+
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "sendgridApiKey"))
       .first();
 
     if (doc) {

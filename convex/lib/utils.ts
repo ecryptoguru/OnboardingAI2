@@ -119,3 +119,74 @@ export async function withRetry<T>(
   }
   throw lastError;
 }
+
+/**
+ * Run an array of async tasks with a concurrency limit.
+ * Prevents firing unlimited parallel HTTP requests (e.g. 20+ Serper calls).
+ */
+export async function withConcurrencyLimit<T>(
+  tasks: (() => Promise<T>)[],
+  limit: number,
+): Promise<T[]> {
+  if (tasks.length === 0) {
+    return [];
+  }
+
+  const results: T[] = new Array(tasks.length);
+
+  return new Promise((resolve, reject) => {
+    let running = 0;
+    let completed = 0;
+    let index = 0;
+
+    function runNext() {
+      if (index >= tasks.length) {
+        if (running === 0) resolve(results);
+        return;
+      }
+
+      const i = index++;
+      running++;
+
+      tasks[i]()
+        .then((value) => {
+          results[i] = value;
+          running--;
+          completed++;
+          if (completed === tasks.length) {
+            resolve(results);
+          } else {
+            runNext();
+          }
+        })
+        .catch((err) => {
+          reject(err);
+        });
+    }
+
+    for (let i = 0; i < Math.min(limit, tasks.length); i++) {
+      runNext();
+    }
+  });
+}
+
+/**
+ * Lightweight runtime validator for parsed LLM JSON output.
+ * Throws a descriptive error instead of letting malformed data propagate.
+ */
+export function validateJsonOutput<T extends Record<string, unknown>>(
+  parsed: unknown,
+  requiredFields: (keyof T)[],
+  label = "LLM output",
+): T {
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(`${label} is not a valid object`);
+  }
+  const obj = parsed as T;
+  for (const field of requiredFields) {
+    if (!(field in obj)) {
+      throw new Error(`${label} missing required field: ${String(field)}`);
+    }
+  }
+  return obj;
+}

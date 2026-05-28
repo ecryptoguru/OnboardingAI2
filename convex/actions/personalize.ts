@@ -4,6 +4,7 @@ import { action } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import { callGemini, TEMP } from "../lib/llm";
+import { sanitizeLlmInput } from "../lib/utils";
 import { OPENER_SYSTEM_PROMPT } from "../lib/prompts";
 import * as Sentry from "@sentry/nextjs";
 
@@ -60,7 +61,7 @@ export const generateOpener = action({
         signalContext: recentSignals
           .map(
             (s: { signal_type: string; content: string }) =>
-              `- [${s.signal_type.toUpperCase()}] ${s.content}`,
+              `- [${s.signal_type.toUpperCase()}] ${sanitizeLlmInput(s.content)}`,
           )
           .join("\n"),
       });

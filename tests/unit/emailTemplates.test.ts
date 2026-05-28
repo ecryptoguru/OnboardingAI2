@@ -3,7 +3,12 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 
-// Replicate pure template helpers inline to avoid top-level await / CJS issues.
+// ⚠️ CRITICAL: These templates are replicated from convex/lib/emailTemplates.ts
+// because tsx cannot resolve modules inside the convex/ directory at test time.
+// If you modify the real templates, you MUST update these inline copies.
+// TODO: Extract shared pure helpers to a non-convex package so both source
+// and tests can import them without duplication.
+
 const htmlWrap = (content: string) => `<html><body>${content}</body></html>`;
 const p = (text: string, style = "") =>
   `<p style="margin:0 0 16px 0;${style}">${text}</p>`;
@@ -14,7 +19,6 @@ const ctaButton = (href: string, label: string) =>
   `<a href="${href}" style="display:inline-block;background:#3b82f6;color:#fff;padding:12px 28px;border-radius:8px;">${label}</a>`;
 const divider = () => `<hr/>`;
 
-// Inline the template shapes we need to test (pure functions)
 const MEETING_REQUEST_ACK = (
   name: string,
   uniName: string,

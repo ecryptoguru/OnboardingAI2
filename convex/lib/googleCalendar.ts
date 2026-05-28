@@ -112,6 +112,7 @@ async function getAccessToken(): Promise<string | null> {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
         body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${encodeURIComponent(jwt)}`,
+        signal: AbortSignal.timeout(10000),
       },
     );
 
@@ -193,6 +194,7 @@ export async function createMeetingEvent(options: {
           "Content-Type": "application/json",
         },
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(15000),
       },
     );
 
@@ -244,6 +246,7 @@ export async function updateEvent(
           "Content-Type": "application/json",
         },
         body: JSON.stringify(patch),
+        signal: AbortSignal.timeout(15000),
       },
     );
 

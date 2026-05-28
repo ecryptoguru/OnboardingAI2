@@ -49,6 +49,18 @@ export default function SettingsPage() {
     error?: string;
   } | null>(null);
 
+  const sendgridStatus = useQuery(api.settings.getSendgridKeyStatus);
+  const setSendgridKeyFn = useMutation(api.settings.setSendgridKey);
+  const removeSendgridKeyFn = useMutation(api.settings.removeSendgridKey);
+
+  const [sendgridApiKey, setSendgridApiKey] = useState("");
+  const [isSavingSendgrid, setIsSavingSendgrid] = useState(false);
+  const [isRemovingSendgrid, setIsRemovingSendgrid] = useState(false);
+  const [sendgridTestResult, setSendgridTestResult] = useState<{
+    success?: boolean;
+    error?: string;
+  } | null>(null);
+
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!apiKey) return;
@@ -155,6 +167,49 @@ export default function SettingsPage() {
       });
     } finally {
       setIsRemovingFirecrawl(false);
+    }
+  };
+
+  const handleSaveSendgrid = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sendgridApiKey) return;
+
+    setIsSavingSendgrid(true);
+    setSendgridTestResult(null);
+    try {
+      await setSendgridKeyFn({ apiKey: sendgridApiKey });
+      setSendgridApiKey("");
+      setSendgridTestResult({ success: true });
+    } catch (err: unknown) {
+      setSendgridTestResult({
+        success: false,
+        error: (err as Error).message || "Failed to save key.",
+      });
+    } finally {
+      setIsSavingSendgrid(false);
+    }
+  };
+
+  const handleRemoveSendgrid = async () => {
+    if (!confirm("Are you sure you want to disconnect the SendGrid API?"))
+      return;
+
+    setIsRemovingSendgrid(true);
+    setSendgridTestResult(null);
+    try {
+      await removeSendgridKeyFn();
+      setSendgridApiKey("");
+      setSendgridTestResult({
+        success: true,
+        error: "API Key removed successfully.",
+      });
+    } catch (err: unknown) {
+      setSendgridTestResult({
+        success: false,
+        error: (err as Error).message || "Failed to remove key.",
+      });
+    } finally {
+      setIsRemovingSendgrid(false);
     }
   };
 
@@ -544,6 +599,115 @@ export default function SettingsPage() {
                   className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
                 >
                   {isRemovingFirecrawl ? "Disconnecting..." : "Disconnect"}
+                </button>
+              )}
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* SendGrid Configuration */}
+      <div className="bg-card rounded-2xl border border-card-border/60 shadow-sm overflow-hidden">
+        <div className="p-8 space-y-7">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-slate-500/10 rounded-xl border border-slate-500/20 shadow-sm">
+                <KeyIcon className="w-6 h-6 text-slate-400" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-foreground tracking-tight">
+                  SendGrid Email API
+                </h2>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Used for sending transactional emails and outreach sequences.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between p-5 bg-muted/40 rounded-xl border border-card-border/60">
+            <span className="text-sm font-medium text-foreground">
+              Current Integration Status
+            </span>
+            {sendgridStatus === undefined ? (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <ArrowPathIcon className="w-3 h-3 animate-spin" />
+                Checking...
+              </div>
+            ) : (
+              <div
+                className={`flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-semibold shadow-sm ${sendgridStatus.hasSendgridKey ? "bg-green-500/10 text-green-500 border border-green-500/20" : "bg-red-500/10 text-red-500 border border-red-500/20"}`}
+              >
+                <div
+                  className={`w-2 h-2 rounded-full ${sendgridStatus.hasSendgridKey ? "bg-green-500" : "bg-red-500"} animate-pulse shadow-sm`}
+                />
+                {sendgridStatus.hasSendgridKey
+                  ? "Key Actively Configured"
+                  : "Not Configured"}
+              </div>
+            )}
+          </div>
+
+          <form onSubmit={handleSaveSendgrid} className="space-y-5">
+            <div className="space-y-2.5">
+              <label
+                htmlFor="sendgridApiKey"
+                className="text-sm font-semibold text-foreground"
+              >
+                API Key
+              </label>
+              <input
+                id="sendgridApiKey"
+                type="password"
+                value={sendgridApiKey}
+                onChange={(e) => setSendgridApiKey(e.target.value)}
+                placeholder={
+                  sendgridStatus?.hasSendgridKey
+                    ? "••••••••••••••••••••••••••••"
+                    : "Paste your SendGrid API Key..."
+                }
+                className="flex h-11 w-full rounded-lg border border-card-border bg-background px-4 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-slate-500/50 focus:border-slate-500 transition-all shadow-sm"
+              />
+              <p className="text-[13px] text-muted-foreground">
+                Your key will be securely stored in the database. Leave blank to
+                keep the current key.
+              </p>
+            </div>
+
+            {sendgridTestResult && (
+              <div
+                className={`p-4 rounded-xl flex items-start gap-3 border shadow-sm ${sendgridTestResult.success ? "bg-green-500/10 border-green-500/20 text-green-600 dark:text-green-400" : "bg-red-500/10 border-red-500/20 text-red-600 dark:text-red-400"}`}
+              >
+                {sendgridTestResult.success ? (
+                  <CheckCircleIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                ) : (
+                  <XCircleIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
+                )}
+                <div className="text-sm font-medium leading-relaxed">
+                  {sendgridTestResult.success
+                    ? "SendGrid API key stored correctly."
+                    : sendgridTestResult.error}
+                </div>
+              </div>
+            )}
+
+            <div className="flex items-center gap-3 pt-5 border-t border-card-border">
+              <button
+                type="submit"
+                disabled={!sendgridApiKey || isSavingSendgrid}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center min-w-[130px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
+              >
+                {isSavingSendgrid ? "Saving..." : "Save Key"}
+              </button>
+
+              {sendgridStatus?.hasSendgridKey && (
+                <button
+                  type="button"
+                  onClick={handleRemoveSendgrid}
+                  disabled={isRemovingSendgrid}
+                  className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
+                >
+                  {isRemovingSendgrid ? "Disconnecting..." : "Disconnect"}
                 </button>
               )}
             </div>

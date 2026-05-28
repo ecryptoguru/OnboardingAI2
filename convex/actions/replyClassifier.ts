@@ -118,7 +118,6 @@ export const classifyReply = action({
             {
               university_id: reply.university_id,
               stakeholder_id: reply.stakeholder_id,
-              meeting_date: Date.now(),
             },
           );
 

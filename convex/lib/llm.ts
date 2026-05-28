@@ -10,7 +10,7 @@ export function getGoogleAI(apiKey?: string | null): GoogleGenAI {
       "Google Gemini API Key is missing. Please configure it in the Settings dashboard.",
     );
   }
-  return new GoogleGenAI({ apiKey });
+  return new GoogleGenAI({ apiKey, httpOptions: { timeout: 20000 } });
 }
 
 // ─── Model constants ──────────────────────────────────────────────────────────
@@ -45,7 +45,7 @@ export async function callGemini({
   responseAsJson = false,
   responseSchema,
   model = MODELS.gemini,
-  thinkingBudget, // Auto-applied if not set: Pro → 1024 minimum, non-Pro → off
+  thinkingBudget,
   maxOutputTokens = 8192,
   apiKey,
 }: {
@@ -59,49 +59,98 @@ export async function callGemini({
   maxOutputTokens?: number;
   apiKey?: string | null;
 }): Promise<string> {
-  // LLM generation calls are NOT idempotent — retrying the same prompt charges twice
-  // and can return a different (worse) result. Limit to 1 retry only for transient errors.
-  return await withRetry(
-    async () => {
-      // Pro models require thinkingBudget >= 512. Flash models work with thinkingBudget = 0.
-      const isProModel = /\bpro\b/i.test(model);
-      const resolvedBudget =
-        thinkingBudget !== undefined
-          ? isProModel
-            ? Math.max(512, thinkingBudget)
-            : thinkingBudget
-          : isProModel
-            ? 1024
-            : 0;
+  // Pro models require thinkingBudget >= 512. Flash models work with thinkingBudget = 0.
+  const isProModel = /\bpro\b/i.test(model);
+  const resolvedBudget =
+    thinkingBudget !== undefined
+      ? isProModel
+        ? Math.max(512, thinkingBudget)
+        : thinkingBudget
+      : isProModel
+        ? 1024
+        : 0;
 
-      const aiClient = getGoogleAI(apiKey);
-      const response = await aiClient.models.generateContent({
-        model,
-        contents: userPrompt,
-        config: {
-          systemInstruction: systemPrompt,
-          temperature,
-          maxOutputTokens,
-          responseMimeType: responseAsJson ? "application/json" : "text/plain",
-          responseSchema,
-          ...(resolvedBudget > 0
-            ? {
-                thinkingConfig: {
-                  thinkingBudget: resolvedBudget,
-                  includeThoughts: false,
-                },
-              }
-            : {}),
-        },
-      });
+  const aiClient = getGoogleAI(apiKey);
+  const startMs = Date.now();
+  const response = await withRetry(async () => {
+    return await aiClient.models.generateContent({
+      model,
+      contents: userPrompt,
+      config: {
+        systemInstruction: systemPrompt,
+        temperature,
+        maxOutputTokens,
+        responseMimeType: responseAsJson ? "application/json" : "text/plain",
+        responseSchema,
+        ...(resolvedBudget > 0
+          ? {
+              thinkingConfig: {
+                thinkingBudget: resolvedBudget,
+                includeThoughts: false,
+              },
+            }
+          : {}),
+      },
+    });
+  }, { maxRetries: 2 });
 
-      const text = response.text;
-      if (!text)
-        throw new Error("Unexpected empty response from Gemini via Google SDK");
-      return text;
-    },
-    { maxRetries: 1 },
-  ); // ⚠️ 1 retry only — generation is non-idempotent
+  const text = response.text;
+  if (!text)
+    throw new Error("Unexpected empty response from Gemini via Google SDK");
+
+  // Telemetry: character-based token heuristic (~4 chars / token for English + code)
+  const latencyMs = Date.now() - startMs;
+  const inputChars = systemPrompt.length + userPrompt.length;
+  const outputChars = text.length;
+  const estimatedInputTokens = Math.ceil(inputChars / 4);
+  const estimatedOutputTokens = Math.ceil(outputChars / 4);
+  console.log(
+    `[LLM] model=${model} inTokens≈${estimatedInputTokens} outTokens≈${estimatedOutputTokens} latencyMs=${latencyMs}`,
+  );
+
+  return text;
+}
+
+/**
+ * Call Gemini with Google Search grounding enabled.
+ * Returns AI-synthesized text + source URLs from grounding metadata.
+ */
+export async function callGeminiWithGrounding({
+  systemPrompt,
+  userPrompt,
+  temperature = TEMP.balanced,
+  model = MODELS.gemini,
+  maxOutputTokens = 8192,
+  apiKey,
+}: {
+  systemPrompt: string;
+  userPrompt: string;
+  temperature?: number;
+  model?: string;
+  maxOutputTokens?: number;
+  apiKey?: string | null;
+}): Promise<{ text: string; sources: string[] }> {
+  const aiClient = getGoogleAI(apiKey);
+  const response = await withRetry(async () => {
+    return await aiClient.models.generateContent({
+      model,
+      contents: userPrompt,
+      config: {
+        systemInstruction: systemPrompt,
+        temperature,
+        maxOutputTokens,
+        tools: [{ googleSearch: {} }],
+      },
+    });
+  }, { maxRetries: 2 });
+
+  const text = response.text || "";
+  const sources =
+    response.candidates?.[0]?.groundingMetadata?.groundingChunks
+      ?.map((c) => c.web?.uri)
+      .filter((uri): uri is string => Boolean(uri)) || [];
+
+  return { text, sources };
 }
 
 /**
@@ -140,18 +189,23 @@ export async function embed(
   text: string,
   apiKey?: string | null,
 ): Promise<number[]> {
-  const result = await getGoogleAI(apiKey).models.embedContent({
-    model: MODELS.embedding,
-    contents: text,
-  });
+  return await withRetry(
+    async () => {
+      const result = await getGoogleAI(apiKey).models.embedContent({
+        model: MODELS.embedding,
+        contents: text,
+      });
 
-  if (
-    !result.embeddings ||
-    result.embeddings.length === 0 ||
-    !result.embeddings[0].values
-  ) {
-    throw new Error("Failed to generate embedding");
-  }
+      if (
+        !result.embeddings ||
+        result.embeddings.length === 0 ||
+        !result.embeddings[0].values
+      ) {
+        throw new Error("Failed to generate embedding");
+      }
 
-  return result.embeddings[0].values;
+      return result.embeddings[0].values;
+    },
+    { maxRetries: 2 },
+  );
 }

@@ -45,6 +45,7 @@ export async function firecrawlMap(
       limit,
       timeout: 60000,
     }),
+    signal: AbortSignal.timeout(25000),
   });
 
   if (!res.ok) {
@@ -75,6 +76,7 @@ export async function firecrawlScrape(
       formats: ["markdown"],
       onlyMainContent: true,
     }),
+    signal: AbortSignal.timeout(20000),
   });
 
   if (!res.ok) {

@@ -2,7 +2,7 @@
 
 import { action } from "../_generated/server";
 import { v } from "convex/values";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { withRetry } from "../lib/utils";
 
 export const validateWebsite = action({
@@ -10,7 +10,7 @@ export const validateWebsite = action({
   handler: async (ctx, args) => {
     let url = args.website.trim();
     if (!url) {
-      await ctx.runMutation(api.universities.update, {
+      await ctx.runMutation(internal.universities.updateInternal, {
         id: args.universityId,
         website_status: "invalid",
       });
@@ -27,14 +27,14 @@ export const validateWebsite = action({
         signal: AbortSignal.timeout(5000),
       });
       if (response.ok) {
-        await ctx.runMutation(api.universities.update, {
+        await ctx.runMutation(internal.universities.updateInternal, {
           id: args.universityId,
           website: url, // save normalized URL
           website_status: "valid",
         });
         return true;
       }
-    } catch (error) {
+    } catch {
       // Fallback to http if https fails
       if (url.startsWith("https://")) {
         try {
@@ -44,7 +44,7 @@ export const validateWebsite = action({
             signal: AbortSignal.timeout(5000),
           });
           if (httpResponse.ok) {
-            await ctx.runMutation(api.universities.update, {
+            await ctx.runMutation(internal.universities.updateInternal, {
               id: args.universityId,
               website: httpUrl,
               website_status: "valid",
@@ -60,7 +60,7 @@ export const validateWebsite = action({
       }
     }
 
-    await ctx.runMutation(api.universities.update, {
+    await ctx.runMutation(internal.universities.updateInternal, {
       id: args.universityId,
       website_status: "invalid",
     });
@@ -87,9 +87,12 @@ export const discoverWebsite = action({
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ q: query, num: 3 }),
+          signal: AbortSignal.timeout(15000),
         });
         if (!response.ok) {
-          throw { status: response.status, message: response.statusText };
+          throw new Error(
+            `Serper search failed: ${response.status} ${response.statusText}`,
+          );
         }
         return await response.json();
       });
@@ -140,7 +143,7 @@ export const discoverWebsite = action({
 
       if (bestLink) {
         const isStrongMatch = looksLikeOwnedDomain(bestLink);
-        await ctx.runMutation(api.universities.update, {
+        await ctx.runMutation(internal.universities.updateInternal, {
           id: args.universityId,
           website: bestLink,
           website_status: (isStrongMatch ? "discovered" : "discovered_weak") as
@@ -157,13 +160,13 @@ export const discoverWebsite = action({
       }
 
       // If no valid link found
-      await ctx.runMutation(api.universities.update, {
+      await ctx.runMutation(internal.universities.updateInternal, {
         id: args.universityId,
         website_status: "invalid",
       });
       return null;
-    } catch (error) {
-      console.error("Error discovering website via Serper API:", error);
+    } catch (_error) {
+      console.error("Error discovering website via Serper API:", _error);
       return null;
     }
   },

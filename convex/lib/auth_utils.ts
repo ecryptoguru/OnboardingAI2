@@ -7,7 +7,7 @@ export async function validateAuth(ctx: {
 }) {
   const isDev = process.env.NODE_ENV === "development";
   const bypassSecret = process.env.DEV_AUTH_BYPASS_SECRET;
-  const bypassEnabled = isDev && bypassSecret === "fretbox-dev-only-override";
+  const bypassEnabled = isDev && !!bypassSecret;
   if (bypassEnabled) {
     console.warn("[Auth] ⚠️ Development auth bypass is active");
     return { name: "Debug User", email: "debug@fretbox.in" };

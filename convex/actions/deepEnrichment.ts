@@ -4,7 +4,7 @@ import { action } from "../_generated/server";
 import { v } from "convex/values";
 import { internal, api } from "../_generated/api";
 import { callGemini, THINKING } from "../lib/llm";
-import { withRetry } from "../lib/utils";
+import { withRetry, sanitizeLlmInput, validateJsonOutput } from "../lib/utils";
 import {
   DEEP_ENRICHMENT_SYNTHESIS_PROMPT,
   DEEP_ENRICHMENT_SCHEMA,
@@ -44,6 +44,17 @@ const MAX_URLS_TO_SCRAPE = 6; // Limit Firecrawl API calls per enrichment
 const MAX_CHARS_PER_SOURCE = 15_000; // Truncate each scraped source
 const MIN_BLOCK_LENGTH = 200; // Minimum length for a block to be considered valid
 const MAX_REGEX_CONTACTS = 30; // Cap to avoid bloating the prompt
+
+// ─── Smart truncation: never slice through a line ────────────────────────────
+function truncateAtNewline(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const sliced = text.substring(0, maxChars);
+  const lastNewline = sliced.lastIndexOf("\n");
+  if (lastNewline > maxChars * 0.9) {
+    return sliced.substring(0, lastNewline) + "\n\n[…truncated]";
+  }
+  return sliced + "[…truncated]";
+}
 
 // ─── Content normalizer ───────────────────────────────────────────────────────
 function normalizeContent(raw: string): string {
@@ -232,7 +243,8 @@ export const runDeepEnrichment = action({
 
       // ─── Phase 3: Deduplicate & Cap context ──────────────────────────────
       const rawContext = deduplicateContext(validBlocks);
-      const finalContext = rawContext.substring(0, MAX_CONTEXT_CHARS);
+      const finalContext = truncateAtNewline(rawContext, MAX_CONTEXT_CHARS);
+      const safeContext = sanitizeLlmInput(finalContext);
 
       console.log(
         `[DeepEnrichment] Context: ${rawContext.length} chars → capped at ${finalContext.length} chars (${validBlocks.length} sources).`,
@@ -264,7 +276,7 @@ Emails: ${uniqueRegexEmails.join(", ") || "none"}
 Phones: ${uniqueRegexPhones.join(", ") || "none"}
 
 WEB PAGE CONTENT:
-${finalContext.substring(0, 90_000)}
+${safeContext}
       `.trim();
 
       let synthesizedJson;
@@ -292,10 +304,16 @@ ${finalContext.substring(0, 90_000)}
           .replace(/^```(json)?\n?/, "")
           .replace(/\n?```$/, "")
           .trim();
-        synthesizedJson = JSON.parse(cleanedText);
-        if (!synthesizedJson || typeof synthesizedJson !== "object") {
-          throw new Error("Malformed synthesis: expected object");
+        const parsed = JSON.parse(cleanedText);
+        interface DeepEnrichmentOutput extends Record<string, unknown> {
+          demographics: Record<string, unknown>;
+          stakeholders: unknown[];
         }
+        synthesizedJson = validateJsonOutput<DeepEnrichmentOutput>(
+          parsed,
+          ["demographics", "stakeholders"],
+          "DeepEnrichment output",
+        );
         console.log(
           "[DeepEnrichment] Synthesized:",
           JSON.stringify(synthesizedJson, null, 2),

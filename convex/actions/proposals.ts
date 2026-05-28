@@ -4,9 +4,20 @@ import { action } from "../_generated/server";
 import { internal, api } from "../_generated/api";
 import { v } from "convex/values";
 import { callGemini, TEMP, MODELS } from "../lib/llm";
+import { validateJsonOutput } from "../lib/utils";
 import { recommendModules, suggestPricingTier } from "../lib/moduleRecommender";
 import { PROPOSAL_SYSTEM_PROMPT, PROPOSAL_SCHEMA } from "../lib/prompts";
 import * as Sentry from "@sentry/nextjs";
+
+interface ProposalContent extends Record<string, unknown> {
+  agenda: string[] | string;
+  executive_summary: unknown;
+  problem_statement: unknown;
+  solution_overview: unknown;
+  key_benefits: unknown;
+  roi_summary: unknown;
+  next_steps: unknown;
+}
 
 /**
  * Generates a full AI proposal for a university.
@@ -75,10 +86,11 @@ export const generateProposal = action({
         `[ProposalGenerator] Gemini latency: ${Date.now() - startMs}ms`,
       );
 
-      const proposalContent = JSON.parse(response);
-      if (!proposalContent || typeof proposalContent !== "object") {
-        throw new Error("Proposal generation returned non-object");
-      }
+      const proposalContent = validateJsonOutput<ProposalContent>(
+        JSON.parse(response),
+        ["agenda", "executive_summary", "problem_statement", "solution_overview", "key_benefits", "roi_summary", "next_steps"],
+        "Proposal output",
+      );
 
       // Set status to "ready" immediately — no PDF step needed
       await ctx.runMutation(internal.proposals.updateInternal, {
@@ -148,19 +160,32 @@ export const emailProposal = action({
       throw new Error("Proposal content is corrupted (invalid JSON)");
     }
 
+    // Sanitize LLM-generated text before injecting into HTML email body
+    const escapeHtml = (text: string): string =>
+      text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+
     // Handle both old and new executive_summary shapes
     const es = c.executive_summary;
-    const hookText =
-      typeof es === "string" ? es : es?.hook || es?.why_now || "";
-    const whyNow = typeof es === "object" && es ? es.why_now || "" : "";
-    const vision =
-      typeof es === "object" && es ? es.vision_statement || "" : "";
+    const hookText = escapeHtml(
+      typeof es === "string" ? es : es?.hook || es?.why_now || "",
+    );
+    const whyNow = escapeHtml(
+      typeof es === "object" && es ? es.why_now || "" : "",
+    );
+    const vision = escapeHtml(
+      typeof es === "object" && es ? es.vision_statement || "" : "",
+    );
 
     const benefitsList = Array.isArray(c.key_benefits)
       ? c.key_benefits
           .map(
             (b: string) =>
-              `<li style="margin-bottom:8px;color:#374151;">${b}</li>`,
+              `<li style="margin-bottom:8px;color:#374151;">${escapeHtml(b)}</li>`,
           )
           .join("")
       : "";
@@ -169,7 +194,7 @@ export const emailProposal = action({
       ? c.next_steps
           .map(
             (s: string, i: number) =>
-              `<li style="margin-bottom:8px;color:#374151;"><strong>${i + 1}.</strong> ${s}</li>`,
+              `<li style="margin-bottom:8px;color:#374151;"><strong>${i + 1}.</strong> ${escapeHtml(s)}</li>`,
           )
           .join("")
       : "";
@@ -199,13 +224,13 @@ export const emailProposal = action({
           ? `
       <div style="background:#fef9f0;border-left:4px solid #f59e0b;padding:16px 20px;border-radius:0 8px 8px 0;margin-bottom:24px;">
         <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:#d97706;letter-spacing:1px;text-transform:uppercase;">The Challenge</p>
-        <ul style="margin:0;padding-left:20px;color:#374151;font-size:14px;line-height:1.7;">${c.problem_statement.map((p: string) => `<li style="margin-bottom:6px;">${p}</li>`).join("")}</ul>
+        <ul style="margin:0;padding-left:20px;color:#374151;font-size:14px;line-height:1.7;">${c.problem_statement.map((p: string) => `<li style="margin-bottom:6px;">${escapeHtml(p)}</li>`).join("")}</ul>
       </div>`
           : typeof c.problem_statement === "string" && c.problem_statement
             ? `
       <div style="background:#fef9f0;border-left:4px solid #f59e0b;padding:16px 20px;border-radius:0 8px 8px 0;margin-bottom:24px;">
         <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:#d97706;letter-spacing:1px;text-transform:uppercase;">The Challenge</p>
-        <p style="margin:0;color:#374151;font-size:14px;line-height:1.7;">${c.problem_statement}</p>
+        <p style="margin:0;color:#374151;font-size:14px;line-height:1.7;">${escapeHtml(c.problem_statement)}</p>
       </div>`
             : ""
       }
@@ -215,7 +240,7 @@ export const emailProposal = action({
           ? `
       <div style="margin-bottom:24px;">
         <p style="margin:0 0 8px;font-size:11px;font-weight:700;color:#1e40af;letter-spacing:1px;text-transform:uppercase;">Our Solution</p>
-        <p style="margin:0;color:#374151;font-size:14px;line-height:1.7;">${c.solution_overview}</p>
+        <p style="margin:0;color:#374151;font-size:14px;line-height:1.7;">${escapeHtml(c.solution_overview)}</p>
       </div>`
           : ""
       }
@@ -235,14 +260,14 @@ export const emailProposal = action({
           ? `
       <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:20px 24px;margin-bottom:24px;">
         <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:#1e40af;letter-spacing:1px;text-transform:uppercase;">Expected ROI</p>
-        <p style="margin:0 0 8px;color:#1e3a8a;font-size:14px;line-height:1.7;font-weight:600;">${(c.roi_summary as { headline?: string }).headline || ""}</p>
-        ${Array.isArray((c.roi_summary as { bullets?: string[] }).bullets) && (c.roi_summary as { bullets?: string[] }).bullets!.length > 0 ? `<ul style="margin:0;padding-left:20px;color:#1e3a8a;font-size:14px;line-height:1.7;">${(c.roi_summary as { bullets?: string[] }).bullets!.map((b: string) => `<li style="margin-bottom:4px;">${b}</li>`).join("")}</ul>` : ""}
+        <p style="margin:0 0 8px;color:#1e3a8a;font-size:14px;line-height:1.7;font-weight:600;">${escapeHtml((c.roi_summary as { headline?: string }).headline || "")}</p>
+        ${Array.isArray((c.roi_summary as { bullets?: string[] }).bullets) && (c.roi_summary as { bullets?: string[] }).bullets!.length > 0 ? `<ul style="margin:0;padding-left:20px;color:#1e3a8a;font-size:14px;line-height:1.7;">${(c.roi_summary as { bullets?: string[] }).bullets!.map((b: string) => `<li style="margin-bottom:4px;">${escapeHtml(b)}</li>`).join("")}</ul>` : ""}
       </div>`
           : typeof c.roi_summary === "string" && c.roi_summary
             ? `
       <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:20px 24px;margin-bottom:24px;">
         <p style="margin:0 0 4px;font-size:11px;font-weight:700;color:#1e40af;letter-spacing:1px;text-transform:uppercase;">Expected ROI</p>
-        <p style="margin:0;color:#1e3a8a;font-size:14px;line-height:1.7;font-weight:600;">${c.roi_summary}</p>
+        <p style="margin:0;color:#1e3a8a;font-size:14px;line-height:1.7;font-weight:600;">${escapeHtml(c.roi_summary)}</p>
       </div>`
             : ""
       }

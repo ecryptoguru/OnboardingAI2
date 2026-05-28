@@ -264,6 +264,16 @@ export const insertInternal = internalMutation({
   },
 });
 
+export const listBySequenceInternal = internalQuery({
+  args: { sequence_id: v.id("outreachSequences") },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("emailsSent")
+      .withIndex("by_sequence", (q) => q.eq("sequence_id", args.sequence_id))
+      .collect();
+  },
+});
+
 export const getInternal = internalQuery({
   args: { id: v.id("emailsSent") },
   handler: async (ctx, args) => {

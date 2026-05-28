@@ -4,12 +4,11 @@ import { action } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import { Id } from "../_generated/dataModel";
-import { embed } from "../lib/llm";
-import { withRetry, cosineSimilarity } from "../lib/utils";
+import { embed, callGeminiWithGrounding } from "../lib/llm";
+import { withRetry, cosineSimilarity, withConcurrencyLimit } from "../lib/utils";
 import * as Sentry from "@sentry/nextjs";
 
 // ─── Constants ─────────────────────────────────────────────────────────────
-const NEWS_ITEMS_PER_QUERY = 3; // Limit news items per query
 const IMAGE_RESULTS = 3; // Limit image search results
 const DEDUP_THRESHOLD = 0.92; // Cosine similarity threshold for deduplication
 
@@ -43,60 +42,72 @@ export const discoverSocialAndMedia = action({
         `[Enrichment] Starting social/media enrichment for ${uni.university_name}`,
       );
 
-      // 1. LinkedIn searches for stakeholders
-      const liPromises = stakeholders.map(
-        async (st: {
-          _id: Id<"stakeholders">;
-          linkedin_url?: string;
-          name?: string;
-          role?: string;
-        }) => {
-          if (st.linkedin_url || (!st.name && !st.role)) return;
+      // 1. LinkedIn searches for stakeholders (capped at 5 concurrent requests)
+      // Only search when we have an actual name — role-only queries are too broad and produce false positives
+      const liTasks = stakeholders
+        .filter(
+          (st) => !st.linkedin_url && st.name && st.name.trim().length > 2,
+        )
+        .map(
+          (st: {
+            _id: Id<"stakeholders">;
+            linkedin_url?: string;
+            name?: string;
+            role?: string;
+          }) => {
+            return async () => {
+              const q = `site:linkedin.com/in/ "${st.name}" "${uni.university_name}" India`;
+              try {
+                const data = await withRetry(async () => {
+                  const response = await fetch(
+                    "https://google.serper.dev/search",
+                    {
+                      method: "POST",
+                      headers: {
+                        "X-API-KEY": serperKey,
+                        "Content-Type": "application/json",
+                      },
+                      body: JSON.stringify({ q }),
+                      signal: AbortSignal.timeout(15000),
+                    },
+                  );
+                  if (!response.ok) {
+                    throw new Error(
+                      `Serper search failed: ${response.status} ${response.statusText}`,
+                    );
+                  }
+                  return await response.json();
+                });
 
-          const q = `site:linkedin.com/in/ "${st.name || st.role}" "${uni.university_name}" India`;
-          try {
-            const data = await withRetry(async () => {
-              const response = await fetch("https://google.serper.dev/search", {
-                method: "POST",
-                headers: {
-                  "X-API-KEY": serperKey,
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({ q }),
-              });
-              if (!response.ok) {
-                throw { status: response.status, message: response.statusText };
+                const firstResult = data.organic?.[0];
+                if (
+                  firstResult &&
+                  firstResult.link.includes("linkedin.com/in/")
+                ) {
+                  await ctx.runMutation(
+                    internal.stakeholders.updateLinkedinInternal,
+                    {
+                      id: st._id,
+                      linkedin_url: firstResult.link,
+                    },
+                  );
+                  updatedCount++;
+                  console.log(
+                    `[Enrichment] Found LinkedIn for ${st.name || st.role}`,
+                  );
+                }
+              } catch (e) {
+                console.error(
+                  `[Enrichment] Serper.dev LinkedIn search failed:`,
+                  e,
+                );
               }
-              return await response.json();
-            });
+            };
+          },
+        );
 
-            const firstResult = data.organic?.[0];
-            if (firstResult && firstResult.link.includes("linkedin.com/in/")) {
-              await ctx.runMutation(
-                internal.stakeholders.updateLinkedinInternal,
-                {
-                  id: st._id,
-                  linkedin_url: firstResult.link,
-                },
-              );
-              updatedCount++;
-              console.log(
-                `[Enrichment] Found LinkedIn for ${st.name || st.role}`,
-              );
-            }
-          } catch (e) {
-            console.error(`[Enrichment] Serper.dev LinkedIn search failed:`, e);
-          }
-        },
-      );
+      await withConcurrencyLimit(liTasks, 5);
 
-      await Promise.all(liPromises);
-
-      // 2. Discover News Signals
-      const queries = [
-        `"${uni.university_name}" India partnership OR collaboration OR "mou signed" news`,
-        `"${uni.university_name}" India placement OR "new campus" OR "convocation" news`,
-      ];
       let signalsAdded = 0;
       const allSignals: {
         university_id: Id<"universities">;
@@ -106,55 +117,54 @@ export const discoverSocialAndMedia = action({
         embedding: number[];
       }[] = [];
 
-      const newsPromises = queries.map(async (q) => {
-        try {
-          const data = await withRetry(async () => {
-            const response = await fetch("https://google.serper.dev/news", {
-              method: "POST",
-              headers: {
-                "X-API-KEY": serperKey,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ q }),
+      // 2. Discover News Signals via Gemini Grounding
+      try {
+        const { text: newsSynthesis, sources } = await withRetry(
+          async () => {
+            return await callGeminiWithGrounding({
+              systemPrompt:
+                "You are a university intelligence analyst. Search the web for the latest news about the given university in India. Return a concise summary of recent partnerships, collaborations, MOUs signed, placement drives, new campus openings, convocation events, and any other notable news relevant to business partnerships. Return your findings as plain text with bullet points. Be factual and cite specific events.",
+              userPrompt: `Search for the latest news about "${uni.university_name}" in India. Focus on partnerships, collaborations, campus events, and business-relevant activities in the past 12 months.`,
+              apiKey,
+              temperature: 0.3,
+              maxOutputTokens: 2048,
             });
-            if (!response.ok) {
-              throw { status: response.status, message: response.statusText };
-            }
-            return await response.json();
+          },
+          { maxRetries: 1 },
+        );
+
+        if (newsSynthesis) {
+          const embedding = await embed(newsSynthesis, apiKey);
+
+          allSignals.push({
+            university_id: args.universityId,
+            signal_type: "news",
+            content: newsSynthesis,
+            source_url: sources[0] || undefined,
+            embedding,
           });
 
-          const newsItems = data.news || [];
+          if (sources.length > 1) {
+            const sourceEmbedding = await embed(
+              `News sources for ${uni.university_name}: ${sources.join(", ")}`,
+              apiKey,
+            );
+            allSignals.push({
+              university_id: args.universityId,
+              signal_type: "news",
+              content: `Source URLs: ${sources.join(", ")}`,
+              source_url: sources[0],
+              embedding: sourceEmbedding,
+            });
+          }
 
-          // Limit to latest news per query
-          const items = newsItems.slice(0, NEWS_ITEMS_PER_QUERY);
-          // Batch embed all news snippets in parallel
-          const newsSnippets = items.map(
-            (item: { title: string; snippet?: string }) =>
-              `${item.title} - ${item.snippet || ""}`,
+          console.log(
+            `[Enrichment] Grounding news for ${uni.university_name}: ${sources.length} sources, ${newsSynthesis.length} chars`,
           );
-          const embeddings = await Promise.all(
-            newsSnippets.map((snippet: string) => embed(snippet, apiKey)),
-          );
-          items.forEach(
-            (
-              item: { title: string; snippet?: string; link?: string },
-              idx: number,
-            ) => {
-              allSignals.push({
-                university_id: args.universityId,
-                signal_type: "news",
-                content: newsSnippets[idx],
-                source_url: item.link,
-                embedding: embeddings[idx],
-              });
-            },
-          );
-        } catch (e) {
-          console.error(`[Enrichment] Serper.dev News search failed:`, e);
         }
-      });
-
-      await Promise.all(newsPromises);
+      } catch (e) {
+        console.error(`[Enrichment] Gemini Grounding news failed:`, e);
+      }
 
       // 3. Discover Images (University Logo/Buildings)
       let imagesAdded = 0;
@@ -168,9 +178,12 @@ export const discoverSocialAndMedia = action({
               "Content-Type": "application/json",
             },
             body: JSON.stringify({ q, num: IMAGE_RESULTS }),
+            signal: AbortSignal.timeout(15000),
           });
           if (!response.ok) {
-            throw { status: response.status, message: response.statusText };
+            throw new Error(
+              `Serper image search failed: ${response.status} ${response.statusText}`,
+            );
           }
           return await response.json();
         });
@@ -197,10 +210,12 @@ export const discoverSocialAndMedia = action({
           );
           if (isDuplicate) continue;
 
+          const imgTitle = (img as { title?: string }).title || "Campus";
+          const imgUrl = (img as { imageUrl: string }).imageUrl;
           allSignals.push({
             university_id: args.universityId,
             signal_type: "image",
-            content: (img as { imageUrl: string }).imageUrl,
+            content: `${imgTitle} | ${imgUrl}`,
             source_url: (img as { link?: string }).link,
             embedding,
           });

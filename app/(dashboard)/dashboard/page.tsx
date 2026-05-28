@@ -243,7 +243,16 @@ export default function UniversitiesPage() {
                 <tr
                   key={uni._id}
                   onClick={() => setSelectedId(uni._id)}
-                  className={`hover:bg-card/40 cursor-pointer transition-colors ${
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      setSelectedId(uni._id);
+                    }
+                  }}
+                  tabIndex={0}
+                  role="button"
+                  aria-label={`Open details for ${uni.university_name}`}
+                  className={`hover:bg-card/40 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/50 ${
                     selectedId === uni._id ? "bg-muted/30" : ""
                   }`}
                 >

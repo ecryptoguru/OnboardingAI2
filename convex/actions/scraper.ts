@@ -3,8 +3,8 @@
 import { action } from "../_generated/server";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
-import { callGemini } from "../lib/llm";
-import { withRetry } from "../lib/utils";
+import { callGemini, MODELS } from "../lib/llm";
+import { withRetry, sanitizeLlmInput } from "../lib/utils";
 import { SCRAPER_SYSTEM_PROMPT, SCRAPER_SCHEMA } from "../lib/prompts";
 import * as Sentry from "@sentry/nextjs";
 
@@ -62,6 +62,7 @@ export const scrapeUniversity = action({
             headers: {
               Accept: "text/event-stream, text/plain",
             },
+            signal: AbortSignal.timeout(15000),
           });
 
           if (!response.ok) {
@@ -84,18 +85,22 @@ export const scrapeUniversity = action({
         content = content.substring(0, MAX_CONTENT_CHARS);
       }
 
-      // 3. Extract stakeholders using Gemini 3 Flash
+      // Sanitize before sending to LLM to prevent prompt injection from compromised sites
+      const safeContent = sanitizeLlmInput(content);
+
+      // 3. Extract stakeholders using Gemini Flash-Lite (cheapest viable model for deterministic extraction)
       console.log(
-        `[Scraper] Pass ${content.length} chars to Gemini 3 Flash...`,
+        `[Scraper] Pass ${safeContent.length} chars to Gemini Flash-Lite...`,
       );
       let extracted;
       try {
         const startMs = Date.now();
         const resultText = await callGemini({
           apiKey,
+          model: MODELS.geminiFlash,
           systemPrompt: SCRAPER_SYSTEM_PROMPT(TARGET_ROLES),
-          userPrompt: content,
-          temperature: 0.1, // extremely low temperature for deterministic extraction
+          userPrompt: safeContent,
+          temperature: 0.1,
           responseAsJson: true,
           responseSchema: SCRAPER_SCHEMA,
         });
@@ -114,14 +119,40 @@ export const scrapeUniversity = action({
       const stakeholders = extracted.stakeholders || [];
       console.log(`[Scraper] Found ${stakeholders.length} stakeholders.`);
 
-      // 4. Save to database in bulk
+      // 4. Deduplicate against existing stakeholders before inserting
+      const existing = await ctx.runQuery(
+        internal.stakeholders.getByUniversityInternal,
+        { university_id: args.universityId },
+      );
+      const existingEmails = new Set(
+        existing
+          .map((e: { email?: string }) => e.email?.toLowerCase())
+          .filter(Boolean),
+      );
+      const existingNames = new Set(
+        existing
+          .map((e: { name?: string }) => e.name?.toLowerCase())
+          .filter(Boolean),
+      );
+
       const validStakeholders = stakeholders.filter(
         (st: { name?: string; email?: string }) => st.name || st.email,
       );
-      if (validStakeholders.length > 0) {
+      const netNew = validStakeholders.filter((st: { name?: string; email?: string }) => {
+        const email = st.email?.toLowerCase();
+        const name = st.name?.toLowerCase();
+        if (email && existingEmails.has(email)) return false;
+        if (name && existingNames.has(name)) return false;
+        return true;
+      });
+      console.log(
+        `[Scraper] ${netNew.length}/${validStakeholders.length} are net-new after dedup.`,
+      );
+
+      if (netNew.length > 0) {
         await ctx.runMutation(internal.stakeholders.bulkInsertInternal, {
           university_id: args.universityId,
-          stakeholders: validStakeholders.map(
+          stakeholders: netNew.map(
             (st: {
               name?: string;
               role?: string;

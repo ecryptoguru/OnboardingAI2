@@ -546,6 +546,45 @@ export const getInternal = internalQuery({
   },
 });
 
+export const updateInternal = internalMutation({
+  args: {
+    id: v.id("universities"),
+    website_status: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("valid"),
+        v.literal("invalid"),
+        v.literal("discovered"),
+        v.literal("discovered_weak"),
+      ),
+    ),
+    website: v.optional(v.string()),
+    lead_tier: v.optional(
+      v.union(v.literal("High"), v.literal("Medium"), v.literal("Low")),
+    ),
+    outreach_stage: v.optional(
+      v.union(
+        v.literal("new"),
+        v.literal("enriching"),
+        v.literal("enriched"),
+        v.literal("sequencing"),
+        v.literal("outreach_active"),
+        v.literal("replied"),
+        v.literal("meeting_booked"),
+        v.literal("proposal_sent"),
+        v.literal("closed"),
+        v.literal("not_interested"),
+        v.literal("skipped"),
+      ),
+    ),
+    notes: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { id, ...fields } = args;
+    await ctx.db.patch(id, { ...fields, updated_at: Date.now() });
+  },
+});
+
 export const updateOutreachStageInternal = internalMutation({
   args: {
     universityId: v.id("universities"),
