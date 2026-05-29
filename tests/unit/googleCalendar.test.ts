@@ -9,7 +9,7 @@ import assert from "node:assert";
 describe("Google Calendar Helper - Utilities", () => {
   it("should export createMeetingEvent and updateEvent functions", async () => {
     const { createMeetingEvent, updateEvent } = await import(
-      "../../convex/lib/googleCalendar.js"
+      "../../convex/lib/googleCalendar.ts"
     );
     assert.strictEqual(typeof createMeetingEvent, "function");
     assert.strictEqual(typeof updateEvent, "function");
@@ -21,7 +21,7 @@ describe("Google Calendar Helper - Utilities", () => {
     delete process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
 
     const { createMeetingEvent } = await import(
-      "../../convex/lib/googleCalendar.js"
+      "../../convex/lib/googleCalendar.ts"
     );
     const result = await createMeetingEvent({
       summary: "Test",
@@ -41,7 +41,7 @@ describe("Google Calendar Helper - Utilities", () => {
     delete process.env.GOOGLE_CALENDAR_ID;
 
     const { createMeetingEvent } = await import(
-      "../../convex/lib/googleCalendar.js"
+      "../../convex/lib/googleCalendar.ts"
     );
     const result = await createMeetingEvent({
       summary: "Test",
