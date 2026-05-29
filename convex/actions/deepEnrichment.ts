@@ -4,7 +4,7 @@ import { action } from "../_generated/server";
 import { v } from "convex/values";
 import { internal, api } from "../_generated/api";
 import { callGemini, THINKING } from "../lib/llm";
-import { withRetry, sanitizeLlmInput, validateJsonOutput } from "../lib/utils";
+import { withRetry, sanitizeLlmInput, validateJsonOutput, truncateAtNewline, isValidEmail } from "../lib/utils";
 import {
   DEEP_ENRICHMENT_SYNTHESIS_PROMPT,
   DEEP_ENRICHMENT_SCHEMA,
@@ -44,17 +44,6 @@ const MAX_URLS_TO_SCRAPE = 6; // Limit Firecrawl API calls per enrichment
 const MAX_CHARS_PER_SOURCE = 15_000; // Truncate each scraped source
 const MIN_BLOCK_LENGTH = 200; // Minimum length for a block to be considered valid
 const MAX_REGEX_CONTACTS = 30; // Cap to avoid bloating the prompt
-
-// ─── Smart truncation: never slice through a line ────────────────────────────
-function truncateAtNewline(text: string, maxChars: number): string {
-  if (text.length <= maxChars) return text;
-  const sliced = text.substring(0, maxChars);
-  const lastNewline = sliced.lastIndexOf("\n");
-  if (lastNewline > maxChars * 0.9) {
-    return sliced.substring(0, lastNewline) + "\n\n[…truncated]";
-  }
-  return sliced + "[…truncated]";
-}
 
 // ─── Content normalizer ───────────────────────────────────────────────────────
 function normalizeContent(raw: string): string {
@@ -349,7 +338,10 @@ ${safeContext}
         hostelites: toNumStrict(demographics.hostelites),
         hostelites_male: toNumStrict(demographics.hostelites_male),
         hostelites_female: toNumStrict(demographics.hostelites_female),
-        source: demographics.source ?? undefined,
+        source:
+          typeof demographics.source === "string"
+            ? demographics.source
+            : undefined,
         // NIRF block
         nirf_source:
           typeof demographics.nirf_source === "string"
@@ -528,7 +520,11 @@ ${safeContext}
         (st.name ? 1 : 0);
 
       const validStakeholders = ((stakeholders as StakeholderCandidate[]) || [])
-        .filter((st) => st.name || st.email)
+        .filter((st) => {
+          const hasName = !!st.name?.trim();
+          const hasValidEmail = !!st.email && isValidEmail(st.email);
+          return hasName || hasValidEmail;
+        })
         .sort((a, b) => richness(b) - richness(a));
 
       if (validStakeholders.length > 0) {

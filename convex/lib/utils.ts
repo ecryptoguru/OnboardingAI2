@@ -7,6 +7,19 @@ import * as Sentry from "@sentry/nextjs";
  * This is defense-in-depth: responseSchema is the primary guard, but raw user content
  * (email replies, scraped web pages) can carry injection payloads.
  */
+/**
+ * Truncate text at a newline boundary to avoid slicing through data structures.
+ */
+export function truncateAtNewline(text: string, maxChars: number): string {
+  if (text.length <= maxChars) return text;
+  const sliced = text.substring(0, maxChars);
+  const lastNewline = sliced.lastIndexOf("\n");
+  if (lastNewline > maxChars * 0.9) {
+    return sliced.substring(0, lastNewline) + "\n\n[…truncated]";
+  }
+  return sliced + "[…truncated]";
+}
+
 export function sanitizeLlmInput(text: string): string {
   let cleaned = text;
 
@@ -168,6 +181,13 @@ export async function withConcurrencyLimit<T>(
       runNext();
     }
   });
+}
+
+/**
+ * Lightweight email validation for scraped data before DB insertion.
+ */
+export function isValidEmail(email: string): boolean {
+  return /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(email);
 }
 
 /**

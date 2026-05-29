@@ -97,7 +97,12 @@ ${signalText || "None found"}
           const parsed = JSON.parse(resultText);
           if (typeof parsed.ai_score === "number") {
             ai_score = Math.min(10, Math.max(0, parsed.ai_score));
-            ai_reasoning = parsed.ai_reasoning || ai_reasoning;
+            if (
+              typeof parsed.ai_reasoning === "string" &&
+              parsed.ai_reasoning.trim().length > 0
+            ) {
+              ai_reasoning = parsed.ai_reasoning;
+            }
             console.log(
               `[Scoring] AI Score from Gemini: ${ai_score}/10. Reasoning: ${ai_reasoning}`,
             );

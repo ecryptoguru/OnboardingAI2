@@ -4,7 +4,7 @@ import { action } from "../_generated/server";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { callGemini, MODELS } from "../lib/llm";
-import { withRetry, sanitizeLlmInput } from "../lib/utils";
+import { withRetry, sanitizeLlmInput, truncateAtNewline, isValidEmail } from "../lib/utils";
 import { SCRAPER_SYSTEM_PROMPT, SCRAPER_SCHEMA } from "../lib/prompts";
 import * as Sentry from "@sentry/nextjs";
 
@@ -80,9 +80,9 @@ export const scrapeUniversity = action({
         return { success: false, reason: "No content" };
       }
 
-      // Truncate to safely fit in context window
+      // Truncate to safely fit in context window (newline-aware to avoid slicing data)
       if (content.length > MAX_CONTENT_CHARS) {
-        content = content.substring(0, MAX_CONTENT_CHARS);
+        content = truncateAtNewline(content, MAX_CONTENT_CHARS);
       }
 
       // Sanitize before sending to LLM to prevent prompt injection from compromised sites
@@ -136,7 +136,11 @@ export const scrapeUniversity = action({
       );
 
       const validStakeholders = stakeholders.filter(
-        (st: { name?: string; email?: string }) => st.name || st.email,
+        (st: { name?: string; email?: string }) => {
+          const hasName = !!st.name?.trim();
+          const hasValidEmail = !!st.email && isValidEmail(st.email);
+          return hasName || hasValidEmail;
+        },
       );
       const netNew = validStakeholders.filter((st: { name?: string; email?: string }) => {
         const email = st.email?.toLowerCase();

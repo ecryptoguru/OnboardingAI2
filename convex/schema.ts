@@ -99,6 +99,7 @@ export default defineSchema({
   })
     .index("by_university", ["university_id"])
     .index("by_email", ["email"])
+    .index("by_university_email", ["university_id", "email"])
     .index("by_university_primary", ["university_id", "is_primary"]),
 
   // ─── Priority Scores ──────────────────────────────────────────────────────

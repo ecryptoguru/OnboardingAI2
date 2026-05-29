@@ -72,42 +72,31 @@ export async function callGemini({
 
   const aiClient = getGoogleAI(apiKey);
   const startMs = Date.now();
-  const response = await withRetry(async () => {
-    return await aiClient.models.generateContent({
-      model,
-      contents: userPrompt,
-      config: {
-        systemInstruction: systemPrompt,
-        temperature,
-        maxOutputTokens,
-        responseMimeType: responseAsJson ? "application/json" : "text/plain",
-        responseSchema,
-        ...(resolvedBudget > 0
-          ? {
-              thinkingConfig: {
-                thinkingBudget: resolvedBudget,
-                includeThoughts: false,
-              },
-            }
-          : {}),
-      },
-    });
-  }, { maxRetries: 2 });
+  const response = await aiClient.models.generateContent({
+    model,
+    contents: userPrompt,
+    config: {
+      systemInstruction: systemPrompt,
+      temperature,
+      maxOutputTokens,
+      responseMimeType: responseAsJson ? "application/json" : "text/plain",
+      responseSchema,
+      ...(resolvedBudget > 0
+        ? {
+            thinkingConfig: {
+              thinkingBudget: resolvedBudget,
+              includeThoughts: false,
+            },
+          }
+        : {}),
+    },
+  });
 
   const text = response.text;
   if (!text)
     throw new Error("Unexpected empty response from Gemini via Google SDK");
 
-  // Telemetry: character-based token heuristic (~4 chars / token for English + code)
-  const latencyMs = Date.now() - startMs;
-  const inputChars = systemPrompt.length + userPrompt.length;
-  const outputChars = text.length;
-  const estimatedInputTokens = Math.ceil(inputChars / 4);
-  const estimatedOutputTokens = Math.ceil(outputChars / 4);
-  console.log(
-    `[LLM] model=${model} inTokens≈${estimatedInputTokens} outTokens≈${estimatedOutputTokens} latencyMs=${latencyMs}`,
-  );
-
+  logLlmTelemetry({ model, systemPrompt, userPrompt, output: text, latencyMs: Date.now() - startMs });
   return text;
 }
 
@@ -131,18 +120,17 @@ export async function callGeminiWithGrounding({
   apiKey?: string | null;
 }): Promise<{ text: string; sources: string[] }> {
   const aiClient = getGoogleAI(apiKey);
-  const response = await withRetry(async () => {
-    return await aiClient.models.generateContent({
-      model,
-      contents: userPrompt,
-      config: {
-        systemInstruction: systemPrompt,
-        temperature,
-        maxOutputTokens,
-        tools: [{ googleSearch: {} }],
-      },
-    });
-  }, { maxRetries: 2 });
+  const startMs = Date.now();
+  const response = await aiClient.models.generateContent({
+    model,
+    contents: userPrompt,
+    config: {
+      systemInstruction: systemPrompt,
+      temperature,
+      maxOutputTokens,
+      tools: [{ googleSearch: {} }],
+    },
+  });
 
   const text = response.text || "";
   const sources =
@@ -150,6 +138,7 @@ export async function callGeminiWithGrounding({
       ?.map((c) => c.web?.uri)
       .filter((uri): uri is string => Boolean(uri)) || [];
 
+  logLlmTelemetry({ model, systemPrompt, userPrompt, output: text, latencyMs: Date.now() - startMs });
   return { text, sources };
 }
 
@@ -157,6 +146,16 @@ export async function callGeminiWithGrounding({
  * Budget constants for Gemini thinking mode.
  * Higher budget = longer latency, deeper reasoning, higher cost.
  */
+function logLlmTelemetry({ model, systemPrompt, userPrompt, output, latencyMs }: { model: string; systemPrompt: string; userPrompt: string; output: string; latencyMs: number }) {
+  const inputChars = systemPrompt.length + userPrompt.length;
+  const outputChars = output.length;
+  const estimatedInputTokens = Math.ceil(inputChars / 4);
+  const estimatedOutputTokens = Math.ceil(outputChars / 4);
+  console.log(
+    `[LLM] model=${model} inTokens≈${estimatedInputTokens} outTokens≈${estimatedOutputTokens} latencyMs=${latencyMs}`,
+  );
+}
+
 export const THINKING = {
   off: 0, // Flash: pure extraction, structured scoring
   low: 512, // Pro: minimal synthesis, light conflict resolution
@@ -206,6 +205,14 @@ export async function embed(
 
       return result.embeddings[0].values;
     },
-    { maxRetries: 2 },
+    {
+      maxRetries: 2,
+      retryOn: (err: unknown) => {
+        const status = (err as Record<string, unknown>)?.status ?? (err as Record<string, unknown>)?.statusCode;
+        if (status === 429 || (typeof status === "number" && status >= 500)) return true;
+        const msg = err instanceof Error ? err.message : String(err);
+        return /timeout|fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|network/i.test(msg);
+      },
+    },
   );
 }
