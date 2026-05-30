@@ -253,6 +253,17 @@ export const runFullPipeline = action({
           sequenceId = enrolledId;
           report.stages.outreach.sequenceId = enrolledId;
 
+          // Ensure sequence is active before processing (previous runs may have paused it)
+          const seqBefore = await ctx.runQuery(internal.sequences.getInternal, {
+            id: enrolledId,
+          });
+          if (seqBefore && seqBefore.status !== "active") {
+            await ctx.runMutation(internal.sequences.resumeInternal, {
+              id: enrolledId,
+              status: "active",
+            });
+          }
+
           // Directly process step 1 to draft the email (deterministic test path)
           const stepResult = await ctx.runAction(
             api.actions.outreach.processSequenceStep,
@@ -292,8 +303,8 @@ export const runFullPipeline = action({
             { replyId },
           );
 
-          // Allow scheduler time to fire auto-reply
-          await new Promise((r) => setTimeout(r, 4000));
+          // Allow scheduler time to fire auto-reply (Convex scheduler may take 5-10s)
+          await new Promise((r) => setTimeout(r, 8000));
 
           const seqEmails = await ctx.runQuery(
             internal.emails.listBySequenceInternal,

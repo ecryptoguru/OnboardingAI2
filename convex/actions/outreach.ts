@@ -124,7 +124,7 @@ export const processSequenceStep = action({
         html_body,
         status: "pending_approval", // Instead of "sent"
         step_number: seq.current_step,
-        sent_at: now, // Reused as draft timestamp; actual sent_at is set in approveAndSend
+        drafted_at: now,
       });
 
       console.log(

@@ -55,28 +55,39 @@ export const scrapeUniversity = action({
 
       // 2. Fetch markdown content using Jina Reader
       let content = "";
-      try {
-        // Jina Reader converts any URL into LLM-friendly markdown
-        content = await withRetry(async () => {
-          const response = await fetch(`https://r.jina.ai/${url}`, {
-            headers: {
-              Accept: "text/event-stream, text/plain",
-            },
-            signal: AbortSignal.timeout(15000),
-          });
+      const urlsToTry = [url];
+      // If original is HTTP, also try HTTPS as a fallback (and vice-versa)
+      if (url.startsWith("http://")) {
+        urlsToTry.push(url.replace("http://", "https://"));
+      } else if (url.startsWith("https://")) {
+        urlsToTry.push(url.replace("https://", "http://"));
+      }
 
-          if (!response.ok) {
-            throw new Error(`Jina Reader returned status ${response.status}`);
+      for (const tryUrl of urlsToTry) {
+        try {
+          content = await withRetry(async () => {
+            const response = await fetch(`https://r.jina.ai/${tryUrl}`, {
+              headers: {
+                Accept: "text/event-stream, text/plain",
+              },
+              signal: AbortSignal.timeout(15000),
+            });
+            if (!response.ok) {
+              throw new Error(`Jina Reader returned status ${response.status}`);
+            }
+            return await response.text();
+          });
+          if (content && content.length >= MIN_CONTENT_LENGTH) {
+            console.log(`[Scraper] Success with ${tryUrl}`);
+            break;
           }
-          return await response.text();
-        });
-      } catch (error) {
-        console.error(`[Scraper] Failed to fetch via Jina Reader:`, error);
-        throw new Error("Scraping failed");
+        } catch (error) {
+          console.warn(`[Scraper] Failed with ${tryUrl}:`, error instanceof Error ? error.message : String(error));
+        }
       }
 
       if (!content || content.length < MIN_CONTENT_LENGTH) {
-        console.log(`[Scraper] Not enough content extracted from ${url}.`);
+        console.error(`[Scraper] Failed to fetch via Jina Reader for all URL variants`);
         return { success: false, reason: "No content" };
       }
 

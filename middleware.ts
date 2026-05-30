@@ -10,7 +10,9 @@ export default convexAuthNextjsMiddleware(async (request, { convexAuth }) => {
   const isDev = process.env.NODE_ENV === "development";
   const bypassSecret = process.env.DEV_AUTH_BYPASS_SECRET;
   const bypassEnabled = isDev && !!bypassSecret;
-  if (bypassEnabled) {
+  if (process.env.NODE_ENV === "production") {
+    // Never bypass in production regardless of env vars
+  } else if (bypassEnabled) {
     console.warn("[Middleware] ⚠️ Development auth bypass is active");
     return;
   }

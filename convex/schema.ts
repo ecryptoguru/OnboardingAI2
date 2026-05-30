@@ -192,7 +192,8 @@ export default defineSchema({
       v.literal("bounced"),
       v.literal("failed"),
     ),
-    sent_at: v.optional(v.number()),
+    drafted_at: v.optional(v.number()), // when the draft was created
+    sent_at: v.optional(v.number()),    // when it was actually dispatched
     opened_at: v.optional(v.number()),
   })
     .index("by_sequence", ["sequence_id"])

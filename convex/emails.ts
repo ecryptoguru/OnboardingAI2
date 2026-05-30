@@ -21,7 +21,7 @@ export const getStats = query({
   args: {},
   handler: async (ctx) => {
     // Use parallel index-scoped queries instead of full-table scan.
-    const [queued, failed, opened, clicked, bounced] = await Promise.all([
+    const [, , opened, clicked, bounced] = await Promise.all([
       ctx.db
         .query("emailsSent")
         .withIndex("by_status", (q) => q.eq("status", "queued"))
@@ -49,9 +49,9 @@ export const getStats = query({
         .then((r) => r.length),
     ]);
 
-    // total = all statuses; total_sent = total - queued - failed
-    // We don't have a cheap COUNT(*) so we approximate using a sentinel status query.
-    // For accuracy, collect all sent/delivered emails too.
+    // total_sent counts all dispatched emails (sent, delivered, opened, clicked, bounced)
+    // queued and failed are intentionally excluded from this metric.
+    // For accuracy, also fetch sent and delivered separately.
     const [sent, delivered] = await Promise.all([
       ctx.db
         .query("emailsSent")
@@ -257,7 +257,8 @@ export const insertInternal = internalMutation({
     ),
     sendgrid_message_id: v.optional(v.string()),
     step_number: v.number(),
-    sent_at: v.number(),
+    drafted_at: v.optional(v.number()),
+    sent_at: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     return await ctx.db.insert("emailsSent", args);
@@ -310,7 +311,7 @@ export const listPending = query({
   handler: async (ctx) => {
     const pendingEmails = await ctx.db
       .query("emailsSent")
-      .filter((q) => q.eq(q.field("status"), "pending_approval"))
+      .withIndex("by_status", (q) => q.eq("status", "pending_approval"))
       .collect();
 
     // Join with university and stakeholder

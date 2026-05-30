@@ -70,13 +70,15 @@ export const getInternalGeminiKey = internalQuery({
       .query("systemSettings")
       .withIndex("by_key", (q) => q.eq("configKey", "geminiApiKey"))
       .first();
-    if (!doc?.value) return null;
-    try {
-      return deobfuscate(doc.value);
-    } catch {
-      // Fallback for plaintext legacy keys
-      return doc.value;
+    if (doc?.value) {
+      try {
+        return deobfuscate(doc.value);
+      } catch {
+        // Fallback for plaintext legacy keys
+        return doc.value;
+      }
     }
+    return process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY ?? null;
   },
 });
 
@@ -113,10 +115,13 @@ export const testGeminiKey = action({
   handler: async (ctx, args) => {
     await ensureAuth(ctx);
 
+    // Keep in sync with MODELS.gemini in convex/lib/llm.ts
+    const TEST_MODEL = "gemini-3.5-flash";
+
     try {
       const ai = new GoogleGenAI({ apiKey: args.apiKey });
       const response = await ai.models.generateContent({
-        model: "gemini-3.5-flash",
+        model: TEST_MODEL,
         contents: "Return only the word OK",
         config: { maxOutputTokens: 5 },
       });
@@ -159,6 +164,83 @@ export const removeGeminiKey = mutation({
   },
 });
 
+export const testSerperKey = action({
+  args: { apiKey: v.string() },
+  handler: async (ctx, args) => {
+    await ensureAuth(ctx);
+
+    try {
+      const res = await fetch("https://google.serper.dev/search", {
+        method: "POST",
+        headers: {
+          "X-API-KEY": args.apiKey,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ q: "test" }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (res.ok) {
+        return { success: true };
+      }
+      const err = await res.text().catch(() => "Invalid response");
+      return { success: false, error: `Serper API error (${res.status}): ${err}` };
+    } catch (e: unknown) {
+      return { success: false, error: (e as Error).message || "Failed to test Serper key." };
+    }
+  },
+});
+
+export const testFirecrawlKey = action({
+  args: { apiKey: v.string() },
+  handler: async (ctx, args) => {
+    await ensureAuth(ctx);
+
+    try {
+      const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${args.apiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ url: "https://example.com" }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (res.ok || res.status === 402) {
+        // 402 = payment required (key is valid but quota exceeded) — still counts as valid key
+        return { success: true };
+      }
+      const err = await res.text().catch(() => "Invalid response");
+      return { success: false, error: `Firecrawl API error (${res.status}): ${err}` };
+    } catch (e: unknown) {
+      return { success: false, error: (e as Error).message || "Failed to test Firecrawl key." };
+    }
+  },
+});
+
+export const testSendgridKey = action({
+  args: { apiKey: v.string() },
+  handler: async (ctx, args) => {
+    await ensureAuth(ctx);
+
+    try {
+      const res = await fetch("https://api.sendgrid.com/v3/user/profile", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${args.apiKey}`,
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (res.ok) {
+        return { success: true };
+      }
+      const err = await res.text().catch(() => "Invalid response");
+      return { success: false, error: `SendGrid API error (${res.status}): ${err}` };
+    } catch (e: unknown) {
+      return { success: false, error: (e as Error).message || "Failed to test SendGrid key." };
+    }
+  },
+});
+
 // --- SERPER API KEY ---
 
 export const getSerperKeyStatus = query({
@@ -183,12 +265,15 @@ export const getInternalSerperKey = internalQuery({
       .query("systemSettings")
       .withIndex("by_key", (q) => q.eq("configKey", "serperApiKey"))
       .first();
-    if (!doc?.value) return null;
-    try {
-      return deobfuscate(doc.value);
-    } catch {
-      return doc.value;
+    if (doc?.value) {
+      try {
+        return deobfuscate(doc.value);
+      } catch {
+        return doc.value;
+      }
     }
+    // Fallback to env var if not yet seeded into settings DB
+    return process.env.SERPER_API_KEY ?? null;
   },
 });
 
@@ -259,12 +344,14 @@ export const getInternalFirecrawlKey = internalQuery({
       .query("systemSettings")
       .withIndex("by_key", (q) => q.eq("configKey", "firecrawlApiKey"))
       .first();
-    if (!doc?.value) return null;
-    try {
-      return deobfuscate(doc.value);
-    } catch {
-      return doc.value;
+    if (doc?.value) {
+      try {
+        return deobfuscate(doc.value);
+      } catch {
+        return doc.value;
+      }
     }
+    return process.env.FIRECRAWL_API_KEY ?? null;
   },
 });
 
@@ -356,12 +443,14 @@ export const getInternalSendgridKey = internalQuery({
       .query("systemSettings")
       .withIndex("by_key", (q) => q.eq("configKey", "sendgridApiKey"))
       .first();
-    if (!doc?.value) return null;
-    try {
-      return deobfuscate(doc.value);
-    } catch {
-      return doc.value;
+    if (doc?.value) {
+      try {
+        return deobfuscate(doc.value);
+      } catch {
+        return doc.value;
+      }
     }
+    return process.env.SENDGRID_API_KEY ?? null;
   },
 });
 
@@ -400,6 +489,265 @@ export const removeSendgridKey = mutation({
     const doc = await ctx.db
       .query("systemSettings")
       .withIndex("by_key", (q) => q.eq("configKey", "sendgridApiKey"))
+      .first();
+
+    if (doc) {
+      await ctx.db.delete(doc._id);
+    }
+    return { success: true };
+  },
+});
+
+// ─── GOOGLE CALENDAR SERVICE ACCOUNT JSON ──────────────────────────────────
+
+export const getGoogleCalendarStatus = query({
+  handler: async (ctx) => {
+    await ensureAuth(ctx);
+
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "googleCalendarServiceAccount"))
+      .first();
+
+    return {
+      hasGoogleCalendarServiceAccount: !!doc?.value,
+    };
+  },
+});
+
+export const getInternalGoogleCalendarJson = internalQuery({
+  handler: async (ctx) => {
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "googleCalendarServiceAccount"))
+      .first();
+    if (doc?.value) {
+      try {
+        return deobfuscate(doc.value);
+      } catch {
+        return doc.value;
+      }
+    }
+    return process.env.GOOGLE_SERVICE_ACCOUNT_JSON ?? null;
+  },
+});
+
+export const setGoogleCalendarJson = mutation({
+  args: { serviceAccountJson: v.string() },
+  handler: async (ctx, args) => {
+    await ensureAuth(ctx);
+
+    // Basic validation: must be valid JSON with client_email and private_key
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(args.serviceAccountJson);
+    } catch {
+      throw new Error("Invalid JSON format for service account key");
+    }
+    if (!parsed.client_email || !parsed.private_key) {
+      throw new Error("Service account JSON must contain client_email and private_key");
+    }
+
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "googleCalendarServiceAccount"))
+      .first();
+
+    const cipher = obfuscate(args.serviceAccountJson);
+    if (doc) {
+      await ctx.db.patch(doc._id, { value: cipher });
+    } else {
+      await ctx.db.insert("systemSettings", {
+        configKey: "googleCalendarServiceAccount",
+        value: cipher,
+      });
+    }
+    return { success: true };
+  },
+});
+
+export const removeGoogleCalendarJson = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await ensureAuth(ctx);
+
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "googleCalendarServiceAccount"))
+      .first();
+
+    if (doc) {
+      await ctx.db.delete(doc._id);
+    }
+    return { success: true };
+  },
+});
+
+// ─── GOOGLE CALENDAR ID ────────────────────────────────────────────────────
+
+export const getGoogleCalendarIdStatus = query({
+  handler: async (ctx) => {
+    await ensureAuth(ctx);
+
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "googleCalendarId"))
+      .first();
+
+    let calendarId: string | null = null;
+    if (doc?.value) {
+      try {
+        calendarId = deobfuscate(doc.value);
+      } catch {
+        calendarId = doc.value;
+      }
+    }
+
+    return {
+      hasGoogleCalendarId: !!doc?.value,
+      calendarId,
+    };
+  },
+});
+
+export const getInternalGoogleCalendarId = internalQuery({
+  handler: async (ctx) => {
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "googleCalendarId"))
+      .first();
+    if (doc?.value) {
+      try {
+        return deobfuscate(doc.value);
+      } catch {
+        return doc.value;
+      }
+    }
+    return process.env.GOOGLE_CALENDAR_ID ?? "primary";
+  },
+});
+
+export const setGoogleCalendarId = mutation({
+  args: { calendarId: v.string() },
+  handler: async (ctx, args) => {
+    await ensureAuth(ctx);
+
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "googleCalendarId"))
+      .first();
+
+    const cipher = obfuscate(args.calendarId);
+    if (doc) {
+      await ctx.db.patch(doc._id, { value: cipher });
+    } else {
+      await ctx.db.insert("systemSettings", {
+        configKey: "googleCalendarId",
+        value: cipher,
+      });
+    }
+    return { success: true };
+  },
+});
+
+export const removeGoogleCalendarId = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await ensureAuth(ctx);
+
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "googleCalendarId"))
+      .first();
+
+    if (doc) {
+      await ctx.db.delete(doc._id);
+    }
+    return { success: true };
+  },
+});
+
+// ─── SENDGRID FROM EMAIL ─────────────────────────────────────────────────────
+
+export const getSendgridFromEmailStatus = query({
+  handler: async (ctx) => {
+    await ensureAuth(ctx);
+
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "sendgridFromEmail"))
+      .first();
+
+    let fromEmail: string | null = null;
+    if (doc?.value) {
+      try {
+        fromEmail = deobfuscate(doc.value);
+      } catch {
+        fromEmail = doc.value;
+      }
+    }
+
+    return {
+      hasSendgridFromEmail: !!doc?.value,
+      fromEmail,
+    };
+  },
+});
+
+export const getInternalSendgridFromEmail = internalQuery({
+  handler: async (ctx) => {
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "sendgridFromEmail"))
+      .first();
+    if (doc?.value) {
+      try {
+        return deobfuscate(doc.value);
+      } catch {
+        return doc.value;
+      }
+    }
+    return process.env.SENDGRID_FROM_EMAIL ?? "outreach@fretbox.in";
+  },
+});
+
+export const setSendgridFromEmail = mutation({
+  args: { fromEmail: v.string() },
+  handler: async (ctx, args) => {
+    await ensureAuth(ctx);
+
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(args.fromEmail)) {
+      throw new Error("Invalid email format");
+    }
+
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "sendgridFromEmail"))
+      .first();
+
+    const cipher = obfuscate(args.fromEmail);
+    if (doc) {
+      await ctx.db.patch(doc._id, { value: cipher });
+    } else {
+      await ctx.db.insert("systemSettings", {
+        configKey: "sendgridFromEmail",
+        value: cipher,
+      });
+    }
+    return { success: true };
+  },
+});
+
+export const removeSendgridFromEmail = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await ensureAuth(ctx);
+
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "sendgridFromEmail"))
       .first();
 
     if (doc) {

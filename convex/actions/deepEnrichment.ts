@@ -3,7 +3,7 @@
 import { action } from "../_generated/server";
 import { v } from "convex/values";
 import { internal, api } from "../_generated/api";
-import { callGemini, THINKING } from "../lib/llm";
+import { callGemini, THINKING, MODELS } from "../lib/llm";
 import { withRetry, sanitizeLlmInput, validateJsonOutput, truncateAtNewline, isValidEmail } from "../lib/utils";
 import {
   DEEP_ENRICHMENT_SYNTHESIS_PROMPT,
@@ -166,24 +166,43 @@ export const runDeepEnrichment = action({
       // ─── Phase 1: Firecrawl Map → Discover high-yield URLs ───────────────
       let highYieldUrls: string[] = [];
       let mapResult: Awaited<ReturnType<typeof firecrawlMap>> | null = null;
-      try {
-        mapResult = await withRetry(
-          async () => firecrawlMap(url, firecrawlKey),
-          { maxRetries: 2 },
-        );
-        highYieldUrls = filterHighYieldUrls(mapResult, MAX_URLS_TO_SCRAPE);
-        console.log(
-          `[DeepEnrichment] Firecrawl map found ${mapResult.links?.length ?? 0} URLs; selected ${highYieldUrls.length} high-yield targets.`,
-        );
-      } catch (e) {
-        console.error("[DeepEnrichment] Firecrawl map failed:", e);
-        // Fallback: guess common subpages
+      let workingUrl = url;
+
+      const urlVariants = [url];
+      if (url.startsWith("http://")) {
+        urlVariants.push(url.replace("http://", "https://"));
+      } else if (url.startsWith("https://")) {
+        urlVariants.push(url.replace("https://", "http://"));
+      }
+
+      for (const tryUrl of urlVariants) {
+        try {
+          mapResult = await withRetry(
+            async () => firecrawlMap(tryUrl, firecrawlKey),
+            { maxRetries: 2 },
+          );
+          if (mapResult.links && mapResult.links.length > 0) {
+            workingUrl = tryUrl;
+            highYieldUrls = filterHighYieldUrls(mapResult, MAX_URLS_TO_SCRAPE);
+            console.log(
+              `[DeepEnrichment] Firecrawl map success with ${tryUrl}: ${mapResult.links.length} URLs; selected ${highYieldUrls.length} high-yield targets.`,
+            );
+            break;
+          }
+        } catch (e) {
+          console.warn(`[DeepEnrichment] Firecrawl map failed for ${tryUrl}:`, e instanceof Error ? e.message : String(e));
+        }
+      }
+
+      if (!highYieldUrls.length) {
+        console.error("[DeepEnrichment] Firecrawl map failed for all URL variants.");
+        // Fallback: guess common subpages using the original URL
         highYieldUrls = [
-          `${url}/contact`,
-          `${url}/administration`,
-          `${url}/about`,
-          `${url}/anti-ragging`,
-          `${url}/mandatory-disclosure`,
+          `${workingUrl}/contact`,
+          `${workingUrl}/administration`,
+          `${workingUrl}/about`,
+          `${workingUrl}/anti-ragging`,
+          `${workingUrl}/mandatory-disclosure`,
         ];
       }
 
@@ -271,50 +290,60 @@ WEB PAGE CONTENT:
 ${safeContext}
       `.trim();
 
-      let synthesizedJson;
-      try {
-        console.log(
-          `[DeepEnrichment] Phase 4: Running Gemini 3.5 Flash extraction (model: gemini-3.5-flash)`,
-        );
-        const startMs = Date.now();
-        const resultText = await callGemini({
-          apiKey,
-          model: "gemini-3.5-flash",
-          systemPrompt: DEEP_ENRICHMENT_SYNTHESIS_PROMPT(TARGET_ROLES),
-          userPrompt: extractionPrompt,
-          temperature: 0.05,
-          responseAsJson: true,
-          responseSchema: DEEP_ENRICHMENT_SCHEMA,
-          thinkingBudget: THINKING.off, // Flash: thinking off for speed
-          maxOutputTokens: 8192,
-        });
-        console.log(
-          `[DeepEnrichment] Gemini latency: ${Date.now() - startMs}ms`,
-        );
+      let synthesizedJson: { demographics: Record<string, unknown>; stakeholders: unknown[] } | null = null;
+      let synthesisAttempts = 0;
+      const maxSynthesisAttempts = 2;
+      while (synthesisAttempts < maxSynthesisAttempts) {
+        synthesisAttempts++;
+        try {
+          console.log(
+            `[DeepEnrichment] Phase 4: Running Gemini extraction (model: ${MODELS.gemini}, attempt ${synthesisAttempts})`,
+          );
+          const startMs = Date.now();
+          const resultText = await callGemini({
+            apiKey,
+            model: MODELS.gemini,
+            systemPrompt: DEEP_ENRICHMENT_SYNTHESIS_PROMPT(TARGET_ROLES),
+            userPrompt: extractionPrompt,
+            temperature: 0.05,
+            responseAsJson: true,
+            responseSchema: DEEP_ENRICHMENT_SCHEMA,
+            thinkingBudget: THINKING.off, // Flash: thinking off for speed
+            maxOutputTokens: 8192,
+          });
+          console.log(
+            `[DeepEnrichment] Gemini latency: ${Date.now() - startMs}ms`,
+          );
 
-        const cleanedText = resultText
-          .replace(/^```(json)?\n?/, "")
-          .replace(/\n?```$/, "")
-          .trim();
-        const parsed = JSON.parse(cleanedText);
-        interface DeepEnrichmentOutput extends Record<string, unknown> {
-          demographics: Record<string, unknown>;
-          stakeholders: unknown[];
+          const cleanedText = resultText
+            .replace(/^```(json)?\n?/, "")
+            .replace(/\n?```$/, "")
+            .trim();
+          const parsed = JSON.parse(cleanedText);
+          synthesizedJson = validateJsonOutput(
+            parsed,
+            ["demographics", "stakeholders"],
+            "DeepEnrichment output",
+          ) as { demographics: Record<string, unknown>; stakeholders: unknown[] };
+          console.log(
+            "[DeepEnrichment] Synthesized:",
+            JSON.stringify(synthesizedJson, null, 2),
+          );
+          break; // Success — exit retry loop
+        } catch (e) {
+          console.error(
+            `[DeepEnrichment] Synthesis attempt ${synthesisAttempts} failed:`
+            , e instanceof Error ? e.message : String(e),
+          );
+          if (synthesisAttempts >= maxSynthesisAttempts) {
+            throw new Error("Failed to synthesize intelligence data after retries");
+          }
         }
-        synthesizedJson = validateJsonOutput<DeepEnrichmentOutput>(
-          parsed,
-          ["demographics", "stakeholders"],
-          "DeepEnrichment output",
-        );
-        console.log(
-          "[DeepEnrichment] Synthesized:",
-          JSON.stringify(synthesizedJson, null, 2),
-        );
-      } catch (e) {
-        console.error("[DeepEnrichment] Failed to parse Gemini output:", e);
-        throw new Error("Failed to synthesize intelligence data");
       }
 
+      if (!synthesizedJson) {
+        throw new Error("Failed to synthesize intelligence data after retries");
+      }
       const { demographics, stakeholders } = synthesizedJson;
 
       // toNum: converts any value to number, returns undefined for null/undefined/NaN

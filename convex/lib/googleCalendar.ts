@@ -49,8 +49,8 @@ function pemToArrayBuffer(pem: string): ArrayBuffer {
   return bytes.buffer;
 }
 
-async function getAccessToken(): Promise<string | null> {
-  const saJson = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+async function getAccessToken(serviceAccountJson?: string): Promise<string | null> {
+  const saJson = serviceAccountJson ?? process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
   if (!saJson) {
     console.warn("[GoogleCalendar] GOOGLE_SERVICE_ACCOUNT_JSON not set");
     return null;
@@ -141,18 +141,20 @@ export async function createMeetingEvent(options: {
   endTime: Date;
   attendeeEmail?: string;
   timeZone?: string;
+  serviceAccountJson?: string;
+  calendarId?: string;
 }): Promise<{
   success: boolean;
   eventId?: string;
   meetLink?: string;
   error?: string;
 }> {
-  const accessToken = await getAccessToken();
+  const accessToken = await getAccessToken(options.serviceAccountJson);
   if (!accessToken) {
     return { success: false, error: "GOOGLE_CALENDAR_NOT_CONFIGURED" };
   }
 
-  const calendarId = process.env.GOOGLE_CALENDAR_ID || "primary";
+  const calendarId = options.calendarId ?? process.env.GOOGLE_CALENDAR_ID ?? "primary";
   const requestId = `fretbox-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   const body = {
@@ -228,13 +230,14 @@ export async function createMeetingEvent(options: {
 export async function updateEvent(
   eventId: string,
   patch: { status?: string },
+  options?: { serviceAccountJson?: string; calendarId?: string },
 ): Promise<{ success: boolean; error?: string }> {
-  const accessToken = await getAccessToken();
+  const accessToken = await getAccessToken(options?.serviceAccountJson);
   if (!accessToken) {
     return { success: false, error: "GOOGLE_CALENDAR_NOT_CONFIGURED" };
   }
 
-  const calendarId = process.env.GOOGLE_CALENDAR_ID || "primary";
+  const calendarId = options?.calendarId ?? process.env.GOOGLE_CALENDAR_ID ?? "primary";
 
   try {
     const res = await fetch(

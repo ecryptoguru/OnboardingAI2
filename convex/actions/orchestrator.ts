@@ -34,23 +34,17 @@ export const runEnrichmentChain = action({
       console.error("[Orchestrator] Parallel extraction step failed", e);
     }
 
-    // 3. Deep Enrichment (Crucial for getting demographics before scoring)
+    // 3. Deep Enrichment (runs scoring internally as its final step)
     try {
       const deepRes: unknown = await ctx.runAction(api.actions.deepEnrichment.runDeepEnrichment, { universityId: args.universityId });
       results.deepEnrichment = (deepRes as { success?: boolean })?.success === true;
+      // deepEnrichment.ts already calls scoreUniversity; reflect that in results
+      results.scoring = results.deepEnrichment;
     } catch (e) {
       console.error("[Orchestrator] Deep Enrichment failed", e);
     }
 
-    // 4. AI Scoring
-    try {
-      const scoreRes: unknown = await ctx.runAction(api.actions.scoring.scoreUniversity, { universityId: args.universityId });
-      results.scoring = (scoreRes as { success?: boolean })?.success === true;
-    } catch (e) {
-       console.error("[Orchestrator] AI Scoring failed", e);
-    }
-
-    const allOk: boolean = results.scrape && results.deepEnrichment && results.scoring;
+    const allOk: boolean = results.scrape && results.deepEnrichment;
     console.log(`[Orchestrator] Enrichment chain completed for ${args.universityId}: scrape=${results.scrape} social=${results.socialMedia} deep=${results.deepEnrichment} score=${results.scoring}`);
     return { success: allOk, steps: results };
     } catch (e) {

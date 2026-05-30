@@ -19,7 +19,7 @@ export const MODELS = {
   complex: "gemini-3.5-flash" as const,
   gemini: "gemini-3.5-flash" as const,
   // Gemini Flash-Lite: lowest cost for high-volume tasks
-  geminiFlash: "gemini-3.1-flash-lite-preview" as const,
+  geminiFlash: "gemini-3.1-flash-lite" as const,
   // Embeddings: 768-dim (direct via Google AI API)
   embedding: "text-embedding-005" as const,
 } as const;
@@ -92,6 +92,15 @@ export async function callGemini({
     },
   });
 
+  const candidate = response.candidates?.[0];
+  const finishReason = candidate?.finishReason;
+  if (finishReason && finishReason !== "STOP" && finishReason !== "MAX_TOKENS") {
+    const blockReason = response.promptFeedback?.blockReason;
+    throw new Error(
+      `Gemini generation halted: finishReason=${finishReason}${blockReason ? `, blockReason=${blockReason}` : ""}`,
+    );
+  }
+
   const text = response.text;
   if (!text)
     throw new Error("Unexpected empty response from Gemini via Google SDK");
@@ -132,9 +141,18 @@ export async function callGeminiWithGrounding({
     },
   });
 
+  const candidate = response.candidates?.[0];
+  const finishReason = candidate?.finishReason;
+  if (finishReason && finishReason !== "STOP" && finishReason !== "MAX_TOKENS") {
+    const blockReason = response.promptFeedback?.blockReason;
+    throw new Error(
+      `Gemini generation halted: finishReason=${finishReason}${blockReason ? `, blockReason=${blockReason}` : ""}`,
+    );
+  }
+
   const text = response.text || "";
   const sources =
-    response.candidates?.[0]?.groundingMetadata?.groundingChunks
+    candidate?.groundingMetadata?.groundingChunks
       ?.map((c) => c.web?.uri)
       .filter((uri): uri is string => Boolean(uri)) || [];
 

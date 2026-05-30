@@ -47,10 +47,13 @@ export const sendEmail = action({
       };
     }
 
-    // Fetch SendGrid key from settings DB first, fall back to env for backward compatibility
-    const dbKey = await ctx.runQuery(internal.settings.getInternalSendgridKey);
+    // Fetch SendGrid key and from-email from settings DB first, fall back to env for backward compatibility
+    const [dbKey, dbFromEmail] = await Promise.all([
+      ctx.runQuery(internal.settings.getInternalSendgridKey),
+      ctx.runQuery(internal.settings.getInternalSendgridFromEmail),
+    ]);
     const apiKey = dbKey || process.env.SENDGRID_API_KEY;
-    const fromEmail = process.env.SENDGRID_FROM_EMAIL || "outreach@fretbox.in";
+    const fromEmail = dbFromEmail || process.env.SENDGRID_FROM_EMAIL || "outreach@fretbox.in";
 
     if (!apiKey) {
       console.error("[Email Action] SENDGRID_API_KEY is not configured");
