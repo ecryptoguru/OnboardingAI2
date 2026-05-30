@@ -273,4 +273,63 @@ http.route({
   }),
 });
 
+// ─── Health Check ────────────────────────────────────────────────────────────
+http.route({
+  path: "/test/ping",
+  method: "GET",
+  handler: httpAction(async () => {
+    return new Response(JSON.stringify({ ok: true, timestamp: Date.now() }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }),
+});
+
+// ─── Real-World Pipeline Test Trigger ────────────────────────────────────────
+// curl -X POST http://localhost:3001/api/test/run-pipeline \
+//   -H "Content-Type: application/json" \
+//   -d '{"universityName":"Anna University","state":"Tamil Nadu","stages":["ingestion","discovery","scraper","enrichment","scoring","outreach","reply","proposal"]}'
+http.route({
+  path: "/test/run-pipeline",
+  method: "POST",
+  handler: httpAction(async (ctx, req) => {
+    const secret = process.env.TEST_WEBHOOK_SECRET;
+    if (secret) {
+      const authHeader = req.headers.get("authorization") ?? "";
+      const provided = authHeader.replace(/^Bearer\s+/i, "").trim();
+      if (provided !== secret) {
+        return new Response("Unauthorized", { status: 401 });
+      }
+    }
+
+    let body: Record<string, unknown> = {};
+    try {
+      body = (await req.json()) as Record<string, unknown>;
+    } catch {
+      return new Response("Invalid JSON", { status: 400 });
+    }
+
+    const result = await ctx.runAction(api.actions.realWorldVerify.runFullPipeline, {
+      universityName: String(body.universityName || "Test University"),
+      state: body.state ? String(body.state) : undefined,
+      city: body.city ? String(body.city) : undefined,
+      website: body.website ? String(body.website) : undefined,
+      studentCount: typeof body.studentCount === "number" ? body.studentCount : undefined,
+      type: body.type ? String(body.type) : undefined,
+      naacGrade: body.naacGrade ? String(body.naacGrade) : undefined,
+      stages: Array.isArray(body.stages)
+        ? body.stages.filter(
+            (s): s is string => typeof s === "string",
+          )
+        : undefined,
+      cleanup: body.cleanup === true,
+    });
+
+    return new Response(JSON.stringify(result, null, 2), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  }),
+});
+
 export default http;

@@ -7,6 +7,9 @@ import {
 import { v, ConvexError } from "convex/values";
 import { validateAuth } from "./lib/auth_utils";
 import { api } from "./_generated/api";
+import { Id } from "./_generated/dataModel";
+import type { GenericMutationCtx } from "convex/server";
+import type { DataModel } from "./_generated/dataModel";
 
 export const listByUniversity = query({
   args: { university_id: v.id("universities") },
@@ -160,75 +163,100 @@ export const resumeInternal = internalMutation({
   },
 });
 
+async function doEnroll(
+  ctx: GenericMutationCtx<DataModel>,
+  args: { university_id: Id<"universities">; stakeholder_id?: Id<"stakeholders"> },
+) {
+  let stakeholder = null;
+
+  if (args.stakeholder_id) {
+    stakeholder = await ctx.db.get(args.stakeholder_id);
+  }
+
+  if (!stakeholder) {
+    // 1. Find primary stakeholder or fallback to any valid stakeholder
+    stakeholder = await ctx.db
+      .query("stakeholders")
+      .withIndex("by_university_primary", (q) =>
+        q.eq("university_id", args.university_id).eq("is_primary", true),
+      )
+      .first();
+  }
+
+  if (!stakeholder) {
+    // Fallback: get the first stakeholder with an email
+    const allStakeholders = await ctx.db
+      .query("stakeholders")
+      .withIndex("by_university", (q) =>
+        q.eq("university_id", args.university_id),
+      )
+      .collect();
+
+    stakeholder =
+      allStakeholders.find(
+        (s) =>
+          s.email &&
+          s.email.trim() !== "" &&
+          s.email.trim().toLowerCase() !== "null",
+      ) ?? null;
+  }
+
+  if (!stakeholder) {
+    throw new ConvexError(
+      "No valid stakeholder found for this university with a valid email address.",
+    );
+  }
+
+  // 2. Check if sequence already exists
+  const existing = await ctx.db
+    .query("outreachSequences")
+    .withIndex("by_university", (q) =>
+      q.eq("university_id", args.university_id),
+    )
+    .filter((q) => q.eq(q.field("stakeholder_id"), stakeholder._id))
+    .first();
+
+  if (existing) {
+    return existing._id;
+  }
+
+  // 3. Create sequence
+  const now = Date.now();
+  const sequenceId = await ctx.db.insert("outreachSequences", {
+    university_id: args.university_id,
+    stakeholder_id: stakeholder._id,
+    status: "active",
+    current_step: 1,
+    total_steps: 4,
+    next_send_at: now,
+    created_at: now,
+    updated_at: now,
+  });
+
+  // 4. Schedule the first email immediately — this is what kicks off the outreach pipeline
+  await ctx.scheduler.runAfter(0, api.actions.outreach.processSequenceStep, {
+    sequenceId,
+  });
+
+  return sequenceId;
+}
+
 export const enroll = mutation({
   args: {
     university_id: v.id("universities"),
   },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
-    // 1. Find primary stakeholder or fallback to any valid stakeholder
-    let stakeholder = await ctx.db
-      .query("stakeholders")
-      .withIndex("by_university_primary", (q) =>
-        q.eq("university_id", args.university_id).eq("is_primary", true),
-      )
-      .first();
+    return await doEnroll(ctx, args);
+  },
+});
 
-    if (!stakeholder) {
-      // Fallback: get the first stakeholder with an email
-      const allStakeholders = await ctx.db
-        .query("stakeholders")
-        .withIndex("by_university", (q) =>
-          q.eq("university_id", args.university_id),
-        )
-        .collect();
-
-      stakeholder =
-        allStakeholders.find(
-          (s) =>
-            s.email &&
-            s.email.trim() !== "" &&
-            s.email.trim().toLowerCase() !== "null",
-        ) ?? null;
-    }
-
-    if (!stakeholder) {
-      throw new ConvexError(
-        "No valid stakeholder found for this university with a valid email address.",
-      );
-    }
-
-    // 2. Check if sequence already exists
-    const existing = await ctx.db
-      .query("outreachSequences")
-      .withIndex("by_university", (q) =>
-        q.eq("university_id", args.university_id),
-      )
-      .filter((q) => q.eq(q.field("stakeholder_id"), stakeholder._id))
-      .first();
-
-    if (existing) {
-      return existing._id;
-    }
-
-    // 3. Create sequence
-    const now = Date.now();
-    const sequenceId = await ctx.db.insert("outreachSequences", {
-      university_id: args.university_id,
-      stakeholder_id: stakeholder._id,
-      status: "active",
-      current_step: 1,
-      total_steps: 4,
-      next_send_at: now,
-      created_at: now,
-      updated_at: now,
-    });
-
-    // 4. Schedule the first email immediately — this is what kicks off the outreach pipeline
-    await ctx.scheduler.runAfter(0, api.actions.outreach.processSequenceStep, {
-      sequenceId,
-    });
-
-    return sequenceId;
+export const enrollInternal = internalMutation({
+  args: {
+    university_id: v.id("universities"),
+    stakeholder_id: v.optional(v.id("stakeholders")),
+  },
+  handler: async (ctx, args) => {
+    return await doEnroll(ctx, args);
   },
 });

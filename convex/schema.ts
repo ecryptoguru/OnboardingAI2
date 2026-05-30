@@ -95,7 +95,12 @@ export default defineSchema({
     linkedin_url: v.optional(v.string()),
     is_primary: v.boolean(),
     source: v.optional(v.string()), // "scraper" | "serper" | "manual"
+    source_type: v.optional(v.string()),
+    sources: v.optional(v.array(v.string())),
+    last_enriched_source: v.optional(v.string()),
+    change_log: v.optional(v.array(v.string())),
     created_at: v.number(),
+    updated_at: v.optional(v.number()),
   })
     .index("by_university", ["university_id"])
     .index("by_email", ["email"])

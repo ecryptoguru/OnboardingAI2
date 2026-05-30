@@ -178,6 +178,8 @@ export const scrapeUniversity = action({
         universityId: args.universityId,
         stage: "enriched",
       });
+
+      return { success: true };
     } catch (e) {
       console.error("[Scraper] Fatal error:", e);
       Sentry.captureException(e, {

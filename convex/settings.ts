@@ -1,4 +1,4 @@
-import { mutation, query, action, internalQuery } from "./_generated/server";
+import { mutation, query, action, internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { GoogleGenAI } from "@google/genai";
 import { getAuthUserId } from "@convex-dev/auth/server";
@@ -35,11 +35,11 @@ function obfuscate(plain: string): string {
       plain.charCodeAt(i) ^ _OBF_SECRET.charCodeAt(i % _OBF_SECRET.length),
     );
   }
-  return Buffer.from(out).toString("base64");
+  return btoa(out);
 }
 
 function deobfuscate(cipher: string): string {
-  const raw = Buffer.from(cipher, "base64").toString("binary");
+  const raw = atob(cipher);
   let out = "";
   for (let i = 0; i < raw.length; i++) {
     out += String.fromCharCode(
@@ -277,6 +277,27 @@ export const setFirecrawlKey = mutation({
       throw new Error("Invalid Firecrawl API Key format");
     }
 
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "firecrawlApiKey"))
+      .first();
+
+    const cipher = obfuscate(args.apiKey);
+    if (doc) {
+      await ctx.db.patch(doc._id, { value: cipher });
+    } else {
+      await ctx.db.insert("systemSettings", {
+        configKey: "firecrawlApiKey",
+        value: cipher,
+      });
+    }
+    return { success: true };
+  },
+});
+
+export const setFirecrawlKeyInternal = internalMutation({
+  args: { apiKey: v.string() },
+  handler: async (ctx, args) => {
     const doc = await ctx.db
       .query("systemSettings")
       .withIndex("by_key", (q) => q.eq("configKey", "firecrawlApiKey"))

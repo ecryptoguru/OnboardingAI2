@@ -546,6 +546,17 @@ export const getInternal = internalQuery({
   },
 });
 
+export const findByNameInternal = internalQuery({
+  args: { name: v.string() },
+  handler: async (ctx, args) => {
+    const all = await ctx.db.query("universities").collect();
+    const lower = args.name.toLowerCase();
+    return (
+      all.find((u) => u.university_name.toLowerCase().includes(lower)) ?? null
+    );
+  },
+});
+
 export const updateInternal = internalMutation({
   args: {
     id: v.id("universities"),

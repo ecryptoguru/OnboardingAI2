@@ -143,9 +143,12 @@ export const runDeepEnrichment = action({
 
       console.log(`[DeepEnrichment] Starting for ${uniName}...`);
 
-      const firecrawlKey = await ctx.runQuery(
+      let firecrawlKey = await ctx.runQuery(
         internal.settings.getInternalFirecrawlKey,
       );
+      if (!firecrawlKey) {
+        firecrawlKey = process.env.FIRECRAWL_API_KEY ?? null;
+      }
       if (!firecrawlKey) {
         throw new Error(
           "FIRECRAWL API KEY is not set. Please configure it in Settings.",
