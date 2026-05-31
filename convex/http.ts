@@ -73,8 +73,14 @@ http.route({
   path: "/webhooks/sendgrid",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
-    // Signature verification (optional — enable by setting SENDGRID_WEBHOOK_SECRET)
     const secret = process.env.SENDGRID_WEBHOOK_SECRET;
+    const isProd = process.env.NODE_ENV === "production";
+
+    if (isProd && !secret) {
+      console.error("[SendGrid] Missing SENDGRID_WEBHOOK_SECRET in production. Rejecting request.");
+      return new Response("Configuration Error", { status: 500 });
+    }
+
     if (secret) {
       const rawBody = await req.text();
       const sig = req.headers.get("x-sendgrid-signature-v1") ?? "";
@@ -91,7 +97,8 @@ http.route({
       return handleSendGridEvents(ctx, events);
     }
 
-    // No secret configured — accept all (dev mode)
+    // No secret configured — accept all (dev mode only)
+    console.warn("[SendGrid] ⚠️ Webhook secret not configured in dev. Bypassing signature verification.");
     const events = (await req.json()) as Array<{
       event: string;
       sg_message_id?: string;
@@ -139,6 +146,13 @@ http.route({
   handler: httpAction(async (ctx, req) => {
     // Shared-secret verification (set EMAIL_WEBHOOK_SECRET in Convex env vars)
     const secret = process.env.EMAIL_WEBHOOK_SECRET;
+    const isProd = process.env.NODE_ENV === "production";
+
+    if (isProd && !secret) {
+      console.error("[Inbound Reply] Missing EMAIL_WEBHOOK_SECRET in production. Rejecting request.");
+      return new Response("Configuration Error", { status: 500 });
+    }
+
     if (secret) {
       const authHeader = req.headers.get("authorization") ?? "";
       const provided = authHeader.replace(/^Bearer\s+/i, "").trim();
@@ -146,6 +160,8 @@ http.route({
         console.warn("[Inbound Reply] Invalid webhook secret. Rejecting.");
         return new Response("Unauthorized", { status: 401 });
       }
+    } else {
+      console.warn("[Inbound Reply] ⚠️ Webhook secret not configured in dev. Bypassing authorization.");
     }
 
     const contentType = req.headers.get("content-type") ?? "";
@@ -253,10 +269,20 @@ http.route({
     // Google Calendar push notifications include a channel token for verification
     const channelToken = req.headers.get("x-goog-channel-token") ?? "";
     const expectedToken = process.env.GOOGLE_CALENDAR_WEBHOOK_TOKEN;
+    const isProd = process.env.NODE_ENV === "production";
 
-    if (expectedToken && channelToken !== expectedToken) {
-      console.warn("[GoogleCalendar] Invalid channel token. Rejecting.");
-      return new Response("Unauthorized", { status: 401 });
+    if (isProd && !expectedToken) {
+      console.error("[GoogleCalendar] Missing GOOGLE_CALENDAR_WEBHOOK_TOKEN in production. Rejecting request.");
+      return new Response("Configuration Error", { status: 500 });
+    }
+
+    if (expectedToken) {
+      if (channelToken !== expectedToken) {
+        console.warn("[GoogleCalendar] Invalid channel token. Rejecting.");
+        return new Response("Unauthorized", { status: 401 });
+      }
+    } else {
+      console.warn("[GoogleCalendar] ⚠️ Webhook token not configured in dev. Bypassing token check.");
     }
 
     // The notification body is empty; we use the channel ID + resource state
@@ -293,6 +319,12 @@ http.route({
   path: "/test/run-pipeline",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
+    const isProd = process.env.NODE_ENV === "production";
+    if (isProd) {
+      console.error("[Pipeline Test] Attempted to run test pipeline in production. Forbidden.");
+      return new Response("Forbidden", { status: 403 });
+    }
+
     const secret = process.env.TEST_WEBHOOK_SECRET;
     if (secret) {
       const authHeader = req.headers.get("authorization") ?? "";
@@ -300,6 +332,8 @@ http.route({
       if (provided !== secret) {
         return new Response("Unauthorized", { status: 401 });
       }
+    } else {
+      console.warn("[Pipeline Test] ⚠️ TEST_WEBHOOK_SECRET not configured. Allowing unauthenticated dev request.");
     }
 
     let body: Record<string, unknown> = {};

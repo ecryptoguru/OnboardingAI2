@@ -121,6 +121,7 @@ export default defineSchema({
       agility_score: v.optional(v.number()),
       stakeholder_score: v.optional(v.number()),
       digital_signals_score: v.optional(v.number()),
+      hostelites_inferred: v.optional(v.boolean()),
       // Legacy fields (some old records may have these; keep as optional so they don't fail validation)
       student_count_score: v.optional(v.number()),
       digital_presence_score: v.optional(v.number()),
@@ -198,6 +199,7 @@ export default defineSchema({
   })
     .index("by_sequence", ["sequence_id"])
     .index("by_university", ["university_id"])
+    .index("by_stakeholder", ["stakeholder_id"])
     .index("by_status", ["status"])
     .index("by_step_number", ["step_number"])
     .index("by_sendgrid_id", ["sendgrid_message_id"]),

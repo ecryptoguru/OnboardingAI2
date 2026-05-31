@@ -4,7 +4,7 @@ import { action } from "../_generated/server";
 import { internal, api } from "../_generated/api";
 import { v } from "convex/values";
 import { callGemini, TEMP, MODELS } from "../lib/llm";
-import { validateJsonOutput } from "../lib/utils";
+import { validateJsonOutput, sanitizeLlmInput } from "../lib/utils";
 import { recommendModules, suggestPricingTier } from "../lib/moduleRecommender";
 import { PROPOSAL_SYSTEM_PROMPT, PROPOSAL_SCHEMA } from "../lib/prompts";
 import * as Sentry from "@sentry/nextjs";
@@ -63,7 +63,7 @@ export const generateProposal = action({
       leadTier: uni.lead_tier || "Standard",
       recommendedModules: recommendedModules.map((m) => m.name),
       pricingTier,
-      signals: signals.map((s: { content: string }) => s.content),
+      signals: signals.map((s: { content: string }) => sanitizeLlmInput(s.content)),
       stakeholderName,
       stakeholderRole,
     });

@@ -69,14 +69,33 @@ describe("calculateDeterministicScore", () => {
     assert.strictEqual(result.factors.agility_score, 15);
   });
 
-  it("should handle missing demographics gracefully", () => {
+  it("should infer hostelites from nirf_total when actual hostelites missing", () => {
+    const result = calculateDeterministicScore(
+      {
+        type: "Deemed",
+        demographics: { nirf_total: 12000 },
+      },
+      [{ signal_type: "news" }],
+      3,
+    );
+
+    // 12000 students * 50% inferred ratio = 6000 hostelites → score 30
+    assert.strictEqual(result.factors.hostelite_score, 30);
+    assert.strictEqual(result.factors.hostelites_inferred, true);
+    assert.strictEqual(result.factors.student_scale_score, 15);
+    assert.strictEqual(result.factors.agility_score, 15);
+  });
+
+  it("should infer hostelites for private universities with student count", () => {
     const result = calculateDeterministicScore(
       { student_count: 5000, type: "Private" },
       [],
       0,
     );
 
-    assert.strictEqual(result.factors.hostelite_score, 0);
+    // 5000 students * 50% inferred ratio = 2500 hostelites → score 20
+    assert.strictEqual(result.factors.hostelite_score, 20);
+    assert.strictEqual(result.factors.hostelites_inferred, true);
     assert.strictEqual(result.factors.student_scale_score, 10);
     assert.strictEqual(result.factors.stakeholder_score, 0);
   });

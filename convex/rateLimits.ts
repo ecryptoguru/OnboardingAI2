@@ -157,3 +157,48 @@ export const increment = internalMutation({
     }
   },
 });
+
+export const checkRateLimitInternal = internalMutation({
+  args: {
+    key: v.string(),
+    windowMs: v.number(),
+    maxRequests: v.number(),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ allowed: boolean; remaining: number; retryAfter?: number }> => {
+    const now = Date.now();
+    const record = await ctx.db
+      .query("rateLimits")
+      .withIndex("by_key", (q) => q.eq("key", args.key))
+      .first();
+
+    if (!record || now > record.resetAt) {
+      if (record) {
+        await ctx.db.patch(record._id, {
+          count: 1,
+          resetAt: now + args.windowMs,
+        });
+      } else {
+        await ctx.db.insert("rateLimits", {
+          key: args.key,
+          count: 1,
+          resetAt: now + args.windowMs,
+        });
+      }
+      return { allowed: true, remaining: args.maxRequests - 1 };
+    }
+
+    if (record.count >= args.maxRequests) {
+      return {
+        allowed: false,
+        remaining: 0,
+        retryAfter: Math.ceil((record.resetAt - now) / 1000),
+      };
+    }
+
+    await ctx.db.patch(record._id, { count: record.count + 1 });
+    return { allowed: true, remaining: args.maxRequests - record.count - 1 };
+  },
+});

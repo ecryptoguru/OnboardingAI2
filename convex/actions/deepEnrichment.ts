@@ -13,6 +13,10 @@ import {
   firecrawlMap,
   firecrawlScrape,
   filterHighYieldUrls,
+  filterPdfUrls,
+  downloadPdfBuffer,
+  extractPdfText,
+  extractPdfTables,
   extractContactsFromMarkdown,
 } from "../lib/scrapers";
 import * as Sentry from "@sentry/nextjs";
@@ -44,6 +48,11 @@ const MAX_URLS_TO_SCRAPE = 6; // Limit Firecrawl API calls per enrichment
 const MAX_CHARS_PER_SOURCE = 15_000; // Truncate each scraped source
 const MIN_BLOCK_LENGTH = 200; // Minimum length for a block to be considered valid
 const MAX_REGEX_CONTACTS = 30; // Cap to avoid bloating the prompt
+const MAX_COST_ESTIMATE = 5000; // Rough ceiling: Firecrawl credits * 100 + Gemini input tokens.
+// Example: 6 URLs scraped (6 credits) + 1 map call = 7 * 100 = 700.
+// Plus ~20k chars prompt / 4 = 5k tokens. Total ~5,700.
+// 5000 is a pragmatic guard against universities with 20+ pages/PDFs.
+// Tune upward if you see too many budget_exceeded aborts on legitimate large universities.
 
 // ─── Content normalizer ───────────────────────────────────────────────────────
 function normalizeContent(raw: string): string {
@@ -226,9 +235,48 @@ export const runDeepEnrichment = action({
       });
 
       const scrapedBlocks = await Promise.all(scrapePromises);
-      const validBlocks = scrapedBlocks.filter(
+      let validBlocks = scrapedBlocks.filter(
         (b) => b.length > MIN_BLOCK_LENGTH,
       );
+
+      // ─── Phase 2c: AISHE / NAAC PDF Text Extraction ──────────────────────
+      // Demographic data (hostelite counts, enrollment tables) frequently resides
+      // in PDF documents linked deep within university websites.
+      const pdfUrls = mapResult ? filterPdfUrls(mapResult, 3) : [];
+      if (pdfUrls.length > 0) {
+        console.log(
+          `[DeepEnrichment] Found ${pdfUrls.length} PDF documents to extract: ${pdfUrls.join(", ")}`,
+        );
+        const pdfPromises = pdfUrls.map(async (pdfUrl) => {
+          try {
+            // Download PDF buffer once, then extract both text and tables from it
+            const buffer = await downloadPdfBuffer(pdfUrl);
+            const [text, tables] = await Promise.all([
+              extractPdfText(buffer),
+              extractPdfTables(buffer),
+            ]);
+
+            const combined = [text, tables].filter(Boolean).join("\n\n");
+            if (combined.length < MIN_BLOCK_LENGTH) return "";
+
+            const normalized = normalizeContent(combined).substring(
+              0,
+              MAX_CHARS_PER_SOURCE,
+            );
+            return `\n=== PDF SOURCE: ${pdfUrl} ===\n${normalized}\n`;
+          } catch (e) {
+            console.error(
+              `[DeepEnrichment] PDF extraction failed for ${pdfUrl}:`,
+              e,
+            );
+            return "";
+          }
+        });
+        const pdfBlocks = await Promise.all(pdfPromises);
+        validBlocks = validBlocks.concat(
+          pdfBlocks.filter((b) => b.length > MIN_BLOCK_LENGTH),
+        );
+      }
 
       // ─── Phase 2b: Zero-Cost Regex Fallback Extraction ───────────────────
       // If contacts exist in raw Markdown, they are physically impossible to miss.
@@ -290,6 +338,25 @@ WEB PAGE CONTENT:
 ${safeContext}
       `.trim();
 
+      // ─── Cost ceiling guard ─────────────────────────────────────────────
+      // Rough estimate: Firecrawl credits * 100 + Gemini input tokens. Abort if too high.
+      const firecrawlCreditsConsumed = 1 + validBlocks.length + pdfUrls.length;
+      const estimatedGeminiTokens = Math.round(extractionPrompt.length / 4);
+      const costEstimate = firecrawlCreditsConsumed * 100 + estimatedGeminiTokens;
+      if (costEstimate > MAX_COST_ESTIMATE) {
+        console.warn(
+          `[DeepEnrichment] COST CEILING EXCEEDED for ${uniName}: estimate=${costEstimate} (max=${MAX_COST_ESTIMATE}). Aborting Gemini call.`,
+        );
+        return {
+          success: false,
+          error: "budget_exceeded",
+          stakeholdersSynthesized: 0,
+          demographicsIncluded: false,
+          contextChars: finalContext.length,
+          estimatedTokens: { flash: estimatedGeminiTokens, pro: 0 },
+        };
+      }
+
       let synthesizedJson: { demographics: Record<string, unknown>; stakeholders: unknown[] } | null = null;
       let synthesisAttempts = 0;
       const maxSynthesisAttempts = 2;
@@ -325,9 +392,15 @@ ${safeContext}
             ["demographics", "stakeholders"],
             "DeepEnrichment output",
           ) as { demographics: Record<string, unknown>; stakeholders: unknown[] };
+          // Redact PII: log only field counts, never names/emails/phones
+          const stCount = Array.isArray(synthesizedJson.stakeholders)
+            ? synthesizedJson.stakeholders.length
+            : 0;
+          const demoKeys = synthesizedJson.demographics
+            ? Object.keys(synthesizedJson.demographics)
+            : [];
           console.log(
-            "[DeepEnrichment] Synthesized:",
-            JSON.stringify(synthesizedJson, null, 2),
+            `[DeepEnrichment] Synthesized: ${stCount} stakeholders, demographics keys: [${demoKeys.join(", ")}]`,
           );
           break; // Success — exit retry loop
         } catch (e) {
@@ -410,6 +483,18 @@ ${safeContext}
 
       if (demo) {
         // Inference chain — run in order so each inferred value can feed the next
+
+        // Fall back to NIRF data if general demographics are not available
+        if (!demo.total_students && demo.nirf_total) {
+          demo.total_students = demo.nirf_total;
+          demo.source = demo.source || demo.nirf_source || "NIRF Fallback";
+        }
+        if (!demo.total_students_male && demo.nirf_male) {
+          demo.total_students_male = demo.nirf_male;
+        }
+        if (!demo.total_students_female && demo.nirf_female) {
+          demo.total_students_female = demo.nirf_female;
+        }
 
         // 1. Compute totals from splits if missing
         if (
@@ -518,9 +603,11 @@ ${safeContext}
         demo &&
         Object.values(demo).some((val) => typeof val === "number" && val > 0)
       ) {
+        const populatedFields = Object.entries(demo)
+          .filter(([, v]) => v !== undefined && v !== null)
+          .map(([k]) => k);
         console.log(
-          "[DeepEnrichment] Saving demographics:",
-          JSON.stringify(demo),
+          `[DeepEnrichment] Saving demographics: ${populatedFields.length} fields populated [${populatedFields.join(", ")}]`,
         );
         await ctx.runMutation(
           internal.universities.updateDemographicsInternal,
@@ -531,8 +618,7 @@ ${safeContext}
         );
       } else {
         console.warn(
-          "[DeepEnrichment] No demographics. Raw:",
-          JSON.stringify(demographics),
+          "[DeepEnrichment] No demographics extracted — all fields null or missing.",
         );
       }
 

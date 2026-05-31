@@ -23,21 +23,9 @@ export function calculateDeterministicScore(
   signals: Signal[],
   stakeholdersCount: number = 0,
 ) {
-  // 1. Hostelite Score (Max 30) - Crucial for Fretbox Hostel Module
-  let hostelite_score = 0;
-  let hostelites = 0;
-  if (uni.demographics && typeof uni.demographics.hostelites === "number") {
-    hostelites = uni.demographics.hostelites;
-  }
-  if (hostelites >= 5000) hostelite_score = 30;
-  else if (hostelites >= 2000) hostelite_score = 20;
-  else if (hostelites >= 500) hostelite_score = 10;
-  else if (hostelites > 0) hostelite_score = 5;
-
-  // 2. Student Scale Score (Max 20) - Campus ERP size
-  // FIX: Always prefer demographics data over the stale student_count field.
-  // demographics.total_students is authoritative (extracted from NIRF/NAAC/AISHE).
-  // Only fall back to student_count if demographics is completely absent.
+  // 1. Student Scale Score (Max 20) - Campus ERP size
+  // Must be calculated BEFORE hostelite score so we can infer hostelites from it.
+  // Always prefer demographics data over the stale student_count field.
   let student_scale_score = 0;
   let calculated_students = 0;
   if (uni.demographics) {
@@ -63,6 +51,30 @@ export function calculateDeterministicScore(
   else if (calculated_students >= 10000) student_scale_score = 15;
   else if (calculated_students >= 5000) student_scale_score = 10;
   else if (calculated_students >= 2000) student_scale_score = 5;
+
+  // 2. Hostelite Score (Max 30) - Crucial for Fretbox Hostel Module
+  let hostelite_score = 0;
+  let hostelites = 0;
+  let hostelites_inferred = false;
+  if (uni.demographics && typeof uni.demographics.hostelites === "number") {
+    hostelites = uni.demographics.hostelites;
+  } else if (calculated_students >= 1000) {
+    // Inference fallback: when actual hostelites are missing but we have total student count,
+    // estimate hostelites using typical residential ratios for Indian universities.
+    // Private/Deemed universities typically have 40-70% hostelites (use conservative 50%).
+    // State/Central/Public universities typically have 20-40% hostelites (use conservative 30%).
+    const isResidential = uni.type && (uni.type.toLowerCase().includes("private") || uni.type.toLowerCase().includes("deemed"));
+    const inferredRatio = isResidential ? 0.50 : 0.30;
+    hostelites = Math.round(calculated_students * inferredRatio);
+    hostelites_inferred = true;
+    console.log(
+      `[Scoring] Inferred hostelites=${hostelites} from total=${calculated_students} ratio=${inferredRatio} type=${uni.type || "unknown"}`,
+    );
+  }
+  if (hostelites >= 5000) hostelite_score = 30;
+  else if (hostelites >= 2000) hostelite_score = 20;
+  else if (hostelites >= 500) hostelite_score = 10;
+  else if (hostelites > 0) hostelite_score = 5;
 
   // 3. NAAC Score (Max 15) - Budget / Quality proxy
   let naac_score = 0;
@@ -110,7 +122,7 @@ export function calculateDeterministicScore(
 
   // Debug log so we can trace scoring in Convex logs
   console.log(
-    `[Scoring] breakdown → hostelites:${hostelites} (+${hostelite_score}) | students:${calculated_students} (+${student_scale_score}) | naac:${uni.naac_grade || "N/A"} (+${naac_score}) | type:${uni.type || "N/A"} (+${agility_score}) | stakeholders:${stakeholdersCount} (+${stakeholder_score}) | signals:+${digital_signals_score} | TOTAL:${deterministic_score}`,
+    `[Scoring] breakdown → hostelites:${hostelites}${hostelites_inferred ? "(inferred)" : ""} (+${hostelite_score}) | students:${calculated_students} (+${student_scale_score}) | naac:${uni.naac_grade || "N/A"} (+${naac_score}) | type:${uni.type || "N/A"} (+${agility_score}) | stakeholders:${stakeholdersCount} (+${stakeholder_score}) | signals:+${digital_signals_score} | TOTAL:${deterministic_score}`,
   );
 
   return {
@@ -122,6 +134,7 @@ export function calculateDeterministicScore(
       agility_score,
       stakeholder_score,
       digital_signals_score,
+      hostelites_inferred,
     },
   };
 }

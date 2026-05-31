@@ -68,6 +68,20 @@ export function UniversityDetail({
 
   if (!universityId) return null;
 
+  const rawDemo = university?.demographics;
+  const viewDemo = rawDemo ? {
+    total_students: rawDemo.total_students || rawDemo.nirf_total || null,
+    total_students_male: rawDemo.total_students_male || rawDemo.nirf_male || null,
+    total_students_female: rawDemo.total_students_female || rawDemo.nirf_female || null,
+    day_scholars: rawDemo.day_scholars ?? null,
+    day_scholars_male: rawDemo.day_scholars_male ?? null,
+    day_scholars_female: rawDemo.day_scholars_female ?? null,
+    hostelites: rawDemo.hostelites ?? null,
+    hostelites_male: rawDemo.hostelites_male ?? null,
+    hostelites_female: rawDemo.hostelites_female ?? null,
+    source: rawDemo.source || rawDemo.nirf_source || "NIRF Fallback",
+  } : null;
+
   return (
     <div
       className={`fixed inset-y-0 right-0 w-full max-w-xl bg-background border-l border-card-border/60 shadow-2xl z-50 transform transition-transform duration-300 ease-in-out ${
@@ -344,16 +358,16 @@ export function UniversityDetail({
             <h3 className="text-sm font-semibold font-heading tracking-wide text-foreground">
               Student Demographics{" "}
               <span className="text-muted-foreground font-normal">
-                (AISHE · NAAC · SSR)
+                (AISHE · NAAC · SSR · NIRF)
               </span>
             </h3>
-            {university?.demographics?.source ? (
+            {viewDemo?.source && !viewDemo.source.includes("NIRF Fallback") ? (
               <span className="text-[10px] uppercase font-bold text-emerald-400/80 bg-emerald-400/10 px-2 py-0.5 rounded border border-emerald-500/20">
-                {university.demographics.source}
+                {viewDemo.source}
               </span>
-            ) : university?.demographics ? (
+            ) : viewDemo ? (
               <span className="text-[10px] uppercase font-bold text-sky-500/80 bg-sky-500/10 px-2 py-0.5 rounded border border-sky-500/20">
-                NIRF Only
+                NIRF Fallback
               </span>
             ) : (
               <span className="text-[10px] uppercase font-bold text-zinc-600 bg-muted px-2 py-0.5 rounded">
@@ -362,7 +376,7 @@ export function UniversityDetail({
             )}
           </div>
 
-          {!university?.demographics ? (
+          {!viewDemo ? (
             <div className="p-5 flex flex-col items-center gap-2 text-center">
               <p className="text-muted-foreground text-sm">
                 No demographic data available yet.
@@ -375,23 +389,6 @@ export function UniversityDetail({
                 above to pull the latest NIRF, AISHE &amp; NAAC data.
               </p>
             </div>
-          ) : !(
-              university.demographics.total_students ||
-              university.demographics.hostelites ||
-              university.demographics.day_scholars
-            ) ? (
-            <div className="p-5 flex flex-col items-center gap-2 text-center">
-              <p className="text-muted-foreground text-sm">
-                Hostelite breakdown not yet available.
-              </p>
-              <p className="text-zinc-600 text-xs">
-                Re-run{" "}
-                <span className="text-emerald-400 font-medium">
-                  Deep Enrich
-                </span>{" "}
-                — the system will search NAAC SSR &amp; AISHE reports.
-              </p>
-            </div>
           ) : (
             <div className="p-5">
               <div className="grid grid-cols-3 gap-y-6 gap-x-4">
@@ -402,9 +399,9 @@ export function UniversityDetail({
                   </p>
                   <p className="text-foreground text-lg font-bold">
                     {(
-                      university.demographics.total_students ||
-                      (university.demographics.total_students_male ?? 0) +
-                        (university.demographics.total_students_female ?? 0) ||
+                      viewDemo.total_students ||
+                      (viewDemo.total_students_male ?? 0) +
+                        (viewDemo.total_students_female ?? 0) ||
                       0
                     ).toLocaleString() || "—"}
                   </p>
@@ -412,15 +409,13 @@ export function UniversityDetail({
                     <div className="flex justify-between">
                       <span className="text-blue-400">Male:</span>
                       <span className="text-foreground">
-                        {university.demographics.total_students_male?.toLocaleString() ??
-                          "—"}
+                        {viewDemo.total_students_male?.toLocaleString() ?? "—"}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-pink-400">Female:</span>
                       <span className="text-foreground">
-                        {university.demographics.total_students_female?.toLocaleString() ??
-                          "—"}
+                        {viewDemo.total_students_female?.toLocaleString() ?? "—"}
                       </span>
                     </div>
                   </div>
@@ -432,14 +427,14 @@ export function UniversityDetail({
                     Day Scholars
                   </p>
                   <p className="text-foreground text-lg font-bold">
-                    {university.demographics.day_scholars != null
-                      ? university.demographics.day_scholars.toLocaleString()
-                      : (university.demographics.day_scholars_male ?? 0) +
-                            (university.demographics.day_scholars_female ?? 0) >
+                    {viewDemo.day_scholars != null
+                      ? viewDemo.day_scholars.toLocaleString()
+                      : (viewDemo.day_scholars_male ?? 0) +
+                            (viewDemo.day_scholars_female ?? 0) >
                           0
                         ? (
-                            (university.demographics.day_scholars_male ?? 0) +
-                            (university.demographics.day_scholars_female ?? 0)
+                            (viewDemo.day_scholars_male ?? 0) +
+                            (viewDemo.day_scholars_female ?? 0)
                           ).toLocaleString()
                         : "—"}
                   </p>
@@ -447,15 +442,13 @@ export function UniversityDetail({
                     <div className="flex justify-between">
                       <span className="text-blue-400">Male:</span>
                       <span className="text-foreground">
-                        {university.demographics.day_scholars_male?.toLocaleString() ??
-                          "—"}
+                        {viewDemo.day_scholars_male?.toLocaleString() ?? "—"}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-pink-400">Female:</span>
                       <span className="text-foreground">
-                        {university.demographics.day_scholars_female?.toLocaleString() ??
-                          "—"}
+                        {viewDemo.day_scholars_female?.toLocaleString() ?? "—"}
                       </span>
                     </div>
                   </div>
@@ -467,14 +460,14 @@ export function UniversityDetail({
                     Hostelites
                   </p>
                   <p className="text-foreground text-lg font-bold">
-                    {university.demographics.hostelites != null
-                      ? university.demographics.hostelites.toLocaleString()
-                      : (university.demographics.hostelites_male ?? 0) +
-                            (university.demographics.hostelites_female ?? 0) >
+                    {viewDemo.hostelites != null
+                      ? viewDemo.hostelites.toLocaleString()
+                      : (viewDemo.hostelites_male ?? 0) +
+                            (viewDemo.hostelites_female ?? 0) >
                           0
                         ? (
-                            (university.demographics.hostelites_male ?? 0) +
-                            (university.demographics.hostelites_female ?? 0)
+                            (viewDemo.hostelites_male ?? 0) +
+                            (viewDemo.hostelites_female ?? 0)
                           ).toLocaleString()
                         : "—"}
                   </p>
@@ -482,15 +475,13 @@ export function UniversityDetail({
                     <div className="flex justify-between">
                       <span className="text-blue-400">Male:</span>
                       <span className="text-foreground">
-                        {university.demographics.hostelites_male?.toLocaleString() ??
-                          "—"}
+                        {viewDemo.hostelites_male?.toLocaleString() ?? "—"}
                       </span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-pink-400">Female:</span>
                       <span className="text-foreground">
-                        {university.demographics.hostelites_female?.toLocaleString() ??
-                          "—"}
+                        {viewDemo.hostelites_female?.toLocaleString() ?? "—"}
                       </span>
                     </div>
                   </div>
@@ -498,8 +489,8 @@ export function UniversityDetail({
               </div>
 
               {/* Hostelite occupancy bar */}
-              {!!university.demographics.total_students &&
-                !!university.demographics.hostelites && (
+              {!!viewDemo.total_students &&
+                !!viewDemo.hostelites && (
                   <div className="mt-5 pt-4 border-t border-card-border/50">
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="text-muted-foreground text-[10px] uppercase font-bold">
@@ -507,8 +498,8 @@ export function UniversityDetail({
                       </span>
                       <span className="text-emerald-400 text-xs font-bold">
                         {Math.round(
-                          (university.demographics.hostelites /
-                            university.demographics.total_students) *
+                          (viewDemo.hostelites /
+                            viewDemo.total_students) *
                             100,
                         )}
                         %
@@ -518,13 +509,13 @@ export function UniversityDetail({
                       <div
                         className="bg-emerald-500 h-full rounded-full"
                         style={{
-                          width: `${Math.min(100, Math.round((university.demographics.hostelites / university.demographics.total_students) * 100))}%`,
+                          width: `${Math.min(100, Math.round((viewDemo.hostelites / viewDemo.total_students) * 100))}%`,
                         }}
                       />
                     </div>
                     <p className="text-zinc-600 text-[10px] mt-1">
-                      {university.demographics.hostelites.toLocaleString()} of{" "}
-                      {university.demographics.total_students.toLocaleString()}{" "}
+                      {viewDemo.hostelites.toLocaleString()} of{" "}
+                      {viewDemo.total_students.toLocaleString()}{" "}
                       students live on campus
                     </p>
                   </div>

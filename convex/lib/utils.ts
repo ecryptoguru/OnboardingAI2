@@ -96,10 +96,41 @@ export async function withRetry<T>(
       const status =
         (err as Record<string, unknown>)?.status ||
         (err as Record<string, unknown>)?.statusCode;
-      return (
+      if (
         status === 429 ||
         (typeof status === "number" && status >= 500 && status < 600)
-      );
+      ) {
+        return true;
+      }
+
+      const msg = err instanceof Error ? err.message : String(err);
+      const msgLower = msg.toLowerCase();
+
+      // Do NOT retry on explicit non-transient status codes
+      if (/\b(400|401|403|404)\b/.test(msgLower)) {
+        return false;
+      }
+
+      // Do NOT retry on safety/policy blocks
+      if (msgLower.includes("halted") || msgLower.includes("blockreason") || msgLower.includes("safety")) {
+        return false;
+      }
+
+      // Look for explicit transient HTTP status codes inside message strings
+      const httpCodeMatch = msgLower.match(/\b(429|500|502|503|504)\b/);
+      if (httpCodeMatch) return true;
+
+      // Look for typical transient/network/timeout indicators
+      const transientKeywords = [
+        "timeout",
+        "etimedout",
+        "fetch failed",
+        "network error",
+        "socket hang up",
+        "econnrefused",
+        "econnreset",
+      ];
+      return transientKeywords.some(keyword => msgLower.includes(keyword));
     },
   } = options;
 
@@ -131,6 +162,19 @@ export async function withRetry<T>(
     Sentry.captureException(lastError);
   }
   throw lastError;
+}
+
+/**
+ * Validate that a number lies within a specified range.
+ */
+export function validateRange(value: number, min: number, max: number, label = "Value"): number {
+  if (typeof value !== "number" || Number.isNaN(value)) {
+    throw new Error(`${label} must be a number`);
+  }
+  if (value < min || value > max) {
+    throw new Error(`${label} must be between ${min} and ${max}, got ${value}`);
+  }
+  return value;
 }
 
 /**

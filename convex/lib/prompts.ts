@@ -22,16 +22,26 @@ export const SCRAPER_SCHEMA: Schema = {
       items: {
         type: Type.OBJECT,
         properties: {
-          name: { type: Type.STRING, description: "Full Name or null" },
+          name: {
+            type: Type.STRING,
+            nullable: true,
+            description: "Full Name or null",
+          },
           role: {
             type: Type.STRING,
+            nullable: true,
             description: "Exact role or closest match from the list",
           },
           email: {
             type: Type.STRING,
+            nullable: true,
             description: "email@example.com or null",
           },
-          phone: { type: Type.STRING, description: "phone number or null" },
+          phone: {
+            type: Type.STRING,
+            nullable: true,
+            description: "phone number or null",
+          },
         },
         required: ["name", "role", "email", "phone"],
       },

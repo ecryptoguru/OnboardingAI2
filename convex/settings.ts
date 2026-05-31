@@ -7,10 +7,6 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 // Centralises the dev-bypass check used across every settings endpoint.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function ensureAuth(ctx: any) {
-  const isDev = process.env.NODE_ENV === "development";
-  const bypassSecret = process.env.DEV_AUTH_BYPASS_SECRET;
-  const bypassEnabled = isDev && !!bypassSecret;
-  if (bypassEnabled) return;
   const userId = await getAuthUserId(ctx);
   if (!userId) throw new Error("Unauthenticated");
 }

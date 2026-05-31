@@ -713,6 +713,7 @@ export const updateDemographicsInternal = internalMutation({
 
     await ctx.db.patch(args.universityId, {
       demographics: merged,
+      student_count: total || undefined,
       updated_at: Date.now(),
     });
   },

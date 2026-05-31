@@ -156,6 +156,80 @@ describe("extractContactsFromMarkdown - Combined", () => {
   });
 });
 
+describe("filterPdfUrls - PDF document detection", () => {
+  const PDF_YIELD_PATTERNS = [
+    /\.pdf$/i,
+    /aishe/i,
+    /naac.*ssr/i,
+    /mandatory.*disclosure/i,
+    /iqac/i,
+    /hostel/i,
+  ];
+
+  function filterPdfUrls(
+    links: { url: string }[],
+    maxUrls = 3,
+  ): string[] {
+    const scored = links
+      .filter((link) => link.url.toLowerCase().endsWith(".pdf"))
+      .map((link) => {
+        const url = link.url.toLowerCase();
+        let score = 0;
+        for (const pattern of PDF_YIELD_PATTERNS) {
+          if (pattern.test(url)) score += 1;
+        }
+        return { url: link.url, score };
+      })
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, maxUrls)
+      .map((item) => item.url);
+    return scored;
+  }
+
+  it("should detect AISHE PDFs", () => {
+    const links = [
+      { url: "https://uni.edu/aishe-report-2023.pdf" },
+      { url: "https://uni.edu/contact.html" },
+    ];
+    const result = filterPdfUrls(links);
+    assert.deepStrictEqual(result, ["https://uni.edu/aishe-report-2023.pdf"]);
+  });
+
+  it("should detect NAAC SSR PDFs", () => {
+    const links = [
+      { url: "https://uni.edu/naac-ssr-report.pdf" },
+      { url: "https://uni.edu/iqac/mandatory-disclosure.pdf" },
+      { url: "https://uni.edu/about" },
+    ];
+    const result = filterPdfUrls(links, 2);
+    assert.strictEqual(result.length, 2);
+    // iqac/mandatory-disclosure.pdf scores 3 (pdf + iqac + mandatory-disclosure)
+    // naac-ssr-report.pdf scores 2 (pdf + naac-ssr)
+    assert.strictEqual(result[0], "https://uni.edu/iqac/mandatory-disclosure.pdf");
+  });
+
+  it("should ignore non-PDF URLs", () => {
+    const links = [
+      { url: "https://uni.edu/aishe-report.html" },
+      { url: "https://uni.edu/contact" },
+    ];
+    const result = filterPdfUrls(links);
+    assert.deepStrictEqual(result, []);
+  });
+
+  it("should score multi-match PDFs higher and return sorted", () => {
+    const links = [
+      { url: "https://uni.edu/naac-ssr-aishe.pdf" }, // matches 3 patterns
+      { url: "https://uni.edu/hostel-rules.pdf" },   // matches 2 patterns
+      { url: "https://uni.edu/random.pdf" },         // matches 1 pattern
+    ];
+    const result = filterPdfUrls(links);
+    assert.strictEqual(result[0], "https://uni.edu/naac-ssr-aishe.pdf");
+    assert.strictEqual(result.length, 3);
+  });
+});
+
 describe("filterHighYieldUrls - URL scoring", () => {
   it("should score contact pages highest", () => {
     const HIGH_YIELD_PATTERNS = [

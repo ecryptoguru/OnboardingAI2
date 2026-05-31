@@ -24,6 +24,7 @@ export const upsert = mutation({
       agility_score: v.number(),
       stakeholder_score: v.number(),
       digital_signals_score: v.number(),
+      hostelites_inferred: v.optional(v.boolean()),
     }),
   },
   handler: async (ctx, args) => {
@@ -55,6 +56,7 @@ export const upsertInternal = internalMutation({
       agility_score: v.number(),
       stakeholder_score: v.number(),
       digital_signals_score: v.number(),
+      hostelites_inferred: v.optional(v.boolean()),
     }),
   },
   handler: async (ctx, args) => {
@@ -86,6 +88,7 @@ export const completeScoringInternal = internalMutation({
       agility_score: v.number(),
       stakeholder_score: v.number(),
       digital_signals_score: v.number(),
+      hostelites_inferred: v.optional(v.boolean()),
     }),
     lead_tier: v.union(v.literal("High"), v.literal("Medium"), v.literal("Low")),
     stage: v.union(

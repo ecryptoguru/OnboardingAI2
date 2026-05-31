@@ -95,9 +95,23 @@ export const discoverWebsite = action({
       return null;
     }
 
+    // Fetch university details to include state and city in the search
+    const university = await ctx.runQuery(internal.universities.getInternal, {
+      universityId: args.universityId,
+    });
+    const state = university?.state || "";
+    const city = university?.city || "";
+    // Clean up state/city if they are placeholders or unknown
+    const cleanState = state && !/unknown|test/i.test(state) ? state : "";
+    const cleanCity = city && !/unknown|test/i.test(city) ? city : "";
+    const locationSuffix = `${cleanCity ? " " + cleanCity : ""}${cleanState ? " " + cleanState : ""}`;
+
     // Try progressively shorter name variants if the full name yields no results
+    // We prioritize variants with the branch's state and city to ensure we get the correct branch website
     const nameVariants = [
+      `${args.universityName}${locationSuffix} official website India`,
       `${args.universityName} official website India`,
+      ...generateShortNameQueries(args.universityName).map(q => q.replace("official website India", `${locationSuffix} official website India`)),
       ...generateShortNameQueries(args.universityName),
     ];
 
@@ -156,9 +170,25 @@ export const discoverWebsite = action({
           if (grounding.sources.length > 0) {
             foundUrl = grounding.sources[0];
           } else if (grounding.text) {
-            // Fallback: extract URL from text response using regex
+            // Fallback: extract URL from text response using regex, then validate
             const urlMatch = grounding.text.match(/https?:\/\/[^\s\"<>]+/);
-            if (urlMatch) foundUrl = urlMatch[0];
+            if (urlMatch) {
+              const candidate = urlMatch[0];
+              try {
+                const urlObj = new URL(candidate);
+                const hostname = urlObj.hostname.replace(/^www\./, "");
+                const tld = hostname.split(".").pop() || "";
+                const validTlds = ["edu", "ac", "in", "org", "com", "net"];
+                const hasValidTld = validTlds.some((v) => tld === v || tld.endsWith(`.${v}`));
+                if (hasValidTld) {
+                  foundUrl = candidate;
+                } else {
+                  console.warn(`[Discovery] Rejected URL with invalid TLD: ${candidate}`);
+                }
+              } catch {
+                console.warn(`[Discovery] Rejected malformed URL: ${candidate}`);
+              }
+            }
           }
           if (foundUrl) {
             console.log(`[Discovery] Gemini Grounding found: ${foundUrl}`);

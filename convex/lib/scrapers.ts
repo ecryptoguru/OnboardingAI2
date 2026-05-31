@@ -1,5 +1,7 @@
 "use node";
 
+import { withRetry } from "./utils";
+
 // ─── Firecrawl API Client ──────────────────────────────────────────────────
 // Provides synchronous Map (sitemap discovery) and Scrape (single-page) calls.
 // We use Firecrawl instead of Serper to eliminate search costs and domain-mismatch bugs.
@@ -126,6 +128,168 @@ export function filterHighYieldUrls(
     .map((item) => item.url);
 
   return scored;
+}
+
+// ─── PDF Document Patterns ───────────────────────────────────────────────
+// Regex patterns used to identify AISHE / NAAC SSR / IQAC PDFs that often
+// contain deep demographic data (hostelite counts, enrollment tables, etc.)
+
+export const PDF_YIELD_PATTERNS = [
+  /\.pdf$/i,
+  /aishe/i,
+  /naac.*ssr/i,
+  /naac.*aqar/i,
+  /mandatory.*disclosure/i,
+  /iqac/i,
+  /ssr.*report/i,
+  /student.*strength/i,
+  /hostel/i,
+  /enrollment.*data/i,
+  /criterion.*2\.1/i,
+  /anti.*ragging/i,
+  /statutory.*disclosure/i,
+] as const;
+
+/**
+ * Filter discovered URLs to find AISHE/NAAC PDF documents.
+ * Returns PDF URLs that match demographic-enrichment patterns.
+ */
+export function filterPdfUrls(
+  mapResult: FirecrawlMapResult,
+  maxUrls = 3,
+): string[] {
+  if (!mapResult.success || !Array.isArray(mapResult.links)) return [];
+
+  const scored = mapResult.links
+    .filter((link) => link.url.toLowerCase().endsWith(".pdf"))
+    .map((link) => {
+      const url = link.url.toLowerCase();
+      let score = 0;
+      for (const pattern of PDF_YIELD_PATTERNS) {
+        if (pattern.test(url)) score += 1;
+      }
+      return { url: link.url, score };
+    })
+    .filter((item) => item.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxUrls)
+    .map((item) => item.url);
+
+  return scored;
+}
+
+/**
+ * Download a PDF with retry and return its buffer.
+ * Centralises fetch logic so extractPdfText + extractPdfTables can share one download.
+ */
+export async function downloadPdfBuffer(url: string): Promise<Buffer> {
+  return withRetry(
+    async () => {
+      const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+      return Buffer.from(await response.arrayBuffer());
+    },
+    { maxRetries: 2 },
+  );
+}
+
+/**
+ * Extract text content from a PDF buffer using pdf-parse v2.
+ *
+ * Uses advanced ParseParameters for optimal LLM ingestion:
+ * - `first: 30`  → Limit to first 30 pages (NAAC SSR tables often span 50+ pages).
+ * - `lineEnforce: true`  → Preserve logical line breaks.
+ * - `cellSeparator: "\t"` → Inject tabs between table cells.
+ * - `parseHyperlinks: true` → Capture embedded URLs.
+ *
+ * `parser.destroy()` is always called via try/finally to prevent memory leaks.
+ */
+interface PDFParser {
+  getText(params?: Record<string, unknown>): Promise<{ text: string }>;
+  getTable(params?: Record<string, unknown>): Promise<{ pages: { tables: string[][][] }[] }>;
+  destroy(): Promise<void>;
+}
+
+export async function extractPdfText(buffer: Buffer): Promise<string> {
+  let parser: PDFParser | null = null;
+  try {
+    const { PDFParse } = await import("pdf-parse");
+    parser = new PDFParse({ data: buffer }) as PDFParser;
+    const data = await parser.getText({
+      first: 30,
+      lineEnforce: true,
+      cellSeparator: "\t",
+      parseHyperlinks: true,
+    });
+    return data.text || "";
+  } catch (e) {
+    console.warn(
+      `[PDF] Failed to extract text:`,
+      e instanceof Error ? e.message : String(e),
+    );
+    return "";
+  } finally {
+    if (parser) {
+      try {
+        await parser.destroy();
+      } catch {
+        // ignore destroy failures
+      }
+    }
+  }
+}
+
+/**
+ * Extract structured tabular data from a PDF buffer using pdf-parse v2 `getTable()`.
+ *
+ * AISHE / NAAC SSR / IQAC PDFs are full of enrollment, hostel, and faculty
+ * tables. Getting them as 2-D arrays preserves row/column relationships
+ * far better than flat text for LLM reasoning.
+ *
+ * - `first: 30` → Enrollment tables can span large reports; scan first 30 pages.
+ * - Returns a markdown-ish table string ready for LLM context.
+ * - Falls back to empty string if no tables detected or on error.
+ *
+ * `parser.destroy()` is always called via try/finally to prevent memory leaks.
+ */
+export async function extractPdfTables(buffer: Buffer): Promise<string> {
+  let parser: PDFParser | null = null;
+  try {
+    const { PDFParse } = await import("pdf-parse");
+    parser = new PDFParse({ data: buffer }) as PDFParser;
+    const result = await parser.getTable({ first: 30 });
+
+    const chunks: string[] = [];
+    for (const page of result.pages) {
+      for (const table of page.tables) {
+        // Skip trivial single-cell or empty tables
+        if (table.length < 2) continue;
+        const rows = table
+          .map((row: string[]) => row.map((cell: string) => cell.replace(/\s+/g, " ").trim()).join(" | "))
+          .join("\n");
+        chunks.push(rows);
+      }
+    }
+
+    if (chunks.length === 0) return "";
+    return `=== TABLES ===\n${chunks.join("\n\n")}\n=== END TABLES ===`;
+  } catch (e) {
+    console.warn(
+      `[PDF] Failed to extract tables:`,
+      e instanceof Error ? e.message : String(e),
+    );
+    return "";
+  } finally {
+    if (parser) {
+      try {
+        await parser.destroy();
+      } catch {
+        // ignore destroy failures
+      }
+    }
+  }
 }
 
 // ─── Local Regex Fallback Extractor ──────────────────────────────────────

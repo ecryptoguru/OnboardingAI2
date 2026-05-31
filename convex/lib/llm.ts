@@ -34,6 +34,47 @@ export const TEMP = {
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /**
+ * Helper to identify transient LLM/API errors that are safe to retry.
+ * Exported so callers can pass it explicitly to withRetry for LLM operations.
+ */
+export function isTransientLlmError(err: unknown): boolean {
+  const status =
+    (err as Record<string, unknown>)?.status ||
+    (err as Record<string, unknown>)?.statusCode;
+  
+  if (
+    status === 429 ||
+    (typeof status === "number" && status >= 500 && status < 600)
+  ) {
+    return true;
+  }
+  
+  const msg = err instanceof Error ? err.message : String(err);
+  const msgLower = msg.toLowerCase();
+
+  // If the error message has standard non-transient status codes, do NOT retry.
+  if (/\b(400|401|403|404)\b/.test(msgLower)) {
+    return false;
+  }
+  
+  // Explicit check for halted/blocked prompt/safety policy
+  if (msgLower.includes("halted") || msgLower.includes("blockreason") || msgLower.includes("safety")) {
+    return false;
+  }
+
+  const transientKeywords = [
+    "timeout",
+    "etimedout",
+    "fetch failed",
+    "network error",
+    "socket hang up",
+    "econnrefused",
+    "econnreset",
+  ];
+  return transientKeywords.some(keyword => msgLower.includes(keyword));
+}
+
+/**
  * Call Gemini via native @google/genai SDK.
  * Pro models use dynamic thinking by default (cannot be disabled).
  * We configure a thinking budget to guide depth of reasoning for structured extraction.
@@ -72,38 +113,45 @@ export async function callGemini({
 
   const aiClient = getGoogleAI(apiKey);
   const startMs = Date.now();
-  const response = await aiClient.models.generateContent({
-    model,
-    contents: userPrompt,
-    config: {
-      systemInstruction: systemPrompt,
-      temperature,
-      maxOutputTokens,
-      responseMimeType: responseAsJson ? "application/json" : "text/plain",
-      responseSchema,
-      ...(resolvedBudget > 0
-        ? {
-            thinkingConfig: {
-              thinkingBudget: resolvedBudget,
-              includeThoughts: false,
-            },
-          }
-        : {}),
+
+  const text = await withRetry(
+    async () => {
+      const response = await aiClient.models.generateContent({
+        model,
+        contents: userPrompt,
+        config: {
+          systemInstruction: systemPrompt,
+          temperature,
+          maxOutputTokens,
+          responseMimeType: responseAsJson ? "application/json" : "text/plain",
+          responseSchema,
+          ...(resolvedBudget > 0
+            ? {
+                thinkingConfig: {
+                  thinkingBudget: resolvedBudget,
+                  includeThoughts: false,
+                },
+              }
+            : {}),
+        },
+      });
+
+      const candidate = response.candidates?.[0];
+      const finishReason = candidate?.finishReason;
+      if (finishReason && finishReason !== "STOP" && finishReason !== "MAX_TOKENS") {
+        const blockReason = response.promptFeedback?.blockReason;
+        throw new Error(
+          `Gemini generation halted: finishReason=${finishReason}${blockReason ? `, blockReason=${blockReason}` : ""}`,
+        );
+      }
+
+      const txt = response.text;
+      if (!txt)
+        throw new Error("Unexpected empty response from Gemini via Google SDK");
+      return txt;
     },
-  });
-
-  const candidate = response.candidates?.[0];
-  const finishReason = candidate?.finishReason;
-  if (finishReason && finishReason !== "STOP" && finishReason !== "MAX_TOKENS") {
-    const blockReason = response.promptFeedback?.blockReason;
-    throw new Error(
-      `Gemini generation halted: finishReason=${finishReason}${blockReason ? `, blockReason=${blockReason}` : ""}`,
-    );
-  }
-
-  const text = response.text;
-  if (!text)
-    throw new Error("Unexpected empty response from Gemini via Google SDK");
+    { retryOn: isTransientLlmError }
+  );
 
   logLlmTelemetry({ model, systemPrompt, userPrompt, output: text, latencyMs: Date.now() - startMs });
   return text;
@@ -130,34 +178,42 @@ export async function callGeminiWithGrounding({
 }): Promise<{ text: string; sources: string[] }> {
   const aiClient = getGoogleAI(apiKey);
   const startMs = Date.now();
-  const response = await aiClient.models.generateContent({
-    model,
-    contents: userPrompt,
-    config: {
-      systemInstruction: systemPrompt,
-      temperature,
-      maxOutputTokens,
-      tools: [{ googleSearch: {} }],
+
+  const result = await withRetry(
+    async () => {
+      const response = await aiClient.models.generateContent({
+        model,
+        contents: userPrompt,
+        config: {
+          systemInstruction: systemPrompt,
+          temperature,
+          maxOutputTokens,
+          tools: [{ googleSearch: {} }],
+        },
+      });
+
+      const candidate = response.candidates?.[0];
+      const finishReason = candidate?.finishReason;
+      if (finishReason && finishReason !== "STOP" && finishReason !== "MAX_TOKENS") {
+        const blockReason = response.promptFeedback?.blockReason;
+        throw new Error(
+          `Gemini generation halted: finishReason=${finishReason}${blockReason ? `, blockReason=${blockReason}` : ""}`,
+        );
+      }
+
+      const text = response.text || "";
+      const sources =
+        candidate?.groundingMetadata?.groundingChunks
+          ?.map((c) => c.web?.uri)
+          .filter((uri): uri is string => Boolean(uri)) || [];
+
+      return { text, sources };
     },
-  });
+    { retryOn: isTransientLlmError }
+  );
 
-  const candidate = response.candidates?.[0];
-  const finishReason = candidate?.finishReason;
-  if (finishReason && finishReason !== "STOP" && finishReason !== "MAX_TOKENS") {
-    const blockReason = response.promptFeedback?.blockReason;
-    throw new Error(
-      `Gemini generation halted: finishReason=${finishReason}${blockReason ? `, blockReason=${blockReason}` : ""}`,
-    );
-  }
-
-  const text = response.text || "";
-  const sources =
-    candidate?.groundingMetadata?.groundingChunks
-      ?.map((c) => c.web?.uri)
-      .filter((uri): uri is string => Boolean(uri)) || [];
-
-  logLlmTelemetry({ model, systemPrompt, userPrompt, output: text, latencyMs: Date.now() - startMs });
-  return { text, sources };
+  logLlmTelemetry({ model, systemPrompt, userPrompt, output: result.text, latencyMs: Date.now() - startMs });
+  return result;
 }
 
 /**
@@ -206,31 +262,34 @@ export async function embed(
   text: string,
   apiKey?: string | null,
 ): Promise<number[]> {
-  return await withRetry(
+  const startMs = Date.now();
+  const result = await withRetry(
     async () => {
-      const result = await getGoogleAI(apiKey).models.embedContent({
+      const embedResult = await getGoogleAI(apiKey).models.embedContent({
         model: MODELS.embedding,
         contents: text,
       });
 
       if (
-        !result.embeddings ||
-        result.embeddings.length === 0 ||
-        !result.embeddings[0].values
+        !embedResult.embeddings ||
+        embedResult.embeddings.length === 0 ||
+        !embedResult.embeddings[0].values
       ) {
         throw new Error("Failed to generate embedding");
       }
 
-      return result.embeddings[0].values;
+      return embedResult.embeddings[0].values;
     },
     {
       maxRetries: 2,
-      retryOn: (err: unknown) => {
-        const status = (err as Record<string, unknown>)?.status ?? (err as Record<string, unknown>)?.statusCode;
-        if (status === 429 || (typeof status === "number" && status >= 500)) return true;
-        const msg = err instanceof Error ? err.message : String(err);
-        return /timeout|fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|network/i.test(msg);
-      },
+      retryOn: isTransientLlmError,
     },
   );
+
+  const inputChars = text.length;
+  const estimatedInputTokens = Math.ceil(inputChars / 4);
+  console.log(
+    `[LLM:Embed] model=${MODELS.embedding} inTokens≈${estimatedInputTokens} latencyMs=${Date.now() - startMs}`
+  );
+  return result;
 }

@@ -33,7 +33,7 @@ export const sendEmail = action({
     const toList = Array.isArray(args.to) ? args.to : [args.to];
     const rateLimitKey = `send_email:${toList[0]}`;
     const rateLimit: { allowed: boolean; retryAfter?: number } =
-      await ctx.runAction(api.rateLimits.checkRateLimit, {
+      await ctx.runMutation(internal.rateLimits.checkRateLimitInternal, {
         key: rateLimitKey,
         windowMs: 60_000,
         maxRequests: 3,

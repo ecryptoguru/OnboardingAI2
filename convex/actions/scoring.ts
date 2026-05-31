@@ -7,6 +7,7 @@ import { callFlash } from "../lib/llm";
 import { calculateDeterministicScore } from "../lib/scoring";
 import { SCORING_SYSTEM_PROMPT, SCORING_SCHEMA } from "../lib/prompts";
 import * as Sentry from "@sentry/nextjs";
+import { validateRange } from "../lib/utils";
 
 // SYSTEM_PROMPT removed (using centralized prompts)
 
@@ -95,18 +96,16 @@ ${signalText || "None found"}
           );
 
           const parsed = JSON.parse(resultText);
-          if (typeof parsed.ai_score === "number") {
-            ai_score = Math.min(10, Math.max(0, parsed.ai_score));
-            if (
-              typeof parsed.ai_reasoning === "string" &&
-              parsed.ai_reasoning.trim().length > 0
-            ) {
-              ai_reasoning = parsed.ai_reasoning;
-            }
-            console.log(
-              `[Scoring] AI Score from Gemini: ${ai_score}/10. Reasoning: ${ai_reasoning}`,
-            );
+          ai_score = validateRange(parsed.ai_score, 0, 10, "ai_score");
+          if (
+            typeof parsed.ai_reasoning === "string" &&
+            parsed.ai_reasoning.trim().length > 0
+          ) {
+            ai_reasoning = parsed.ai_reasoning;
           }
+          console.log(
+            `[Scoring] AI Score from Gemini: ${ai_score}/10. Reasoning: ${ai_reasoning}`,
+          );
         } else {
           console.log(
             `[Scoring] No signals, demographics, or stakeholders found, using default AI score: 5/10`,
@@ -123,10 +122,12 @@ ${signalText || "None found"}
         deterministic_score * 0.7 + ai_score * 10 * 0.3,
       );
 
-      // 4. Determine Lead Tier (Adjusted thresholds based on new formula)
+      // 4. Determine Lead Tier (Adjusted thresholds + AI floor)
       let lead_tier: "High" | "Medium" | "Low" = "Low";
       if (final_score >= 75) lead_tier = "High";
       else if (final_score >= 50) lead_tier = "Medium";
+      // AI floor: strong AI conviction (>= 8/10) with reasonable base data should not be Low
+      else if (ai_score >= 8.0 && deterministic_score >= 15) lead_tier = "Medium";
 
       // 5. Update Database in a single consolidated mutation
       await ctx.runMutation(internal.priorityScores.completeScoringInternal, {
