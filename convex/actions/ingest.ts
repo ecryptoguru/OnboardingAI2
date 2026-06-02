@@ -4,11 +4,11 @@ import { action } from "../_generated/server";
 import { v } from "convex/values";
 import { api } from "../_generated/api";
 import Papa from "papaparse";
-import * as Sentry from "@sentry/nextjs";
+import * as Sentry from "@sentry/node";
 
 export const parseCsv = action({
   args: { storageId: v.id("_storage") },
-  handler: async (ctx, args): Promise<{ count: number }> => {
+  handler: async (ctx, args): Promise<{ count: number; skipped: number }> => {
     try {
       const fileUrl = await ctx.storage.getUrl(args.storageId);
       if (!fileUrl) throw new Error("File not found");
@@ -40,9 +40,12 @@ export const parseCsv = action({
         };
       });
 
-      // Bulk insert into the DB
-      const ids = await ctx.runMutation(api.universities.bulkInsert, { rows });
-      return { count: ids.length };
+      // Bulk insert into the DB (now returns { inserted, skipped, skippedNames })
+      const insertResult = await ctx.runMutation(api.universities.bulkInsert, { rows });
+      if (insertResult.skipped > 0) {
+        console.log(`[Ingest] Skipped ${insertResult.skipped} duplicate universities.`);
+      }
+      return { count: insertResult.inserted, skipped: insertResult.skipped };
     } catch (e) {
       console.error("[Ingest] Fatal error:", e);
       Sentry.captureException(e, {

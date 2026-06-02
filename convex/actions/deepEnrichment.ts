@@ -2,9 +2,9 @@
 
 import { action } from "../_generated/server";
 import { v } from "convex/values";
-import { internal, api } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { callGemini, THINKING, MODELS } from "../lib/llm";
-import { withRetry, sanitizeLlmInput, validateJsonOutput, truncateAtNewline, isValidEmail } from "../lib/utils";
+import { withRetry, sanitizeLlmInput, validateJsonOutput, truncateAtNewline, isValidEmail, isValidIndianPhone, toNum, toNumStrict } from "../lib/utils";
 import {
   DEEP_ENRICHMENT_SYNTHESIS_PROMPT,
   DEEP_ENRICHMENT_SCHEMA,
@@ -13,13 +13,9 @@ import {
   firecrawlMap,
   firecrawlScrape,
   filterHighYieldUrls,
-  filterPdfUrls,
-  downloadPdfBuffer,
-  extractPdfText,
-  extractPdfTables,
   extractContactsFromMarkdown,
 } from "../lib/scrapers";
-import * as Sentry from "@sentry/nextjs";
+import * as Sentry from "@sentry/node";
 
 const TARGET_ROLES = [
   "Owner",
@@ -43,16 +39,112 @@ const TARGET_ROLES = [
 ];
 
 // ─── Constants ─────────────────────────────────────────────────────────────
-const MAX_CONTEXT_CHARS = 100_000; // Gemini 3.5 Flash handles 1M context; use 100k for speed
-const MAX_URLS_TO_SCRAPE = 6; // Limit Firecrawl API calls per enrichment
-const MAX_CHARS_PER_SOURCE = 15_000; // Truncate each scraped source
+const MAX_CONTEXT_CHARS = 50_000; // Cap context to keep Gemini calls fast
+const MAX_URLS_TO_SCRAPE = 3; // Limit Firecrawl API calls per enrichment
+const MAX_CHARS_PER_SOURCE = 8_000; // Truncate each scraped source
 const MIN_BLOCK_LENGTH = 200; // Minimum length for a block to be considered valid
-const MAX_REGEX_CONTACTS = 30; // Cap to avoid bloating the prompt
-const MAX_COST_ESTIMATE = 5000; // Rough ceiling: Firecrawl credits * 100 + Gemini input tokens.
-// Example: 6 URLs scraped (6 credits) + 1 map call = 7 * 100 = 700.
-// Plus ~20k chars prompt / 4 = 5k tokens. Total ~5,700.
-// 5000 is a pragmatic guard against universities with 20+ pages/PDFs.
-// Tune upward if you see too many budget_exceeded aborts on legitimate large universities.
+const MAX_REGEX_CONTACTS = 20; // Cap to avoid bloating the prompt
+const MAX_COST_ESTIMATE = 15000; // Firecrawl credits * 100 + Gemini input tokens.
+// A typical run: 1 map + 3 scrapes = 4 * 100 = 400.
+// Plus ~25k chars prompt / 4 = 6.25k tokens. Total ~6,650.
+
+// ─── External Source Search Helpers ────────────────────────────────────────────
+// Indian university demographics live on government portals, NOT university websites.
+// We use Serper to find these external pages and scrape them for demographic data.
+
+interface SerperResult {
+  organic?: Array<{ link: string; title?: string; snippet?: string }>;
+}
+
+async function serperSearch(query: string, apiKey: string, num = 5): Promise<SerperResult> {
+  const res = await fetch("https://google.serper.dev/search", {
+    method: "POST",
+    headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify({ q: query, num }),
+    signal: AbortSignal.timeout(15000),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Serper failed: ${res.status} ${text}`);
+  }
+  return await res.json();
+}
+
+/**
+ * Search for AISHE, NIRF, NAAC, and administration pages.
+ * Returns URLs sorted by relevance for demographic + stakeholder extraction.
+ */
+async function discoverExternalSources(
+  uniName: string,
+  domain: string,
+  serperKey: string,
+): Promise<string[]> {
+  // Use simple keyword queries — Serper works best with natural language, not complex operators
+  const queries = [
+    // NIRF data — highest value for demographics
+    `${uniName} NIRF student strength enrollment`,
+    // NAAC / IQAC / SSR
+    `${uniName} NAAC SSR hostelite student data`,
+    // Anti-ragging — mandatory page with contacts + hostel numbers
+    `${uniName} anti-ragging committee contact`,
+    // Administration / Contact
+    `${uniName} administration contact directory`,
+    // LinkedIn for officials
+    `${uniName} vice chancellor registrar linkedin`,
+    // General contact info search
+    `${uniName} phone email address contact`,
+  ];
+
+  const allUrls: { url: string; score: number }[] = [];
+  const seen = new Set<string>();
+
+  for (const q of queries) {
+    try {
+      const data = await withRetry(() => serperSearch(q, serperKey, 5), { maxRetries: 1 });
+      for (const r of data.organic || []) {
+        if (!r.link || seen.has(r.link)) continue;
+        seen.add(r.link);
+        // Score by relevance
+        let score = 0;
+        const url = r.link.toLowerCase();
+        const title = (r.title || "").toLowerCase();
+        const snippet = (r.snippet || "").toLowerCase();
+        const combined = title + " " + snippet;
+
+        // Boost university's own domain for contact/admin pages
+        if (url.includes(domain.toLowerCase())) score += 6;
+
+        // Boost government/education data sources
+        if (url.includes("nirfindia.org")) score += 10;
+        if (url.includes("aishe.gov.in")) score += 10;
+        if (url.includes("naac.gov.in")) score += 8;
+        if (url.includes("ugc.gov.in")) score += 6;
+
+        // Content relevance signals
+        if (/\b(nirf|ranking|student.*strength|enrollment)\b/i.test(combined)) score += 5;
+        if (/\b(hostel|hostelite|day scholar|accommodation)\b/i.test(combined)) score += 5;
+        if (/\b(contact|phone|email|directory|administration)\b/i.test(combined)) score += 4;
+        if (/\b(vice.chancellor|registrar|dean|principal|director)\b/i.test(combined)) score += 4;
+        if (/\b(anti.ragging|committee|iqac|mandatory.disclosure)\b/i.test(combined)) score += 3;
+        if (url.includes("linkedin.com/in/")) score += 3;
+        if (url.endsWith(".pdf")) score += 2;
+
+        // Penalise obvious junk / aggregator sites
+        if (/shiksha|collegedunia|careers360|pagal guy/i.test(combined)) score -= 5;
+        if (/wikipedia|wiki/i.test(combined)) score -= 3;
+
+        if (score > 0) allUrls.push({ url: r.link, score });
+      }
+    } catch (e) {
+      console.warn(`[ExternalSearch] Serper query failed: "${q}"`, e instanceof Error ? e.message : String(e));
+    }
+  }
+
+  return allUrls
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3)
+    .map((u) => u.url);
+}
 
 // ─── Content normalizer ───────────────────────────────────────────────────────
 function normalizeContent(raw: string): string {
@@ -164,6 +256,14 @@ export const runDeepEnrichment = action({
         );
       }
 
+      let rawSerperKey = await ctx.runQuery(
+        internal.settings.getInternalSerperKey,
+      );
+      if (!rawSerperKey) {
+        rawSerperKey = process.env.SERPER_API_KEY ?? null;
+      }
+      const serperKey = rawSerperKey ? rawSerperKey.trim() : null;
+
       // ─── Domain extraction ────────────────────────────────────────────────
       const rawDomain = url.replace(/^https?:\/\//, "").replace(/\/$/, "");
       const domain = rawDomain.replace(/^www\./, "");
@@ -215,6 +315,38 @@ export const runDeepEnrichment = action({
         ];
       }
 
+      // ─── Phase 1b: External Source Discovery (AISHE/NIRF/NAAC/Admin) ────
+      // Indian university demographics live on government portals, not university websites.
+      // We search for these external sources and scrape them via Jina Reader (free).
+      let externalBlocks: string[] = [];
+      if (serperKey) {
+        try {
+          const externalUrls = await discoverExternalSources(uniName, domain, serperKey);
+          if (externalUrls.length > 0) {
+            console.log(`[DeepEnrichment] Discovered ${externalUrls.length} external sources: ${externalUrls.join(", ")}`);
+            const jinaPromises = externalUrls.map(async (extUrl) => {
+              try {
+                const jinaRes = await fetch(`https://r.jina.ai/${extUrl}`, {
+                  headers: { Accept: "text/plain" },
+                  signal: AbortSignal.timeout(8000),
+                });
+                if (!jinaRes.ok) return "";
+                const text = await jinaRes.text();
+                const normalized = normalizeContent(text).substring(0, MAX_CHARS_PER_SOURCE);
+                if (normalized.length < MIN_BLOCK_LENGTH) return "";
+                return `\n=== EXTERNAL SOURCE: ${extUrl} ===\n${normalized}\n`;
+              } catch {
+                return "";
+              }
+            });
+            externalBlocks = (await Promise.all(jinaPromises)).filter((b) => b.length > MIN_BLOCK_LENGTH);
+            console.log(`[DeepEnrichment] External scraping: ${externalBlocks.length}/${externalUrls.length} sources succeeded.`);
+          }
+        } catch (e) {
+          console.warn(`[DeepEnrichment] External source discovery failed:`, e instanceof Error ? e.message : String(e));
+        }
+      }
+
       // ─── Phase 2: Firecrawl Scrape → Get clean Markdown ──────────────────
       const scrapePromises = highYieldUrls.map(async (targetUrl) => {
         try {
@@ -239,43 +371,43 @@ export const runDeepEnrichment = action({
         (b) => b.length > MIN_BLOCK_LENGTH,
       );
 
-      // ─── Phase 2c: AISHE / NAAC PDF Text Extraction ──────────────────────
-      // Demographic data (hostelite counts, enrollment tables) frequently resides
-      // in PDF documents linked deep within university websites.
-      const pdfUrls = mapResult ? filterPdfUrls(mapResult, 3) : [];
-      if (pdfUrls.length > 0) {
-        console.log(
-          `[DeepEnrichment] Found ${pdfUrls.length} PDF documents to extract: ${pdfUrls.join(", ")}`,
-        );
-        const pdfPromises = pdfUrls.map(async (pdfUrl) => {
-          try {
-            // Download PDF buffer once, then extract both text and tables from it
-            const buffer = await downloadPdfBuffer(pdfUrl);
-            const [text, tables] = await Promise.all([
-              extractPdfText(buffer),
-              extractPdfTables(buffer),
-            ]);
+      // Merge external sources (AISHE/NIRF/NAAC/Admin pages) into the context
+      if (externalBlocks.length > 0) {
+        validBlocks = validBlocks.concat(externalBlocks);
+        console.log(`[DeepEnrichment] Merged ${externalBlocks.length} external blocks into context (total: ${validBlocks.length}).`);
+      }
 
-            const combined = [text, tables].filter(Boolean).join("\n\n");
-            if (combined.length < MIN_BLOCK_LENGTH) return "";
+      // NOTE: PDF extraction removed — government data action (enrichGovernmentData.ts)
+      // already handles NIRF/AISHE/NAAC PDFs via Jina Reader + Gemini Flash-Lite.
+      // Keeping deep enrichment focused on stakeholder contacts + website data.
 
-            const normalized = normalizeContent(combined).substring(
-              0,
-              MAX_CHARS_PER_SOURCE,
-            );
-            return `\n=== PDF SOURCE: ${pdfUrl} ===\n${normalized}\n`;
-          } catch (e) {
-            console.error(
-              `[DeepEnrichment] PDF extraction failed for ${pdfUrl}:`,
-              e,
-            );
-            return "";
+      // ─── Phase 2d: Anti-Ragging Committee Scraping ───────────────────────
+      // UGC mandates every university to list anti-ragging committee members
+      // with their mobile numbers. These are real, personal phone numbers.
+      const antiRaggingUrls = mapResult
+        ? (mapResult.links || []).filter((l) => {
+            const urlLower = (l.url || "").toLowerCase();
+            return /anti[-_]?ragging|antiragging|anti_ragging/i.test(urlLower);
+          }).map((l) => l.url).slice(0, 1)
+        : [`${workingUrl}/anti-ragging`, `${workingUrl}/anti-ragging-committee`];
+
+      const antiRaggingContacts = { emails: new Set<string>(), phones: new Set<string>() };
+      for (const arUrl of antiRaggingUrls) {
+        try {
+          const arRes = await fetch(`https://r.jina.ai/${arUrl}`, {
+            headers: { Accept: "text/plain" },
+            signal: AbortSignal.timeout(8000),
+          });
+          if (arRes.ok) {
+            const arText = await arRes.text();
+            const contacts = extractContactsFromMarkdown(arText);
+            contacts.emails.forEach((e) => antiRaggingContacts.emails.add(e));
+            contacts.phones.forEach((p) => antiRaggingContacts.phones.add(p));
+            console.log(`[DeepEnrichment] Anti-ragging page ${arUrl}: ${contacts.emails.length} emails, ${contacts.phones.length} phones.`);
           }
-        });
-        const pdfBlocks = await Promise.all(pdfPromises);
-        validBlocks = validBlocks.concat(
-          pdfBlocks.filter((b) => b.length > MIN_BLOCK_LENGTH),
-        );
+        } catch {
+          // Ignore anti-ragging page failures
+        }
       }
 
       // ─── Phase 2b: Zero-Cost Regex Fallback Extraction ───────────────────
@@ -287,6 +419,9 @@ export const runDeepEnrichment = action({
         result.emails.forEach((e) => regexEmails.add(e));
         result.phones.forEach((p) => regexPhones.add(p));
       }
+      // Merge anti-ragging contacts into the main regex sets
+      antiRaggingContacts.emails.forEach((e) => regexEmails.add(e));
+      antiRaggingContacts.phones.forEach((p) => regexPhones.add(p));
       // Cap to avoid bloating the prompt (rare edge case: pages with hundreds of emails)
       const uniqueRegexEmails = Array.from(regexEmails).slice(
         0,
@@ -317,18 +452,21 @@ UNIVERSITY BEING ENRICHED:
   Name: ${uniName}
   Website: ${url || "unknown"}
 
-EXTRACT EVERY STAKEHOLDER AND DEMOGRAPHIC FACT from the web pages below.
-Rules:
-- Extract ALL emails and phone numbers found — do not stop at target roles.
-- Include administrative staff, secretaries, office assistants, committee members.
-- If a list has 10 names with 10 phones, extract all 10.
+DATA SOURCE PRIORITY (STRICT — government data ONLY):
+1. NIRF data (from nirfindia.org) → nirf_total, nirf_male, nirf_female, nirf_programs
+2. AISHE data (from aishe.gov.in) → total_students, hostelites, day_scholars
+3. NAAC SSR reports / Mandatory Disclosure PDFs → hostelites, day_scholars, gender splits
+4. Anti-Ragging Committee pages → names, mobile numbers, roles
+5. University administration pages → contact emails, phone numbers
+6. LinkedIn profiles → name, role, linkedin_url
+
+CRITICAL RULES:
+- For demographics: ONLY extract data from NIRF, AISHE, NAAC SSR, or Mandatory Disclosure.
+- REJECT any student count from "About Us", "Overview", or marketing pages — these are inflated estimates.
+- Extract ALL emails and phone numbers from ALL sources.
+- Anti-Ragging Committee pages are UGC-mandated and MUST list real mobile numbers — extract every one.
 - Use null for missing values, never 0.
 - Indian phone format: +91XXXXXXXXXX
-
-ALSO EXTRACT:
-- total_students, hostelites, day_scholars (with gender splits if available)
-- NIRF program-wise student data if present
-- NAAC / IQAC / Mandatory Disclosure hostelite numbers
 
 PRE-DISCOVERED CONTACTS (from regex scan — verify and merge):
 Emails: ${uniqueRegexEmails.join(", ") || "none"}
@@ -340,7 +478,9 @@ ${safeContext}
 
       // ─── Cost ceiling guard ─────────────────────────────────────────────
       // Rough estimate: Firecrawl credits * 100 + Gemini input tokens. Abort if too high.
-      const firecrawlCreditsConsumed = 1 + validBlocks.length + pdfUrls.length;
+      // External sources use Jina Reader (free) — only count Firecrawl-based blocks.
+      const firecrawlBasedBlocks = validBlocks.filter((b) => !b.includes("EXTERNAL SOURCE:"));
+      const firecrawlCreditsConsumed = 1 + firecrawlBasedBlocks.length;
       const estimatedGeminiTokens = Math.round(extractionPrompt.length / 4);
       const costEstimate = firecrawlCreditsConsumed * 100 + estimatedGeminiTokens;
       if (costEstimate > MAX_COST_ESTIMATE) {
@@ -364,18 +504,18 @@ ${safeContext}
         synthesisAttempts++;
         try {
           console.log(
-            `[DeepEnrichment] Phase 4: Running Gemini extraction (model: ${MODELS.gemini}, attempt ${synthesisAttempts})`,
+            `[DeepEnrichment] Phase 4: Running Gemini extraction (model: ${MODELS.geminiFlash}, attempt ${synthesisAttempts})`,
           );
           const startMs = Date.now();
           const resultText = await callGemini({
             apiKey,
-            model: MODELS.gemini,
+            model: MODELS.geminiFlash,
             systemPrompt: DEEP_ENRICHMENT_SYNTHESIS_PROMPT(TARGET_ROLES),
             userPrompt: extractionPrompt,
             temperature: 0.05,
             responseAsJson: true,
             responseSchema: DEEP_ENRICHMENT_SCHEMA,
-            thinkingBudget: THINKING.off, // Flash: thinking off for speed
+            thinkingBudget: THINKING.off,
             maxOutputTokens: 8192,
           });
           console.log(
@@ -418,19 +558,6 @@ ${safeContext}
         throw new Error("Failed to synthesize intelligence data after retries");
       }
       const { demographics, stakeholders } = synthesizedJson;
-
-      // toNum: converts any value to number, returns undefined for null/undefined/NaN
-      const toNum = (val: unknown): number | undefined => {
-        if (val === null || val === undefined) return undefined;
-        const n = Number(val);
-        return isNaN(n) ? undefined : n;
-      };
-      // toNumStrict: same but also rejects 0 — hostelites/day_scholars are NEVER legitimately 0 for large universities
-      // (the LLM frequently returns 0 for unfound fields instead of null despite instructions)
-      const toNumStrict = (val: unknown): number | undefined => {
-        const n = toNum(val);
-        return n === 0 ? undefined : n;
-      };
 
       const demo = demographics && {
         // AISHE/NAAC block
@@ -597,6 +724,36 @@ ${safeContext}
             0,
             demo.total_students_female - demo.hostelites_female,
           );
+
+        // 6. Infer gender splits for hostelites if not found (reverse)
+        if (
+          !demo.hostelites_male &&
+          demo.total_students_male &&
+          demo.day_scholars_male
+        )
+          demo.hostelites_male = Math.max(
+            0,
+            demo.total_students_male - demo.day_scholars_male,
+          );
+        if (
+          !demo.hostelites_female &&
+          demo.total_students_female &&
+          demo.day_scholars_female
+        )
+          demo.hostelites_female = Math.max(
+            0,
+            demo.total_students_female - demo.day_scholars_female,
+          );
+      }
+
+      // Diagnostic: log a sample of raw values before toNum to help debug extraction issues
+      if (demographics && typeof demographics === "object") {
+        const rawSample = Object.entries(demographics)
+          .filter(([, v]) => v !== null && v !== undefined)
+          .slice(0, 6)
+          .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
+          .join(", ");
+        console.log(`[DeepEnrichment] Raw demographics sample: ${rawSample}`);
       }
 
       if (
@@ -637,12 +794,57 @@ ${safeContext}
         (st.linkedin_url ? 1 : 0) +
         (st.name ? 1 : 0);
 
+      // Role-based emails that are valuable even without a person name
+      const ROLE_EMAIL_PREFIXES = ["vc", "registrar", "registrar1", "dean", "coe", "chiefwarden", "provc", "dyregistrar", "finance", "director", "rector", "chairman", "president"];
+      function isRoleBasedEmail(email: string): boolean {
+        const local = email.split("@")[0]?.toLowerCase() || "";
+        return ROLE_EMAIL_PREFIXES.some((p) => local === p || local.startsWith(p + ".") || local.startsWith(p + "_"));
+      }
+
+      // Normalize for pre-dedup (same logic as stakeholders.ts)
+      function normalizeNameDedup(n?: string): string {
+        const raw = (n || "").toLowerCase().replace(/\b(dr|prof|professor|mr|mrs|ms|shri|smt|er|engg|arch)\b/g, "").replace(/\./g, " ").replace(/[,\-]/g, " ");
+        return raw.split(/\s+/).filter((t) => t.length > 0).sort().join(" ");
+      }
+
       const validStakeholders = ((stakeholders as StakeholderCandidate[]) || [])
         .filter((st) => {
           const hasName = !!st.name?.trim();
+          const hasRole = !!st.role?.trim();
           const hasValidEmail = !!st.email && isValidEmail(st.email);
-          return hasName || hasValidEmail;
+          const hasValidPhone = !!st.phone && isValidIndianPhone(st.phone);
+          const isRoleEmail = hasValidEmail && isRoleBasedEmail(st.email!);
+
+          // Keep if: has a real name + some contact info
+          // OR: has a role-based email with a role (e.g., registrar@kiit.ac.in + Registrar)
+          // Reject: pure phone-only without name, generic emails without name
+          return (hasName && (hasValidEmail || hasValidPhone || hasRole)) ||
+                 (isRoleEmail && hasRole);
         })
+        // Pre-dedup within LLM extraction: merge duplicates by normalized name or email
+        .reduce<StakeholderCandidate[]>((acc, st) => {
+          const normName = normalizeNameDedup(st.name);
+          const existingIdx = acc.findIndex((e) => {
+            if (st.email && e.email && st.email.toLowerCase() === e.email.toLowerCase()) return true;
+            if (normName && normalizeNameDedup(e.name) === normName && normName.length > 3) return true;
+            return false;
+          });
+          if (existingIdx >= 0) {
+            // Merge richer data into existing
+            const existing = acc[existingIdx];
+            acc[existingIdx] = {
+              ...existing,
+              name: existing.name || st.name,
+              role: existing.role || st.role,
+              email: existing.email || st.email,
+              phone: existing.phone || st.phone,
+              linkedin_url: existing.linkedin_url || st.linkedin_url,
+            };
+          } else {
+            acc.push(st);
+          }
+          return acc;
+        }, [])
         .sort((a, b) => richness(b) - richness(a));
 
       if (validStakeholders.length > 0) {
@@ -654,14 +856,15 @@ ${safeContext}
             email: st.email || undefined,
             phone: st.phone || undefined,
             linkedin_url: st.linkedin_url || undefined,
+            email_source: st.email ? "scraped" : undefined,
+            phone_source: st.phone ? "scraped" : undefined,
           })),
           source: "deep_enrichment",
         });
       }
 
-      await ctx.runAction(api.actions.scoring.scoreUniversity, {
-        universityId: args.universityId,
-      });
+      // Note: scoring is now handled by the orchestrator to avoid double-scoring
+      // when multiple enrichment actions run in parallel.
 
       await ctx.runMutation(internal.universities.updateOutreachStageInternal, {
         universityId: args.universityId,
@@ -697,5 +900,100 @@ ${safeContext}
       });
       return { success: false, error: String(e) };
     }
+  },
+});
+
+/**
+ * Debug action: traces the deep enrichment pipeline WITHOUT writing to DB.
+ * Returns a detailed report of what each phase discovered.
+ */
+export const debugDeepEnrichment = action({
+  args: { universityId: v.id("universities") },
+  handler: async (ctx, args): Promise<Record<string, unknown>> => {
+    const report: Record<string, unknown> = { phases: {} };
+
+    const university = await ctx.runQuery(internal.universities.getInternal, {
+      universityId: args.universityId,
+    });
+    if (!university) return { error: "University not found" };
+
+    const uniName = university.university_name;
+    const url = typeof university.website === "string" ? university.website : "";
+    report.university = uniName;
+    report.website = url;
+
+    // Phase 1: Check keys
+    const apiKey = await ctx.runQuery(internal.settings.getInternalGeminiKey);
+    const firecrawlKey = await ctx.runQuery(internal.settings.getInternalFirecrawlKey) || process.env.FIRECRAWL_API_KEY;
+    const rawSerperKey = await ctx.runQuery(internal.settings.getInternalSerperKey) || process.env.SERPER_API_KEY;
+    const serperKey = rawSerperKey ? rawSerperKey.trim() : null;
+    report.keys = { gemini: !!apiKey, firecrawl: !!firecrawlKey, serper: !!serperKey };
+
+    // Phase 2: Firecrawl map
+    let mapLinks: string[] = [];
+    if (firecrawlKey) {
+      try {
+        const mapResult = await firecrawlMap(url, firecrawlKey as string);
+        mapLinks = (mapResult.links || []).map((l) => l.url);
+        report.phases = { ...(report.phases as object), firecrawlMap: { success: true, links: mapLinks.length, top10: mapLinks.slice(0, 10) } };
+      } catch (e) {
+        report.phases = { ...(report.phases as object), firecrawlMap: { success: false, error: e instanceof Error ? e.message : String(e) } };
+      }
+    }
+
+    // Phase 3: External source search
+    let externalUrls: string[] = [];
+    if (serperKey) {
+      try {
+        const domain = url.replace(/^https?:\/\//, "").replace(/\/$/, "").replace(/^www\./, "");
+        externalUrls = await discoverExternalSources(uniName, domain, serperKey as string);
+        report.phases = { ...(report.phases as object), externalSearch: { success: true, urls: externalUrls } };
+      } catch (e) {
+        report.phases = { ...(report.phases as object), externalSearch: { success: false, error: e instanceof Error ? e.message : String(e) } };
+      }
+    }
+
+    // Phase 4: Jina Reader on external URLs
+    const jinaResults: Record<string, { length: number; preview: string }> = {};
+    for (const extUrl of externalUrls.slice(0, 3)) {
+      try {
+        const res = await fetch(`https://r.jina.ai/${extUrl}`, { headers: { Accept: "text/plain" }, signal: AbortSignal.timeout(15000) });
+        const text = await res.text();
+        jinaResults[extUrl] = { length: text.length, preview: text.substring(0, 500) };
+      } catch (e) {
+        jinaResults[extUrl] = { length: 0, preview: `ERROR: ${e instanceof Error ? e.message : String(e)}` };
+      }
+    }
+    report.phases = { ...(report.phases as object), jinaScrape: jinaResults };
+
+    // Phase 5: Jina Reader on university contact page
+    if (url) {
+      try {
+        const contactRes = await fetch(`https://r.jina.ai/${url.replace(/\/$/, "")}/contact`, { headers: { Accept: "text/plain" }, signal: AbortSignal.timeout(15000) });
+        const contactText = await contactRes.text();
+        const { emails, phones } = extractContactsFromMarkdown(contactText);
+        report.phases = { ...(report.phases as object), contactPage: { length: contactText.length, emails, phones, preview: contactText.substring(0, 500) } };
+      } catch (e) {
+        report.phases = { ...(report.phases as object), contactPage: { error: e instanceof Error ? e.message : String(e) } };
+      }
+    }
+
+    // Phase 6: Regex extraction from map links
+    const allEmails = new Set<string>();
+    const allPhones = new Set<string>();
+    for (const link of mapLinks.slice(0, 10)) {
+      try {
+        const res = await fetch(`https://r.jina.ai/${link}`, { headers: { Accept: "text/plain" }, signal: AbortSignal.timeout(10000) });
+        const text = await res.text();
+        const contacts = extractContactsFromMarkdown(text);
+        contacts.emails.forEach((e) => allEmails.add(e));
+        contacts.phones.forEach((p) => allPhones.add(p));
+      } catch {
+        // ignore
+      }
+    }
+    report.phases = { ...(report.phases as object), regexScan: { emails: Array.from(allEmails), phones: Array.from(allPhones) } };
+
+    return report;
   },
 });

@@ -16,7 +16,6 @@ npm run dev -- -p 3001
 
 ### 2. Environment Setup
 Set these variables in your Convex dashboard (or via CLI):
-- `OPENROUTER_API_KEY`: For Claude 3.7 & Gemini 2.5 Flash
 - `GOOGLE_API_KEY`: For text-embedding-004
 - `SENDGRID_API_KEY`: For email delivery
 - `SERPER_API_KEY`: For website discovery

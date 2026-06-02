@@ -12,7 +12,7 @@ This document serves as the central reference point for AI coding agents to navi
 - **Backend & Database:** Convex (Serverless functions, Real-time DB, Crons, Vector search)
 - **Auth:** `@convex-dev/auth` with Password provider
 - **Styling:** Tailwind CSS v3.4.1, Glassmorphism design system (see `design-system/onboardingai/MASTER.md`)
-- **Icons:** Heroicons React + Lucide React
+- **Icons:** Heroicons React
 - **AI Models:** Google Gemini 3.5 Flash (complex tasks), Gemini 3.1 Flash-Lite (high-volume), `text-embedding-005` (768-dim embeddings). Uses direct `@google/genai` SDK.
 - **External Services:**
   - SendGrid (Email dispatch & delivery tracking)
@@ -31,10 +31,11 @@ This document serves as the central reference point for AI coding agents to navi
 Next.js 15 App Router frontend.
 
 - `/(auth)/`
-  - `sign-in/page.tsx`: Sign-in page (Convex Auth Password)
-  - `sign-up/page.tsx`: Sign-up page
+  - `sign-in/page.tsx`: Sign-in page (Convex Auth Password, FormData-based, `redirectTo: "/dashboard"`)
+  - `sign-up/page.tsx`: Sign-up page (same pattern)
 - `/(dashboard)/`
-  - `layout.tsx`: Dashboard shell with navigation, glassmorphism styling, theme support
+  - `layout.tsx`: Dashboard shell with `<Sidebar />`, glassmorphism styling, theme support
+  - `not-found.tsx`: Global 404 page
   - `dashboard/page.tsx`: Universities list & detail view with filters, search, CSV upload
   - `dashboard/enrichment/page.tsx`: Signal enrichment & scoring overview
   - `dashboard/analytics/page.tsx`: Pipeline analytics & KPIs
@@ -55,7 +56,7 @@ Next.js 15 App Router frontend.
 The entire backend ecosystem (Queries, Mutations, Actions, HTTP routes, Crons).
 
 - **Core Entities:**
-  - `universities.ts`: CRUD, search, filtering, ingestion, UGC sync, discovery triggers
+  - `universities.ts`: CRUD, search, filtering, ingestion, UGC sync, discovery triggers. Also exposes internal helpers: `listAllInternal`, `patchInternal`, `deleteInternal`, `bulkSyncUgcInternal` for action-based batching.
   - `stakeholders.ts`: Contact management, enrichment, deduplication, email/LinkedIn tracking
   - `signals.ts`: Signal ingestion, vector search, semantic retrieval
   - `proposals.ts`: Proposal CRUD, PDF storage, Calendar event linking
@@ -67,7 +68,7 @@ The entire backend ecosystem (Queries, Mutations, Actions, HTTP routes, Crons).
   - `rateLimits.ts`: Persistent rate-limiting for external APIs
   - `admin.ts`: Admin operations (e.g., `resetUniversityEnrichment`)
   - `dbReset.ts`: Database reset utilities
-  - `removeDuplicates.ts`: Duplicate cleanup operations
+  - `removeDuplicates.ts`: Action-based duplicate cleanup (`removeFuzzyDuplicates`) — exact-match grouping by `(name, state)` with rich-record scoring and merge-before-delete.
   - `wipeEnrichment.ts`: Bulk enrichment data wiping
   - `test.ts` / `testDeep.ts`: Test endpoints
 
@@ -94,7 +95,7 @@ The entire backend ecosystem (Queries, Mutations, Actions, HTTP routes, Crons).
   - `email.ts`: SendGrid email dispatch with retry logic
   - `ingest.ts`: CSV/UGC data ingestion helpers
   - `ugcSeed.ts`: UGC dataset seeding
-  - `ugcSync.ts`: UGC synchronization
+  - `ugcSync.ts`: UGC synchronization action — in-memory strict matching, state-indexed candidate lookup, input deduplication, and batched writes via `bulkSyncUgcInternal` to avoid mutation timeouts.
   - `migrateEmbeddings.ts`: Embedding backfill for vector search
   - `realWorldVerify.ts`: Real-world pipeline verification
   - `testE2E.ts`, `testRetry.ts`, `testVerifyOptimizations.ts`, `testVerifyRequirements.ts`: Test helpers
@@ -118,7 +119,8 @@ The entire backend ecosystem (Queries, Mutations, Actions, HTTP routes, Crons).
 
 Shared React UI components:
 - `ApiKeyModal.tsx`: API key input modal
-- `ConvexClientProvider.tsx`: Convex client context provider
+- `ConvexClientProvider.tsx`: Convex client context provider (`verbose` mode gated to development)
+- `Sidebar.tsx`: Dashboard navigation sidebar with badge counts (approvals + unclassified replies)
 - `ErrorBoundary.tsx`: React error boundary
 - `SyncUgcButton.tsx`: UGC sync trigger button
 - `ThemeProvider.tsx` / `ThemeToggle.tsx`: Dark/light mode support
@@ -144,7 +146,7 @@ Shared React UI components:
 
 ### Root Config & Scripts
 
-- `middleware.ts`: Next.js middleware — auth protection with dev bypass support
+- `middleware.ts`: Next.js middleware — protects `/dashboard` routes and redirects authenticated users away from `/sign-in` / `/sign-up`.
 - `next.config.ts`: Next.js configuration
 - `tailwind.config.ts`: Tailwind theme config
 - `playwright.config.ts`: Playwright E2E config

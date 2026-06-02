@@ -9,7 +9,7 @@ import {
   REPLY_CLASSIFIER_SCHEMA,
 } from "../lib/prompts";
 import { sanitizeLlmInput } from "../lib/utils";
-import * as Sentry from "@sentry/nextjs";
+import * as Sentry from "@sentry/node";
 
 /**
  * Classifies an incoming email reply and updates the reply record.
@@ -19,6 +19,7 @@ import * as Sentry from "@sentry/nextjs";
 export const classifyReply = action({
   args: {
     replyId: v.id("replyLogs"),
+    triggerAutoReply: v.optional(v.boolean()),
   },
   handler: async (
     ctx,
@@ -82,12 +83,19 @@ export const classifyReply = action({
         confidence, // computed above — not a stub
       });
 
-      // 3. Trigger Auto-Reply if applicable
-      await ctx.scheduler.runAfter(0, api.actions.autoReply.sendAutoReply, {
-        universityId: reply.university_id,
-        stakeholderId: reply.stakeholder_id,
-        classification: result,
-      });
+      // 3. Trigger Auto-Reply if applicable (enabled by default)
+      const shouldTriggerAutoReply = args.triggerAutoReply !== false;
+      if (shouldTriggerAutoReply) {
+        await ctx.scheduler.runAfter(0, api.actions.autoReply.sendAutoReply, {
+          universityId: reply.university_id,
+          stakeholderId: reply.stakeholder_id,
+          classification: result,
+        });
+      } else {
+        console.log(
+          `[ReplyClassifier] Auto-reply suppressed for replyId=${args.replyId}`,
+        );
+      }
 
       // 4. Update university outreach stage based on classification
       let newStage: string | null = null;

@@ -6,7 +6,7 @@ import { v } from "convex/values";
 import { Id } from "../_generated/dataModel";
 import { embed, callGeminiWithGrounding } from "../lib/llm";
 import { withRetry, cosineSimilarity, withConcurrencyLimit } from "../lib/utils";
-import * as Sentry from "@sentry/nextjs";
+import * as Sentry from "@sentry/node";
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 const IMAGE_RESULTS = 3; // Limit image search results
@@ -81,6 +81,7 @@ export const discoverSocialAndMedia = action({
         console.warn("[Enrichment] No SERPER_API_KEY");
         return { success: false, reason: "No SERPER_API_KEY" };
       }
+      const cleanSerperKey = serperKey.trim();
 
       // Check for recent signals to avoid redundant re-enrichment
       const existingSignals = await ctx.runQuery(
@@ -135,7 +136,7 @@ export const discoverSocialAndMedia = action({
                     {
                       method: "POST",
                       headers: {
-                        "X-API-KEY": serperKey,
+                        "X-API-KEY": cleanSerperKey,
                         "Content-Type": "application/json",
                       },
                       body: JSON.stringify({ q }),
@@ -264,7 +265,7 @@ export const discoverSocialAndMedia = action({
             const response = await fetch("https://google.serper.dev/images", {
               method: "POST",
               headers: {
-                "X-API-KEY": serperKey,
+                "X-API-KEY": cleanSerperKey,
                 "Content-Type": "application/json",
               },
               body: JSON.stringify({ q, num: IMAGE_RESULTS }),

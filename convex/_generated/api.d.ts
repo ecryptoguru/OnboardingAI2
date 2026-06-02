@@ -8,11 +8,15 @@
  * @module
  */
 
+import type * as _debug_delete_users from "../_debug_delete_users.js";
+import type * as _debug_dump_users from "../_debug_dump_users.js";
 import type * as actions_autoReply from "../actions/autoReply.js";
 import type * as actions_deepEnrichment from "../actions/deepEnrichment.js";
 import type * as actions_discovery from "../actions/discovery.js";
 import type * as actions_email from "../actions/email.js";
+import type * as actions_enrichGovernmentData from "../actions/enrichGovernmentData.js";
 import type * as actions_enrichment from "../actions/enrichment.js";
+import type * as actions_inferContacts from "../actions/inferContacts.js";
 import type * as actions_ingest from "../actions/ingest.js";
 import type * as actions_liveTest from "../actions/liveTest.js";
 import type * as actions_migrateEmbeddings from "../actions/migrateEmbeddings.js";
@@ -23,8 +27,11 @@ import type * as actions_proposals from "../actions/proposals.js";
 import type * as actions_realWorldVerify from "../actions/realWorldVerify.js";
 import type * as actions_replyClassifier from "../actions/replyClassifier.js";
 import type * as actions_scoring from "../actions/scoring.js";
+import type * as actions_scrapeAntiRagging from "../actions/scrapeAntiRagging.js";
 import type * as actions_scraper from "../actions/scraper.js";
 import type * as actions_testE2E from "../actions/testE2E.js";
+import type * as actions_testEmbed from "../actions/testEmbed.js";
+import type * as actions_testEnrichmentLoop from "../actions/testEnrichmentLoop.js";
 import type * as actions_testRetry from "../actions/testRetry.js";
 import type * as actions_testVerifyOptimizations from "../actions/testVerifyOptimizations.js";
 import type * as actions_testVerifyRequirements from "../actions/testVerifyRequirements.js";
@@ -60,6 +67,8 @@ import type * as signals from "../signals.js";
 import type * as stakeholders from "../stakeholders.js";
 import type * as test from "../test.js";
 import type * as universities from "../universities.js";
+import type * as users from "../users.js";
+import type * as wipeAllData from "../wipeAllData.js";
 import type * as wipeEnrichment from "../wipeEnrichment.js";
 
 import type {
@@ -69,11 +78,15 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  _debug_delete_users: typeof _debug_delete_users;
+  _debug_dump_users: typeof _debug_dump_users;
   "actions/autoReply": typeof actions_autoReply;
   "actions/deepEnrichment": typeof actions_deepEnrichment;
   "actions/discovery": typeof actions_discovery;
   "actions/email": typeof actions_email;
+  "actions/enrichGovernmentData": typeof actions_enrichGovernmentData;
   "actions/enrichment": typeof actions_enrichment;
+  "actions/inferContacts": typeof actions_inferContacts;
   "actions/ingest": typeof actions_ingest;
   "actions/liveTest": typeof actions_liveTest;
   "actions/migrateEmbeddings": typeof actions_migrateEmbeddings;
@@ -84,8 +97,11 @@ declare const fullApi: ApiFromModules<{
   "actions/realWorldVerify": typeof actions_realWorldVerify;
   "actions/replyClassifier": typeof actions_replyClassifier;
   "actions/scoring": typeof actions_scoring;
+  "actions/scrapeAntiRagging": typeof actions_scrapeAntiRagging;
   "actions/scraper": typeof actions_scraper;
   "actions/testE2E": typeof actions_testE2E;
+  "actions/testEmbed": typeof actions_testEmbed;
+  "actions/testEnrichmentLoop": typeof actions_testEnrichmentLoop;
   "actions/testRetry": typeof actions_testRetry;
   "actions/testVerifyOptimizations": typeof actions_testVerifyOptimizations;
   "actions/testVerifyRequirements": typeof actions_testVerifyRequirements;
@@ -121,6 +137,8 @@ declare const fullApi: ApiFromModules<{
   stakeholders: typeof stakeholders;
   test: typeof test;
   universities: typeof universities;
+  users: typeof users;
+  wipeAllData: typeof wipeAllData;
   wipeEnrichment: typeof wipeEnrichment;
 }>;
 

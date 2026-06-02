@@ -6,7 +6,7 @@ import { v } from "convex/values";
 import { callFlash } from "../lib/llm";
 import { calculateDeterministicScore } from "../lib/scoring";
 import { SCORING_SYSTEM_PROMPT, SCORING_SCHEMA } from "../lib/prompts";
-import * as Sentry from "@sentry/nextjs";
+import * as Sentry from "@sentry/node";
 import { validateRange } from "../lib/utils";
 
 // SYSTEM_PROMPT removed (using centralized prompts)

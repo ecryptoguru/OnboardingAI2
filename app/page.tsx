@@ -1,5 +1,16 @@
 import Link from "next/link";
 import { ArrowRightIcon } from "@heroicons/react/24/outline";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Fretbox Outreach AI",
+  description: "Automate your university outreach with intelligent insights, automated enrichment, and data-driven engagement.",
+  openGraph: {
+    title: "Fretbox Outreach AI",
+    description: "Automate your university outreach with intelligent insights, automated enrichment, and data-driven engagement.",
+    type: "website",
+  },
+};
 
 export default function Home() {
   return (

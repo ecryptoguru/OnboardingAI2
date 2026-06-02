@@ -116,8 +116,8 @@ export const completeScoringInternal = internalMutation({
 
     // 2. Update university status
     await ctx.db.patch(args.university_id, {
-      lead_tier: args.lead_tier,
-      outreach_stage: args.stage,
+      lead_tier,
+      outreach_stage: stage,
       updated_at: now,
     });
   },

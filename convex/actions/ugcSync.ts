@@ -1,75 +1,250 @@
 "use node";
 
 import { action } from "../_generated/server";
-import { api } from "../_generated/api";
+import { v } from "convex/values";
+import { internal } from "../_generated/api";
+import type { Doc, Id } from "../_generated/dataModel";
 
-interface UgcUniversity {
-  uni_name: string;
-  address: string | null;
-  Zip: string | null;
-  state: string;
-  uni_type: string | null;
-  url: string | null;
-  NM_VC: string | null;
-  NM_REG: string | null;
-  status?: string | null;
-  [key: string]: unknown;
+/**
+ * Strict matching for UGC sync. Much more conservative than namesMatch()
+ * to avoid false positives that swallow genuinely missing universities.
+ *
+ * Rules (in order):
+ * 1. Exact normalized-name match
+ * 2. Substring match with >=70% length overlap
+ * 3. Acronym match (3+ chars, as standalone token)
+ * 4. >=3 shared distinctive non-stopword tokens
+ */
+function strictMatch(ugcName: string, dbName: string): boolean {
+  const na = ugcName.toLowerCase().replace(/\s+/g, " ").trim();
+  const nb = dbName.toLowerCase().replace(/\s+/g, " ").trim();
+
+  if (na === nb) return true;
+
+  // Substring with substantial overlap
+  if (na.includes(nb) || nb.includes(na)) {
+    const shorter = na.length <= nb.length ? na : nb;
+    const longer = na.length <= nb.length ? nb : na;
+    if (shorter.length / longer.length >= 0.7) return true;
+  }
+
+  // Acronym check (3+ chars, must appear as standalone token)
+  const getAcronym = (s: string) =>
+    s
+      .toLowerCase()
+      .replace(/&/g, " and ")
+      .replace(/[^a-z0-9\s]/g, "")
+      .split(/\s+/)
+      .filter(
+        (w) =>
+          w.length > 2 &&
+          !["university", "college", "of", "the", "and", "institute", "institution"].includes(w),
+      )
+      .map((w) => w[0])
+      .join("");
+
+  const acrA = getAcronym(ugcName);
+  const acrB = getAcronym(dbName);
+
+  if (acrA.length >= 3) {
+    const tokensB = nb.split(/\s+/);
+    if (tokensB.some((t) => t === acrA)) return true;
+  }
+  if (acrB.length >= 3) {
+    const tokensA = na.split(/\s+/);
+    if (tokensA.some((t) => t === acrB)) return true;
+  }
+
+  // Token overlap: require >=3 shared distinctive tokens
+  const stopWords = new Set([
+    "university", "college", "of", "the", "and",
+    "institute", "institution", "technology", "science", "sciences",
+    "engineering", "management", "studies", "research", "arts",
+    "national", "indian", "state", "private", "public", "international",
+    "global", "deemed", "central", "technical",
+  ]);
+
+  const tokensA = na.split(/\s+/).filter((t) => t.length > 2 && !stopWords.has(t));
+  const tokensB = nb.split(/\s+/).filter((t) => t.length > 2 && !stopWords.has(t));
+
+  const shared = tokensA.filter((t) => tokensB.includes(t));
+  if (shared.length >= 3) return true;
+
+  // Or 2 shared where at least one is >=5 chars
+  if (shared.length === 2 && shared.some((t) => t.length >= 5)) return true;
+
+  return false;
 }
 
-export const fetchFromUgc = action({
-  args: {},
+export const syncUgcData = action({
+  args: {
+    universities: v.array(
+      v.object({
+        university_name: v.string(),
+        state: v.string(),
+        city: v.optional(v.string()),
+        website: v.optional(v.string()),
+        type: v.optional(v.string()),
+        address: v.optional(v.string()),
+        zip_code: v.optional(v.string()),
+        ugc_status: v.optional(v.string()),
+        vc_name: v.optional(v.string()),
+        registrar_name: v.optional(v.string()),
+      }),
+    ),
+  },
   handler: async (
     ctx,
+    args,
   ): Promise<{ addedCount: number; updatedCount: number }> => {
-    console.log("Starting UGC sync fetch...");
+    console.log(`Starting UGC sync with ${args.universities.length} universities...`);
 
-    // unitypeID=0 fetches all universities
-    const response = await fetch(
-      "https://www.ugc.gov.in/universitydetails/Getuniversity_details?unitypeID=0",
-      {
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-          Accept: "application/json, text/plain, */*",
-          Referer: "https://www.ugc.gov.in/universitydetails/university",
-          Origin: "https://www.ugc.gov.in",
-          "X-Requested-With": "XMLHttpRequest",
-        },
-      },
+    // Fetch all existing universities for in-memory fuzzy matching
+    const existingUniversities: Doc<"universities">[] = await ctx.runQuery(
+      internal.universities.listAllInternal,
+      {},
     );
+    console.log(`Found ${existingUniversities.length} existing universities.`);
 
-    if (!response.ok) {
-      throw new Error(`UGC API returned status: ${response.status}`);
+    // Build state-indexed map for O(1) candidate lookup
+    const stateMap = new Map<string, Doc<"universities">[]>();
+    for (const record of existingUniversities) {
+      const key = (record.state || "unknown").toLowerCase().trim();
+      const list = stateMap.get(key) ?? [];
+      list.push(record);
+      stateMap.set(key, list);
     }
 
-    const data = await response.json();
+    const inserts: {
+      university_name: string;
+      state: string;
+      city?: string;
+      website?: string;
+      type?: string;
+      address?: string;
+      zip_code?: string;
+      ugc_status?: string;
+      vc_name?: string;
+      registrar_name?: string;
+    }[] = [];
 
-    if (!data || !data.List || !Array.isArray(data.List)) {
-      throw new Error("Invalid response format from UGC API");
+    const updates: {
+      id: Id<"universities">;
+      website?: string;
+      type?: string;
+      state?: string;
+      address?: string;
+      zip_code?: string;
+      ugc_status?: string;
+    }[] = [];
+
+    // Pre-deduplicate UGC input by exact (name, state) pair.
+    // The UGC API itself has ~43 duplicate names. Keeping only the
+    // richest record per (name, state) prevents creating DB duplicates.
+    const ugcDedupMap = new Map<string, typeof args.universities[0]>();
+    for (const uni of args.universities) {
+      const key = (uni.university_name.trim().toLowerCase() + "|" + uni.state.trim().toLowerCase());
+      const existing = ugcDedupMap.get(key);
+      if (!existing) {
+        ugcDedupMap.set(key, uni);
+      } else {
+        // Keep the richer record (more fields populated)
+        const score = (u: typeof uni) =>
+          (u.website ? 1 : 0) + (u.address ? 1 : 0) + (u.ugc_status ? 1 : 0) +
+          (u.zip_code ? 1 : 0) + (u.vc_name ? 1 : 0) + (u.registrar_name ? 1 : 0);
+        if (score(uni) > score(existing)) {
+          ugcDedupMap.set(key, uni);
+        }
+      }
+    }
+    const dedupedUniversities = Array.from(ugcDedupMap.values());
+    console.log(`Deduplicated UGC input: ${args.universities.length} → ${dedupedUniversities.length}`);
+
+    for (const uni of dedupedUniversities) {
+      // Normalize type if not already done by caller
+      let normalizedType = uni.type || "Other";
+      if (normalizedType.includes("Deemed")) {
+        normalizedType = "Deemed";
+      }
+      // NOTE: we intentionally do NOT mutate uni.type here to avoid a side
+      // effect on the caller's input array. We use normalizedType below.
+
+      const stateKey = (uni.state || "unknown").toLowerCase().trim();
+      const candidates = stateMap.get(stateKey) ?? [];
+      const matched: Doc<"universities">[] = [];
+
+      for (const record of candidates) {
+        if (strictMatch(uni.university_name, record.university_name)) {
+          matched.push(record);
+        }
+      }
+
+      if (matched.length === 0) {
+        inserts.push({ ...uni, type: normalizedType });
+      } else {
+        for (const record of matched) {
+          const normalizeStr = (val: unknown) =>
+            val ? String(val).trim() : undefined;
+
+          const hasUpdates =
+            (uni.website &&
+              normalizeStr(record.website) !== normalizeStr(uni.website)) ||
+            (normalizedType &&
+              normalizeStr(record.type) !== normalizeStr(normalizedType)) ||
+            (uni.state &&
+              normalizeStr(record.state) !== normalizeStr(uni.state)) ||
+            (uni.address &&
+              normalizeStr(record.address) !== normalizeStr(uni.address)) ||
+            (uni.zip_code &&
+              normalizeStr(record.zip_code) !== normalizeStr(uni.zip_code)) ||
+            (uni.ugc_status &&
+              normalizeStr(record.ugc_status) !== normalizeStr(uni.ugc_status));
+
+          if (hasUpdates) {
+            updates.push({
+              id: record._id as Id<"universities">,
+              website: uni.website || record.website || undefined,
+              type: normalizedType || record.type || undefined,
+              state: uni.state || record.state || undefined,
+              address: uni.address || record.address || undefined,
+              zip_code: uni.zip_code || record.zip_code || undefined,
+              ugc_status: uni.ugc_status || record.ugc_status || undefined,
+            });
+          }
+        }
+      }
     }
 
-    const rawList: UgcUniversity[] = data.List;
-    console.log(`Fetched ${rawList.length} universities from UGC.`);
+    console.log(`Prepared ${inserts.length} inserts, ${updates.length} updates.`);
 
-    // Map full UGC payload to our schema
-    const universitiesToSync = rawList.map((item) => ({
-      university_name: item.uni_name.trim(),
-      state: item.state.trim(),
-      address: item.address || undefined,
-      zip_code: item.Zip || undefined,
-      ugc_status: item.status || undefined,
-      website: item.url || undefined,
-      type: item.uni_type || undefined,
-    }));
+    // Batch writes to avoid 1-second mutation timeout
+    const BATCH_SIZE = 50;
+    let totalAdded = 0;
+    let totalUpdated = 0;
 
-    // Trigger the mutation to save data
-    const result = await ctx.runMutation(api.universities.bulkSyncUgc, {
-      universities: universitiesToSync,
-    });
+    for (let i = 0; i < inserts.length; i += BATCH_SIZE) {
+      const batch = inserts.slice(i, i + BATCH_SIZE);
+      const result = await ctx.runMutation(
+        internal.universities.bulkSyncUgcInternal,
+        { inserts: batch, updates: [] },
+      );
+      totalAdded += result.addedCount;
+      console.log(`Batch insert ${i / BATCH_SIZE + 1}: +${result.addedCount}`);
+    }
+
+    for (let i = 0; i < updates.length; i += BATCH_SIZE) {
+      const batch = updates.slice(i, i + BATCH_SIZE);
+      const result = await ctx.runMutation(
+        internal.universities.bulkSyncUgcInternal,
+        { inserts: [], updates: batch },
+      );
+      totalUpdated += result.updatedCount;
+      console.log(`Batch update ${i / BATCH_SIZE + 1}: +${result.updatedCount}`);
+    }
 
     console.log(
-      `Sync complete. Added ${result.addedCount}, Updated ${result.updatedCount}.`,
+      `Sync complete. Added ${totalAdded}, Updated ${totalUpdated}.`,
     );
-    return result;
+    return { addedCount: totalAdded, updatedCount: totalUpdated };
   },
 });

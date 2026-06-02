@@ -16,7 +16,7 @@ import { chromium } from "playwright";
       try {
         const text = await res.text();
         console.log("HTTP 400 ERROR on", res.url(), "Response:", text);
-      } catch (e) {
+      } catch {
         console.log("Could not read response text");
       }
     }

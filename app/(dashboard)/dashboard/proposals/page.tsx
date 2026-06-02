@@ -555,15 +555,13 @@ function ProposalCard({
    Proposal Edit + Send Modal
 ────────────────────────────────────────────────────────── */
 function AutoResizeTextareaField({
-  label,
   value,
   onChange,
-  hint,
+  ariaLabel,
 }: {
-  label: string;
   value: string;
   onChange: (v: string) => void;
-  hint?: string;
+  ariaLabel: string;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -578,23 +576,17 @@ function AutoResizeTextareaField({
 
   return (
     <div className="group relative -mx-4 px-4 py-2 hover:bg-muted/30 rounded-2xl transition-colors">
-      <div className="flex items-center justify-between pl-1 mb-1.5 transition-opacity opacity-40 group-focus-within:opacity-100 group-hover:opacity-100">
-        <label className="text-[10px] font-bold uppercase tracking-widest text-blue-500">
-          {label}
-        </label>
-        {hint && (
-          <span className="text-[10px] text-muted-foreground/60 invisible sm:visible">
-            {hint}
-          </span>
-        )}
-      </div>
       <textarea
         ref={textareaRef}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        aria-label={ariaLabel}
         className="w-full bg-transparent border-transparent focus:outline-none focus:border-transparent focus:ring-0 p-0 m-0 text-sm text-foreground leading-relaxed resize-none overflow-hidden transition-all placeholder:text-muted-foreground/30"
         rows={1}
       />
+      <span className="absolute top-1 right-3 text-[10px] text-muted-foreground/30 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none select-none">
+        click to edit
+      </span>
     </div>
   );
 }
@@ -745,54 +737,14 @@ function ProposalEditModal({
                 </p>
               </div>
 
-              <AutoResizeTextareaField
-                label="Executive Hook"
-                value={hook}
-                onChange={setHook}
-                hint="Opening line to create immediate curiosity."
-              />
-              <AutoResizeTextareaField
-                label="Why Now"
-                value={whyNow}
-                onChange={setWhyNow}
-                hint="Urgency & timing for acting now."
-              />
-              <AutoResizeTextareaField
-                label="Vision Statement"
-                value={vision}
-                onChange={setVision}
-                hint="The future state you're helping them achieve."
-              />
-              <AutoResizeTextareaField
-                label="The Challenge"
-                value={problem}
-                onChange={setProblem}
-                hint="The problem they're currently facing."
-              />
-              <AutoResizeTextareaField
-                label="Our Solution"
-                value={solution}
-                onChange={setSolution}
-                hint="How Fretbox specifically solves their challenge."
-              />
-              <AutoResizeTextareaField
-                label="Key Benefits"
-                value={benefits}
-                onChange={setBenefits}
-                hint="One benefit per line."
-              />
-              <AutoResizeTextareaField
-                label="Expected ROI"
-                value={roi}
-                onChange={setRoi}
-                hint="Quantified or qualified outcome."
-              />
-              <AutoResizeTextareaField
-                label="Next Steps"
-                value={nextSteps}
-                onChange={setNextSteps}
-                hint="One step per line."
-              />
+              <AutoResizeTextareaField value={hook} onChange={setHook} ariaLabel="Executive hook — opening line to create immediate curiosity" />
+              <AutoResizeTextareaField value={whyNow} onChange={setWhyNow} ariaLabel="Why now — urgency and timing for acting now" />
+              <AutoResizeTextareaField value={vision} onChange={setVision} ariaLabel="Vision statement — the future state you are helping them achieve" />
+              <AutoResizeTextareaField value={problem} onChange={setProblem} ariaLabel="The challenge — the problem they are currently facing" />
+              <AutoResizeTextareaField value={solution} onChange={setSolution} ariaLabel="Our solution — how Fretbox specifically solves their challenge" />
+              <AutoResizeTextareaField value={benefits} onChange={setBenefits} ariaLabel="Key benefits — one benefit per line" />
+              <AutoResizeTextareaField value={roi} onChange={setRoi} ariaLabel="Expected ROI — quantified or qualified outcome" />
+              <AutoResizeTextareaField value={nextSteps} onChange={setNextSteps} ariaLabel="Next steps — one step per line" />
             </div>
           </div>
         </div>

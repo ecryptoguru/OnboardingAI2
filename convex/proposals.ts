@@ -10,6 +10,7 @@ import { validateAuth } from "./lib/auth_utils";
 export const listAll = query({
   args: {},
   handler: async (ctx) => {
+    await validateAuth(ctx);
     const proposals = await ctx.db.query("proposals").order("desc").collect();
     return await Promise.all(
       proposals.map(async (p) => {
@@ -35,7 +36,10 @@ export const listAll = query({
 
 export const get = query({
   args: { id: v.id("proposals") },
-  handler: async (ctx, args) => ctx.db.get(args.id),
+  handler: async (ctx, args) => {
+    await validateAuth(ctx);
+    return ctx.db.get(args.id);
+  },
 });
 
 export const create = mutation({
@@ -140,6 +144,7 @@ export const updateInternal = internalMutation({
 export const generateUploadUrl = mutation({
   args: {},
   handler: async (ctx) => {
+    await validateAuth(ctx);
     return await ctx.storage.generateUploadUrl();
   },
 });
@@ -147,6 +152,7 @@ export const generateUploadUrl = mutation({
 export const getFileUrl = query({
   args: { storageId: v.id("_storage") },
   handler: async (ctx, args) => {
+    await validateAuth(ctx);
     return await ctx.storage.getUrl(args.storageId);
   },
 });

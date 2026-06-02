@@ -89,7 +89,8 @@ export const validateWebsite = action({
 export const discoverWebsite = action({
   args: { universityId: v.id("universities"), universityName: v.string() },
   handler: async (ctx, args) => {
-    const apiKey = await ctx.runQuery(internal.settings.getInternalSerperKey);
+    const rawApiKey = await ctx.runQuery(internal.settings.getInternalSerperKey);
+    const apiKey = rawApiKey ? rawApiKey.trim() : null;
     if (!apiKey) {
       console.warn("SERPER_API_KEY is not set. Cannot discover website.");
       return null;

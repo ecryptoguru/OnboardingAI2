@@ -14,6 +14,7 @@ import type { DataModel } from "./_generated/dataModel";
 export const listByUniversity = query({
   args: { university_id: v.id("universities") },
   handler: async (ctx, args) => {
+    await validateAuth(ctx);
     return await ctx.db
       .query("outreachSequences")
       .withIndex("by_university", (q) =>
@@ -35,8 +36,10 @@ export const listByUniversityInternal = internalQuery({
   },
 });
 
-// Returns all active sequences that are due (next_send_at <= now)
-export const getDue = query({
+// Returns active sequences that are due (next_send_at <= now).
+// Capped at 50 to avoid "too many system operations" timeout.
+// The cron runs every minute, so backlog clears across multiple runs.
+export const getDueInternal = internalQuery({
   args: {},
   handler: async (ctx) => {
     const now = Date.now();
@@ -45,7 +48,7 @@ export const getDue = query({
       .withIndex("by_status_next_send", (q) =>
         q.eq("status", "active").lte("next_send_at", now),
       )
-      .collect();
+      .take(50);
   },
 });
 

@@ -7,9 +7,19 @@ import {
 import { v } from "convex/values";
 import { validateAuth } from "./lib/auth_utils";
 
+export const unclassifiedCount = query({
+  args: {},
+  handler: async (ctx) => {
+    await validateAuth(ctx);
+    const logs = await ctx.db.query("replyLogs").order("desc").take(200);
+    return logs.filter((r) => !r.classification).length;
+  },
+});
+
 export const list = query({
   args: {},
-  handler: async (ctx, args) => {
+  handler: async (ctx) => {
+    await validateAuth(ctx);
     const logs = await ctx.db.query("replyLogs").order("desc").take(50);
     return await Promise.all(
       logs.map(async (log) => {
@@ -23,6 +33,7 @@ export const list = query({
 export const listByUniversity = query({
   args: { university_id: v.id("universities") },
   handler: async (ctx, args) => {
+    await validateAuth(ctx);
     return await ctx.db
       .query("replyLogs")
       .withIndex("by_university", (q) =>

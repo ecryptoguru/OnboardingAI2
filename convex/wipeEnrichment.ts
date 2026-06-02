@@ -1,4 +1,4 @@
-import { mutation, query, internalMutation } from "./_generated/server";
+import { mutation, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 
 export const wipeAll = mutation({
@@ -48,7 +48,7 @@ export const purgeBadDemographics = mutation({
     const unis = await ctx.db.query("universities").collect();
     let fixed = 0;
     for (const uni of unis) {
-      const demo = (uni as any).demographics;
+      const demo = uni.demographics;
       if (!demo) continue;
 
       const total: number | undefined =

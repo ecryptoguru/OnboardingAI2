@@ -10,6 +10,13 @@ You are a highly accurate data extraction system.
 Your job is to read the provided text from a University website and extract key stakeholders matching or closely related to the following roles:
 ${targetRoles.join(", ")}
 
+CRITICAL RULES:
+1. Extract EVERY person you find with a name and role, even if NO email or phone is listed.
+2. Indian universities often display names+roles on administration pages but hide emails to avoid spam. STILL extract the name and role.
+3. Use null for missing email or phone — do NOT skip the person just because contact info is missing.
+4. Look for titles: Dr., Prof., Mr., Mrs., Shri, Smt., Er.
+5. If the same person appears multiple times with slightly different names, merge them into one entry.
+
 Extract as much relevant information as possible for each found stakeholder.
 If no stakeholders are found, return an empty array for stakeholders.
 `.trim();
@@ -43,7 +50,9 @@ export const SCRAPER_SCHEMA: Schema = {
             description: "phone number or null",
           },
         },
-        required: ["name", "role", "email", "phone"],
+        // Intentionally NO required fields — Indian university sites often list
+        // names+roles without emails. We want to capture the name+role even
+        // when contact details are missing. The app filters empty entries later.
       },
     },
   },
@@ -137,7 +146,9 @@ NIRF tables appear in TWO formats:
   FORMAT A — single-row summary (common in smaller/mid-size universities):
     Column pattern: Total | Male | Female | Hostellers | Day Scholars
     Example row:    6100  | 2430  | 3670  | 4250        | 1850
-    → Use all values directly. Hostellers = nirf hostelites (not needed for nirf_* block but also populate AISHE block from this if no better hostelite source).
+    → Use Total/Male/Female for nirf_* block.
+    → CRITICAL: Put Hostellers value into AISHE block \`hostelites\` field.
+    → CRITICAL: Put Day Scholars value into AISHE block \`day_scholars\` field.
 
   FORMAT B — program-wise rows (large universities: VIT, BITS, Manipal, Amity, SRM, LPU, Chandigarh):
     Each row = one academic program. Example:
@@ -257,6 +268,8 @@ Target roles to find: ${targetRoles.join(", ")}
     - ⚠️ DOMAIN MATCHING: Only extract emails that match the university's known domain (e.g., @xim.edu.in, @xub.edu.in).
     - If you see emails like @iitbbs.ac.in while enriching XIM University, DISCARD THEM. They are from search results for neighboring institutions.
     - NO PLACEHOLDERS: Never include "N/A", "Unknown", or "Dean Student Welfare" as a name if the actual name isn't found.
+    - NEVER use a role title as a name. "Vice Chancellor", "Registrar", "Dean Student Affairs" are ROLES, not names. If you cannot find the actual person's name, set name to null. Do NOT invent a name.
+    - A stakeholder MUST have either (a) a real person's name, or (b) a verified role-based email with the corresponding role. Do not include generic contacts with neither name nor role.
 
   MERGE RULE: If same person appears in multiple sources (website + anti-ragging + LinkedIn),
     merge into ONE record with ALL contact fields combined. Keep the most complete version.

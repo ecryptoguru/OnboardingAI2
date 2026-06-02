@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { useMutation } from "convex/react";
+import { useAction } from "convex/react";
 import { api } from "../convex/_generated/api";
 import { ArrowPathIcon, CheckCircleIcon } from "@heroicons/react/24/outline";
 
@@ -14,7 +14,7 @@ export function SyncUgcButton() {
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const bulkSyncUgc = useMutation(api.universities.bulkSyncUgc);
+  const syncUgcData = useAction(api.actions.ugcSync.syncUgcData);
 
   const handleSync = async () => {
     setIsSyncing(true);
@@ -22,7 +22,7 @@ export function SyncUgcButton() {
     setSyncResult(null);
 
     try {
-      // Step 1: Fetch through the Proxy Route Handler
+      // Step 1: Fetch UGC data via Next.js API route (browser-side)
       const response = await fetch("/api/sync-ugc");
       if (!response.ok) {
         throw new Error(`Proxy error: ${response.status}`);
@@ -33,7 +33,7 @@ export function SyncUgcButton() {
         throw new Error("Invalid format from UGC API");
       }
 
-      // Step 2: Map full UGC dataset to our schema with normalization
+      // Step 2: Map to our schema
       const mappedUniversities = data.List.map(
         (item: {
           uni_name?: string;
@@ -65,8 +65,8 @@ export function SyncUgcButton() {
         },
       );
 
-      // Step 3: Send to Convex mutation
-      const result = await bulkSyncUgc({
+      // Step 3: Pass to action for fuzzy matching + DB writes
+      const result = await syncUgcData({
         universities: mappedUniversities,
       });
 

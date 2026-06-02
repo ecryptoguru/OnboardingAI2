@@ -2,7 +2,7 @@
 
 import { action } from "../_generated/server";
 import { api, internal } from "../_generated/api";
-import { v } from "convex/values";
+import { Id } from "../_generated/dataModel";
 
 /**
  * Verification action to trace the full requirements lifecycle.
@@ -10,7 +10,7 @@ import { v } from "convex/values";
 export const verifyRequirements = action({
   args: {},
   handler: async (ctx) => {
-    const results: Record<string, any> = {};
+    const results: Record<string, unknown> = {};
 
     try {
       // 1. Mock University Creation
@@ -35,11 +35,15 @@ export const verifyRequirements = action({
       results.images_found = enrichment.imagesAdded || 0;
 
       // 4. Mock Stakeholder (Requirement 3)
-      const stId = await ctx.runMutation(internal.stakeholders.bulkInsertInternal, {
+      const stIds = (await ctx.runMutation(internal.stakeholders.bulkInsertInternal, {
           university_id: universityId,
           stakeholders: [{ name: "Test User", role: "Registrar", email: "test@example.com" }],
           source: "manual",
-      });
+      })) as unknown as string[];
+      const stakeholderId = stIds.length > 0 ? stIds[0] : null;
+      if (!stakeholderId) {
+        throw new Error("Failed to insert test stakeholder");
+      }
       results.step3_stakeholder = "PASS";
 
       // 5. Mock Email (Requirement 5)
@@ -53,7 +57,7 @@ export const verifyRequirements = action({
       // 6. Mock Auto-Reply (Requirement 8)
       const autoReply = await ctx.runAction(api.actions.autoReply.sendAutoReply, {
           universityId,
-          stakeholderId: stId as any,
+          stakeholderId: stakeholderId as Id<"stakeholders">,
           classification: "positive_interest",
       });
       results.step8_autoreply = autoReply.success ? "PASS" : "FAIL";

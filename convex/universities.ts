@@ -9,6 +9,21 @@ import { paginationOptsValidator } from "convex/server";
 import { validateAuth } from "./lib/auth_utils";
 import { namesMatch } from "./lib/universityUtils";
 
+function isDuplicateOfExisting(
+  row: { university_name: string; state?: string | null },
+  existing: { university_name: string; state?: string | null }[],
+): boolean {
+  for (const record of existing) {
+    if (namesMatch(row.university_name, record.university_name)) {
+      // Optional: also compare state to reduce false positives
+      if (!row.state || !record.state || row.state === record.state) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 const websiteStatusValidator = v.optional(
   v.union(
     v.literal("pending"),
@@ -84,15 +99,17 @@ export const list = query({
     tier: v.optional(v.string()),
     stage: outreachStageValidator,
     type: v.optional(v.string()),
+    limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
+    const limit = args.limit ?? 500;
 
     if (args.type && args.type !== "All") {
       return await ctx.db
         .query("universities")
         .withIndex("by_type", (q) => q.eq("type", args.type))
-        .collect();
+        .take(limit);
     }
 
     if (args.status) {
@@ -101,7 +118,7 @@ export const list = query({
         .withIndex("by_website_status", (q) =>
           q.eq("website_status", args.status!),
         )
-        .collect();
+        .take(limit);
     }
 
     if (args.stage) {
@@ -110,14 +127,14 @@ export const list = query({
         .withIndex("by_outreach_stage", (q) =>
           q.eq("outreach_stage", args.stage!),
         )
-        .collect();
+        .take(limit);
     }
 
     return await ctx.db
       .query("universities")
       .withIndex("by_created_at")
       .order("desc")
-      .collect();
+      .take(limit);
   },
 });
 export const getStats = query({
@@ -154,12 +171,36 @@ export const getStats = query({
         .then((r) => r.length),
     ]);
 
-    // Count universities with no type or types not in the standard set
+    // Compute total by summing all outreach stages (every uni has a stage).
+    // This avoids a full-table .collect() which loads every document into memory.
+    const [
+      newCount,
+      enriching,
+      enriched,
+      sequencing,
+      outreachActive,
+      replied,
+      meetingBooked,
+      proposalSent,
+      closed,
+      notInterested,
+      skipped,
+    ] = await Promise.all([
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "new")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "enriching")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "enriched")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "sequencing")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "outreach_active")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "replied")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "meeting_booked")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "proposal_sent")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "closed")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "not_interested")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "skipped")).collect().then((r) => r.length),
+    ]);
+
+    const all = newCount + enriching + enriched + sequencing + outreachActive + replied + meetingBooked + proposalSent + closed + notInterested + skipped;
     const allWithType = central + state + priv + deemed + other;
-    const all = await ctx.db
-      .query("universities")
-      .collect()
-      .then((r) => r.length);
 
     return {
       All: all,
@@ -401,18 +442,47 @@ export const bulkInsert = mutation({
   handler: async (ctx, args) => {
     await validateAuth(ctx);
     const now = Date.now();
-    const ids = await Promise.all(
-      args.rows.map((row) =>
-        ctx.db.insert("universities", {
-          ...row,
-          website_status: "pending",
-          outreach_stage: "new",
-          created_at: now,
-          updated_at: now,
-        }),
-      ),
-    );
-    return ids;
+
+    // Fetch existing universities for deduplication
+    const existing = await ctx.db.query("universities").collect();
+
+    const ids: string[] = [];
+    const skipped: string[] = [];
+
+    for (const row of args.rows) {
+      if (isDuplicateOfExisting(row, existing)) {
+        skipped.push(row.university_name);
+        continue;
+      }
+
+      const inserted = await ctx.db.insert("universities", {
+        ...row,
+        website_status: "pending",
+        outreach_stage: "new",
+        created_at: now,
+        updated_at: now,
+      });
+
+      ids.push(inserted);
+      // Update local cache so subsequent rows in same batch don't duplicate each other
+      existing.push({
+        _id: inserted,
+        _creationTime: now,
+        university_name: row.university_name,
+        state: row.state,
+        city: row.city,
+        website: row.website,
+        website_status: "pending",
+        outreach_stage: "new",
+        student_count: row.student_count,
+        type: row.type,
+        naac_grade: row.naac_grade,
+        created_at: now,
+        updated_at: now,
+      } as (typeof existing)[0]);
+    }
+
+    return { inserted: ids.length, skipped: skipped.length, skippedNames: skipped };
   },
 });
 
@@ -527,14 +597,14 @@ export const revertStage = mutation({
 });
 
 export const listSkipped = query({
-  args: {},
-  handler: async (ctx) => {
+  args: { limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
     await validateAuth(ctx);
     return await ctx.db
       .query("universities")
       .withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "skipped"))
       .order("desc")
-      .collect();
+      .take(args.limit ?? 500);
   },
 });
 
@@ -638,6 +708,33 @@ export const updateLeadTierInternal = internalMutation({
   },
 });
 
+export const listAllInternal = internalQuery({
+  args: {},
+  handler: async (ctx) => {
+    return await ctx.db.query("universities").collect();
+  },
+});
+
+export const patchInternal = internalMutation({
+  args: {
+    id: v.id("universities"),
+    fields: v.record(
+      v.string(),
+      v.union(v.string(), v.number(), v.boolean()),
+    ),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, { ...args.fields, updated_at: Date.now() });
+  },
+});
+
+export const deleteInternal = internalMutation({
+  args: { id: v.id("universities") },
+  handler: async (ctx, args) => {
+    await ctx.db.delete(args.id);
+  },
+});
+
 export const updateDemographicsInternal = internalMutation({
   args: {
     universityId: v.id("universities"),
@@ -652,6 +749,7 @@ export const updateDemographicsInternal = internalMutation({
       hostelites_male: v.optional(v.number()),
       hostelites_female: v.optional(v.number()),
       source: v.optional(v.string()), // NAAC/AISHE source year
+      data_quality: v.optional(v.string()), // "verified" | "partial" | "inferred"
       nirf_source: v.optional(v.string()), // e.g. "NIRF 2024"
       nirf_total: v.optional(v.number()),
       nirf_male: v.optional(v.number()),
@@ -872,6 +970,76 @@ export const bulkSyncUgc = mutation({
   },
 });
 
+export const bulkSyncUgcInternal = internalMutation({
+  args: {
+    inserts: v.array(
+      v.object({
+        university_name: v.string(),
+        state: v.string(),
+        city: v.optional(v.string()),
+        website: v.optional(v.string()),
+        type: v.optional(v.string()),
+        address: v.optional(v.string()),
+        zip_code: v.optional(v.string()),
+        ugc_status: v.optional(v.string()),
+        vc_name: v.optional(v.string()),
+        registrar_name: v.optional(v.string()),
+      }),
+    ),
+    updates: v.array(
+      v.object({
+        id: v.id("universities"),
+        website: v.optional(v.string()),
+        type: v.optional(v.string()),
+        state: v.optional(v.string()),
+        address: v.optional(v.string()),
+        zip_code: v.optional(v.string()),
+        ugc_status: v.optional(v.string()),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    let addedCount = 0;
+    let updatedCount = 0;
+
+    for (const uni of args.inserts) {
+      await ctx.db.insert("universities", {
+        university_name: uni.university_name,
+        state: uni.state,
+        city: uni.city,
+        website: uni.website,
+        type: uni.type,
+        address: uni.address,
+        zip_code: uni.zip_code,
+        ugc_status: uni.ugc_status,
+        vc_name: uni.vc_name,
+        registrar_name: uni.registrar_name,
+        website_status: uni.website ? "valid" : "pending",
+        outreach_stage: "new",
+        created_at: now,
+        updated_at: now,
+      });
+      addedCount++;
+    }
+
+    for (const upd of args.updates) {
+      await ctx.db.patch(upd.id, {
+        website: upd.website,
+        type: upd.type,
+        state: upd.state,
+        address: upd.address,
+        zip_code: upd.zip_code,
+        ugc_status: upd.ugc_status,
+        updated_at: now,
+      });
+      updatedCount++;
+    }
+
+    return { addedCount, updatedCount };
+  },
+});
+
 export const patchState = mutation({
   args: { id: v.id("universities"), state: v.string() },
   handler: async (ctx, args) => {
@@ -897,3 +1065,4 @@ export const migrateDeemed = mutation({
     return { updatedCount };
   },
 });
+

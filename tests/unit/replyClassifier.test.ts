@@ -22,7 +22,7 @@ function validateClassification(result: string | undefined): {
   category: string;
   confidence: number;
 } {
-  if (!result || !VALID_CATEGORIES.includes(result as any)) {
+  if (!result || !VALID_CATEGORIES.includes(result as typeof VALID_CATEGORIES[number])) {
     return { category: "other", confidence: 0.5 };
   }
   return { category: result, confidence: 0.9 };
@@ -78,6 +78,13 @@ function mapClassificationToStage(classification: string): string {
   return "replied";
 }
 
+/**
+ * Mirror of auto-reply trigger logic from replyClassifier.ts
+ */
+function shouldTriggerAutoReply(triggerAutoReply?: boolean): boolean {
+  return triggerAutoReply !== false;
+}
+
 describe("Reply Classifier - Stage Mapping", () => {
   it("should map meeting_request to meeting_booked", () => {
     assert.strictEqual(mapClassificationToStage("meeting_request"), "meeting_booked");
@@ -109,5 +116,19 @@ describe("Reply Classifier - Stage Mapping", () => {
 
   it("should map unknown classifications to replied", () => {
     assert.strictEqual(mapClassificationToStage("spam"), "replied");
+  });
+});
+
+describe("Reply Classifier - Auto Reply Trigger", () => {
+  it("should enable auto-reply by default when arg is omitted", () => {
+    assert.strictEqual(shouldTriggerAutoReply(undefined), true);
+  });
+
+  it("should enable auto-reply when explicitly true", () => {
+    assert.strictEqual(shouldTriggerAutoReply(true), true);
+  });
+
+  it("should suppress auto-reply when explicitly false", () => {
+    assert.strictEqual(shouldTriggerAutoReply(false), false);
   });
 });

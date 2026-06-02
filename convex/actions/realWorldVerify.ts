@@ -29,6 +29,10 @@ export const runFullPipeline = action({
     cleanup: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
+    if (process.env.NODE_ENV === "production") {
+      throw new Error("runFullPipeline is disabled in production");
+    }
+
     const allStages = [
       "ingestion",
       "discovery",
@@ -42,7 +46,14 @@ export const runFullPipeline = action({
     ] as const;
     const stagesToRun = new Set(args.stages ?? allStages);
 
-    const report: Record<string, any> = {
+    const report: {
+      universityName: string;
+      startedAt: string;
+      stages: Record<string, Record<string, unknown>>;
+      cleanup?: Record<string, unknown>;
+      success?: boolean;
+      [key: string]: unknown;
+    } = {
       universityName: args.universityName,
       startedAt: new Date().toISOString(),
       stages: {},
@@ -244,7 +255,7 @@ export const runFullPipeline = action({
           }
 
           const enrolledId = await ctx.runMutation(
-            (internal as any).sequences.enrollInternal,
+            internal.sequences.enrollInternal,
             {
               university_id: universityId,
               stakeholder_id: testStakeholderId,
@@ -300,7 +311,10 @@ export const runFullPipeline = action({
 
           const classification = await ctx.runAction(
             api.actions.replyClassifier.classifyReply,
-            { replyId },
+            {
+              replyId,
+              triggerAutoReply: false,
+            },
           );
 
           // Allow scheduler time to fire auto-reply (Convex scheduler may take 5-10s)

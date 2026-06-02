@@ -4,8 +4,13 @@ import { useQuery, useMutation, usePaginatedQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { UploadCsvButton } from "../../../components/UploadCsvButton";
 import { SyncUgcButton } from "../../../components/SyncUgcButton";
-import { UniversityDetail } from "../../../components/UniversityDetail";
+import dynamic from "next/dynamic";
 import { useState, useRef, useEffect } from "react";
+
+const UniversityDetail = dynamic(
+  () => import("../../../components/UniversityDetail").then((mod) => mod.UniversityDetail),
+  { ssr: false }
+);
 import { Id, Doc } from "../../../convex/_generated/dataModel";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 import { useToast } from "../../../components/Toast";
@@ -67,10 +72,10 @@ export default function UniversitiesPage() {
   }, [listStatus, loadMore, isSearching]);
 
   const stats = useQuery(api.universities.getStats);
+  const totalUsers = useQuery(api.users.getTotalUsers);
   const dispatchValidation = useMutation(
     api.dispatcher.dispatchWebsiteValidation,
   );
-
   const handleValidate = async () => {
     setValidating(true);
     try {
@@ -107,6 +112,11 @@ export default function UniversitiesPage() {
           <p className="text-muted-foreground text-sm mt-1.5 font-medium">
             Manage and track all university leads
           </p>
+          {totalUsers !== undefined && (
+            <p className="text-xs text-muted-foreground mt-1">
+              {totalUsers} registered user{totalUsers === 1 ? "" : "s"}
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-3">
           <button

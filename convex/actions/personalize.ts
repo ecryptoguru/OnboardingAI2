@@ -6,7 +6,7 @@ import { v } from "convex/values";
 import { callGemini, TEMP } from "../lib/llm";
 import { sanitizeLlmInput } from "../lib/utils";
 import { OPENER_SYSTEM_PROMPT } from "../lib/prompts";
-import * as Sentry from "@sentry/nextjs";
+import * as Sentry from "@sentry/node";
 
 /**
  * Generates a personalized 2-sentence opener for an outreach email.

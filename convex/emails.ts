@@ -10,6 +10,7 @@ import { validateAuth } from "./lib/auth_utils";
 export const listBySequence = query({
   args: { sequence_id: v.id("outreachSequences") },
   handler: async (ctx, args) => {
+    await validateAuth(ctx);
     return await ctx.db
       .query("emailsSent")
       .withIndex("by_sequence", (q) => q.eq("sequence_id", args.sequence_id))
@@ -20,6 +21,7 @@ export const listBySequence = query({
 export const getStats = query({
   args: {},
   handler: async (ctx) => {
+    await validateAuth(ctx);
     // Use parallel index-scoped queries instead of full-table scan.
     const [, , opened, clicked, bounced] = await Promise.all([
       ctx.db
@@ -74,6 +76,7 @@ export const getStats = query({
 export const listByUniversity = query({
   args: { university_id: v.id("universities") },
   handler: async (ctx, args) => {
+    await validateAuth(ctx);
     const emails = await ctx.db
       .query("emailsSent")
       .withIndex("by_university", (q) =>
@@ -98,6 +101,7 @@ export const listByUniversity = query({
 export const getDetailedStats = query({
   args: {},
   handler: async (ctx) => {
+    await validateAuth(ctx);
     // Use index query with a safety cap to prevent OOM at massive scale.
     const MAX_ANALYTICS_ROWS = 5000;
     const emails = await ctx.db
@@ -131,6 +135,7 @@ export const getDetailedStats = query({
 export const getBySendgridId = query({
   args: { sendgrid_message_id: v.string() },
   handler: async (ctx, args) => {
+    await validateAuth(ctx);
     return await ctx.db
       .query("emailsSent")
       .withIndex("by_sendgrid_id", (q) =>
@@ -306,9 +311,22 @@ export const updateStatusInternal = internalMutation({
 
 // HITL Approval Queue Endpoints
 
+export const pendingCount = query({
+  args: {},
+  handler: async (ctx) => {
+    await validateAuth(ctx);
+    const pendingEmails = await ctx.db
+      .query("emailsSent")
+      .withIndex("by_status", (q) => q.eq("status", "pending_approval"))
+      .collect();
+    return pendingEmails.length;
+  },
+});
+
 export const listPending = query({
   args: {},
   handler: async (ctx) => {
+    await validateAuth(ctx);
     const pendingEmails = await ctx.db
       .query("emailsSent")
       .withIndex("by_status", (q) => q.eq("status", "pending_approval"))

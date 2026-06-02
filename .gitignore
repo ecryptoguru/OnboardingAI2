@@ -19,6 +19,10 @@ out/
 .env.local
 .env.*.local
 !.env.local.example
+jwt_key.pem
+jwks_value.txt
+jwt_key_tmp.pem
+tmp_jwt_key.txt
 
 # Build
 build/

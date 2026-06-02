@@ -235,6 +235,59 @@ export function isValidEmail(email: string): boolean {
 }
 
 /**
+ * Validate Indian phone numbers.
+ * Accepts: +91XXXXXXXXXX, +91-XXXX-XXXXXX, 0XXXXXXXXXX, XXXXXXXXXX (10-digit mobile)
+ * Also accepts landlines with STD code.
+ */
+export function isValidIndianPhone(phone: string): boolean {
+  if (!phone || typeof phone !== "string") return false;
+  const digits = phone.replace(/\D/g, "");
+  // +91XXXXXXXXXX (12 digits starting with 91)
+  if (digits.length === 12 && digits.startsWith("91")) {
+    return /^[6-9]/.test(digits.slice(2));
+  }
+  // 0XXXXXXXXXX (11 digits starting with 0) — mobile with trunk prefix
+  if (digits.length === 11 && digits.startsWith("0")) {
+    return /^[6-9]/.test(digits.slice(1));
+  }
+  // XXXXXXXXXX (10 digits) — standard mobile
+  if (digits.length === 10) {
+    return /^[6-9]/.test(digits);
+  }
+  // Landline: 0 + 2-4 digit STD + 6-8 digit number
+  if (digits.length >= 8 && digits.length <= 11 && digits.startsWith("0")) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Convert an LLM-extracted value to a number, handling comma-formatted strings.
+ * Returns undefined for null/undefined/NaN. Strips commas and whitespace from strings
+ * — NIRF/AISHE reports often format numbers as "25,000" which Number() cannot parse.
+ */
+export function toNum(val: unknown): number | undefined {
+  if (val === null || val === undefined) return undefined;
+  let normalized = val;
+  if (typeof val === "string") {
+    normalized = val.replace(/,/g, "").trim();
+    if (normalized === "") return undefined;
+  }
+  const n = Number(normalized);
+  return isNaN(n) ? undefined : n;
+}
+
+/**
+ * Same as toNum but also rejects 0 — useful for fields like hostelites or day_scholars
+ * that are NEVER legitimately 0 for large universities (LLMs frequently return 0
+ * for unfound fields instead of null despite instructions).
+ */
+export function toNumStrict(val: unknown): number | undefined {
+  const n = toNum(val);
+  return n === 0 ? undefined : n;
+}
+
+/**
  * Lightweight runtime validator for parsed LLM JSON output.
  * Throws a descriptive error instead of letting malformed data propagate.
  */

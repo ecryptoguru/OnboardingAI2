@@ -1,4 +1,4 @@
-export default {
+const authConfig = {
   providers: [
     {
       // CONVEX_SITE_URL is a Convex built-in env var automatically set to
@@ -10,3 +10,5 @@ export default {
     },
   ],
 };
+
+export default authConfig;

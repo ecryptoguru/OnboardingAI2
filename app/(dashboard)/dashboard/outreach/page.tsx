@@ -322,18 +322,6 @@ export default function OutreachPage() {
         </>
       )}
 
-      <style jsx global>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 5px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background-color: #3f3f46;
-          border-radius: 10px;
-        }
-      `}</style>
     </div>
   );
 }
@@ -790,7 +778,10 @@ function SimulateReplyModal({
         stakeholder_id: selectedStakeholderId,
         raw_reply: replyText,
       });
-      const result = await classifyReply({ replyId });
+      const result = await classifyReply({
+        replyId,
+        triggerAutoReply: false,
+      });
       setDone(result.classification ?? "other");
     } catch (e) {
       setError(`Simulation failed: ${String(e)}`);

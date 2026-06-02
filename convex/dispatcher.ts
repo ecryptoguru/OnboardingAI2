@@ -1,10 +1,12 @@
 import { mutation } from "./_generated/server";
 import { v } from "convex/values";
 import { api } from "./_generated/api";
+import { validateAuth } from "./lib/auth_utils";
 
 export const dispatchWebsiteValidation = mutation({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    await validateAuth(ctx);
     // Find universities that are 'pending' or 'invalid' to try validating or discovering
     const pending = await ctx.db
       .query("universities")

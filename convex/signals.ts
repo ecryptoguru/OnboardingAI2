@@ -11,6 +11,7 @@ import { validateAuth } from "./lib/auth_utils";
 export const listByUniversity = query({
   args: { university_id: v.id("universities") },
   handler: async (ctx, args) => {
+    await validateAuth(ctx);
     return await ctx.db
       .query("universitySignals")
       .withIndex("by_university", (q) =>

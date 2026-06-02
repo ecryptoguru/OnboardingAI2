@@ -2,8 +2,7 @@
 
 import { action } from "../_generated/server";
 import { internal, api } from "../_generated/api";
-import { v } from "convex/values";
-import * as Sentry from "@sentry/nextjs";
+import * as Sentry from "@sentry/node";
 
 /**
  * Verification action to confirm optimizations:
@@ -12,7 +11,7 @@ import * as Sentry from "@sentry/nextjs";
  */
 export const runVerification = action({
   args: {},
-  handler: async (ctx): Promise<any> => {
+  handler: async (ctx): Promise<unknown> => {
     console.log("[Verification] Starting optimization verification...");
 
     // 1. Setup Test Data
@@ -59,14 +58,14 @@ export const runVerification = action({
 
       // 4. Verify Results
       console.log("[Verification] Checking results...");
-      const stakeholders: any[] = await ctx.runQuery(internal.stakeholders.getByUniversityInternal, { 
-        university_id: universityId 
+      const stakeholders = await ctx.runQuery(internal.stakeholders.getByUniversityInternal, {
+        university_id: universityId
       });
       
       const uni = await ctx.runQuery(internal.universities.getInternal, { universityId });
       const scores = await ctx.runQuery(api.priorityScores.getByUniversity, { university_id: universityId });
 
-      const results: any = {
+      const results: Record<string, unknown> = {
         stakeholderCount: stakeholders.length,
         leadTier: uni?.lead_tier,
         outreachStage: uni?.outreach_stage,

@@ -7,7 +7,7 @@ import { callGemini, TEMP, MODELS } from "../lib/llm";
 import { validateJsonOutput, sanitizeLlmInput } from "../lib/utils";
 import { recommendModules, suggestPricingTier } from "../lib/moduleRecommender";
 import { PROPOSAL_SYSTEM_PROMPT, PROPOSAL_SCHEMA } from "../lib/prompts";
-import * as Sentry from "@sentry/nextjs";
+import * as Sentry from "@sentry/node";
 
 interface ProposalContent extends Record<string, unknown> {
   agenda: string[] | string;

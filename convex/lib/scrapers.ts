@@ -40,7 +40,7 @@ export async function firecrawlMap(
     body: JSON.stringify({
       url,
       search: "",
-      sitemap: true,
+      sitemap: "include",
       includeSubdomains: true,
       ignoreQueryParameters: true,
       ignoreCache: false,

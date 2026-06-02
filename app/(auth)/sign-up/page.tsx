@@ -1,29 +1,32 @@
 "use client";
 
 import { useAuthActions } from "@convex-dev/auth/react";
+import Link from "next/link";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 
 export default function SignUpPage() {
   const { signIn } = useAuthActions();
-  const router = useRouter();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
     setError("");
-    try {
-      await signIn("password", { email, password, flow: "signUp" });
-      router.push("/dashboard");
-    } catch {
-      setError("Could not create account. Try a different email.");
-    } finally {
-      setLoading(false);
-    }
+    const formData = new FormData(e.currentTarget);
+    signIn("password", {
+      email: formData.get("email") as string,
+      password: formData.get("password") as string,
+      flow: formData.get("flow") as string,
+      redirectTo: "/dashboard",
+    })
+      .catch((err: Error) => {
+        console.error(err);
+        setError("Could not create account. Try a different email.");
+      })
+      .finally(() => {
+        setLoading(false);
+      });
   };
 
   return (
@@ -37,28 +40,32 @@ export default function SignUpPage() {
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="block text-sm font-medium text-foreground mb-1.5">Email</label>
+            <label htmlFor="email" className="block text-sm font-medium text-foreground mb-1.5">Email</label>
             <input
+              id="email"
+              name="email"
               type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
               required
+              suppressHydrationWarning
               className="w-full bg-card border border-card-border rounded-lg px-3.5 py-2.5 text-foreground text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               placeholder="you@fretbox.in"
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-foreground mb-1.5">Password</label>
+            <label htmlFor="password" className="block text-sm font-medium text-foreground mb-1.5">Password</label>
             <input
+              id="password"
+              name="password"
               type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
               required
               minLength={8}
+              suppressHydrationWarning
               className="w-full bg-card border border-card-border rounded-lg px-3.5 py-2.5 text-foreground text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
               placeholder="min 8 characters"
             />
           </div>
+
+          <input name="flow" type="hidden" value="signUp" />
 
           {error && (
             <p className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
@@ -77,7 +84,7 @@ export default function SignUpPage() {
 
         <p className="text-center text-muted-foreground text-xs mt-6">
           Already have an account?{" "}
-          <a href="/sign-in" className="text-indigo-400 hover:text-indigo-300">Sign in</a>
+          <Link href="/sign-in" className="text-indigo-400 hover:text-indigo-300">Sign in</Link>
         </p>
       </div>
     </div>

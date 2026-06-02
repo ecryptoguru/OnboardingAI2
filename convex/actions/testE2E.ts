@@ -10,9 +10,9 @@ export const runChain = action({
     success: boolean; 
     universityId: Id<"universities"> | null; 
     website: string | null;
-    scoring: any;
+    scoring: unknown;
     personalization: string | null;
-    autoReply: any;
+    autoReply: unknown;
   }> => {
     const { api, internal } = await import("../_generated/api");
     console.log(`[E2E] 🚀 Starting deep test chain for: ${args.universityName}`);
@@ -33,9 +33,9 @@ export const runChain = action({
     })) as string | null;
     console.log(`[E2E] 🌐 Discovered website: ${website}`);
 
-    let scoring: any = null;
-    let personalization: any = null;
-    let autoReply: any = null;
+    let scoring: Record<string, unknown> | null = null;
+    let personalization: string | null = null;
+    let autoReply: Record<string, unknown> | null = null;
 
     if (website) {
       // 3. Trigger Enrichment Chain via Orchestrator
@@ -66,7 +66,7 @@ export const runChain = action({
         universityId,
         stakeholderId
       });
-      console.log(`[E2E] 🤖 Generated Opener: "${personalization ? (personalization as string).substring(0, 50) : "null"}..."`);
+      console.log(`[E2E] 🤖 Generated Opener: "${personalization ? personalization.substring(0, 50) : "null"}..."`);
 
       // Cleanup: remove the test stakeholder immediately after use
       await ctx.runMutation(internal.stakeholders.removeInternal, { id: stakeholderId });

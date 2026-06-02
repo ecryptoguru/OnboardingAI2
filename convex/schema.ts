@@ -58,6 +58,14 @@ export default defineSchema({
         hostelites_male: v.optional(v.number()),
         hostelites_female: v.optional(v.number()),
         source: v.optional(v.string()), // e.g., "AISHE 2022-23 AND NAAC SSR 2023"
+        // ── Data quality tracking ────────────────────────────────────────────
+        data_quality: v.optional(
+          v.union(
+            v.literal("verified"),   // From official government source
+            v.literal("partial"),      // Some fields from gov, some inferred
+            v.literal("inferred"),     // No government source found
+          ),
+        ),
         // ── NIRF program-wise block ───────────────────────────────────────────
         nirf_source: v.optional(v.string()), // e.g., "NIRF 2023-24"
         nirf_total: v.optional(v.number()), // sum across all programs
@@ -99,6 +107,24 @@ export default defineSchema({
     sources: v.optional(v.array(v.string())),
     last_enriched_source: v.optional(v.string()),
     change_log: v.optional(v.array(v.string())),
+    // Contact provenance tracking
+    email_source: v.optional(
+      v.union(
+        v.literal("scraped"),    // Found on website via scraper
+        v.literal("regex"),      // Extracted via regex from page content
+        v.literal("inferred"),   // Guessed from role + domain pattern
+        v.literal("linkedin"),   // From LinkedIn enrichment
+        v.literal("manual"),     // User-added
+      ),
+    ),
+    phone_source: v.optional(
+      v.union(
+        v.literal("scraped"),
+        v.literal("regex"),
+        v.literal("inferred"),
+        v.literal("manual"),
+      ),
+    ),
     created_at: v.number(),
     updated_at: v.optional(v.number()),
   })

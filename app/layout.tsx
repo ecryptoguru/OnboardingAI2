@@ -22,6 +22,16 @@ const poppins = Poppins({
 export const metadata: Metadata = {
   title: "Fretbox Outreach AI",
   description: "AI-powered university outreach automation",
+  openGraph: {
+    title: "Fretbox Outreach AI",
+    description: "Automate your university outreach with intelligent insights, automated enrichment, and data-driven engagement.",
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Fretbox Outreach AI",
+    description: "Automate your university outreach with intelligent insights, automated enrichment, and data-driven engagement.",
+  },
 };
 
 export default function RootLayout({

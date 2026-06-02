@@ -4,8 +4,14 @@ import { useQuery, useAction } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { useState } from "react";
 import { Id, Doc } from "../../../../convex/_generated/dataModel";
-import { UniversityDetail } from "../../../../components/UniversityDetail";
+import dynamic from "next/dynamic";
 import { useRequireGeminiKey } from "../../../../components/ApiKeyModal";
+import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+
+const UniversityDetail = dynamic(
+  () => import("../../../../components/UniversityDetail").then((mod) => mod.UniversityDetail),
+  { ssr: false }
+);
 
 export default function EnrichmentPage() {
   const [selectedId, setSelectedId] = useState<Id<"universities"> | null>(null);
@@ -25,8 +31,20 @@ export default function EnrichmentPage() {
   const [selectedNewIds, setSelectedNewIds] = useState<Set<Id<"universities">>>(
     new Set(),
   );
+  const [searchQuery, setSearchQuery] = useState("");
 
   const { withKeyCheck, keyModal } = useRequireGeminiKey();
+
+  const filterBySearch = (unis: Doc<"universities">[] | undefined) => {
+    if (!searchQuery.trim() || !unis) return unis;
+    const q = searchQuery.toLowerCase().trim();
+    return unis.filter(
+      (u) =>
+        u.university_name.toLowerCase().includes(q) ||
+        (u.city && u.city.toLowerCase().includes(q)) ||
+        (u.state && u.state.toLowerCase().includes(q)),
+    );
+  };
 
   const toggleSelection = (e: React.MouseEvent, id: Id<"universities">) => {
     e.stopPropagation();
@@ -38,13 +56,17 @@ export default function EnrichmentPage() {
     });
   };
 
+  const filteredNew = filterBySearch(
+    newUniversities?.filter((u: Doc<"universities">) => !enrichingIds.has(u._id)),
+  );
+
   const selectAll = () => {
-    if (!newUniversities) return;
-    if (selectedNewIds.size === newUniversities.length) {
+    if (!filteredNew) return;
+    if (selectedNewIds.size === filteredNew.length) {
       setSelectedNewIds(new Set());
     } else {
       setSelectedNewIds(
-        new Set(newUniversities.map((u: Doc<"universities">) => u._id)),
+        new Set(filteredNew.map((u: Doc<"universities">) => u._id)),
       );
     }
   };
@@ -185,7 +207,19 @@ export default function EnrichmentPage() {
           </p>
         </div>
 
-        {selectedNewIds.size > 0 && (
+        <div className="flex items-center gap-3">
+          <div className="relative w-64">
+            <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <input
+              type="text"
+              placeholder="Search universities..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-9 pr-4 py-1.5 bg-card border border-card-border/80 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 shadow-sm transition-shadow text-foreground placeholder:text-muted-foreground placeholder:font-medium"
+            />
+          </div>
+
+          {selectedNewIds.size > 0 && (
           <button
             type="button"
             onClick={withKeyCheck(handleDeepEnrichSelected)}
@@ -207,6 +241,7 @@ export default function EnrichmentPage() {
             </svg>
           </button>
         )}
+        </div>
       </div>
 
       <div className="flex-1 min-h-0 flex gap-6 overflow-hidden">
@@ -224,13 +259,13 @@ export default function EnrichmentPage() {
                   : 0}
               </span>
             </h2>
-            {newUniversities && newUniversities.length > 0 && (
+            {filteredNew && filteredNew.length > 0 && (
               <button
                 type="button"
                 onClick={selectAll}
                 className="text-xs text-blue-400 hover:text-blue-300 font-medium transition-colors"
               >
-                {selectedNewIds.size === newUniversities.length
+                {selectedNewIds.size === filteredNew.length
                   ? "Deselect All"
                   : "Select All"}
               </button>
@@ -247,9 +282,7 @@ export default function EnrichmentPage() {
                     className="h-20 bg-muted/30 border border-card-border/50 animate-pulse rounded-xl mb-3"
                   />
                 ))
-            ) : newUniversities.filter(
-                (u: Doc<"universities">) => !enrichingIds.has(u._id),
-              ).length === 0 ? (
+            ) : filteredNew && filteredNew.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center p-6 text-muted-foreground">
                 <div className="w-12 h-12 bg-card rounded-full flex items-center justify-center mb-3">
                   <svg
@@ -266,14 +299,14 @@ export default function EnrichmentPage() {
                     />
                   </svg>
                 </div>
-                <p className="text-sm">No pending universities.</p>
+                <p className="text-sm">
+                  {searchQuery.trim() ? "No matches found." : "No pending universities."}
+                </p>
               </div>
             ) : (
-              newUniversities
-                .filter((u: Doc<"universities">) => !enrichingIds.has(u._id))
-                .map((uni: Doc<"universities">) =>
-                  renderUniversityCard(uni, true, false),
-                )
+              filteredNew?.map((uni: Doc<"universities">) =>
+                renderUniversityCard(uni, true, false),
+              )
             )}
           </div>
         </div>
@@ -310,9 +343,8 @@ export default function EnrichmentPage() {
                 <p className="text-sm">No enrichment processes running.</p>
               </div>
             ) : (
-              newUniversities
-                ?.filter((u: Doc<"universities">) => enrichingIds.has(u._id))
-                .map((uni: Doc<"universities">) =>
+              filterBySearch(newUniversities?.filter((u: Doc<"universities">) => enrichingIds.has(u._id)))
+                ?.map((uni: Doc<"universities">) =>
                   renderUniversityCard(uni, true, true),
                 )
             )}
@@ -362,9 +394,10 @@ export default function EnrichmentPage() {
                 </p>
               </div>
             ) : (
-              enrichedUniversities.map((uni: Doc<"universities">) =>
-                renderUniversityCard(uni, false, false),
-              )
+              filterBySearch(enrichedUniversities)
+                ?.map((uni: Doc<"universities">) =>
+                  renderUniversityCard(uni, false, false),
+                )
             )}
           </div>
         </div>
@@ -382,18 +415,6 @@ export default function EnrichmentPage() {
       />
       {keyModal}
 
-      <style jsx global>{`
-        .custom-scrollbar::-webkit-scrollbar {
-          width: 6px;
-        }
-        .custom-scrollbar::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .custom-scrollbar::-webkit-scrollbar-thumb {
-          background-color: #3f3f46;
-          border-radius: 10px;
-        }
-      `}</style>
     </div>
   );
 }

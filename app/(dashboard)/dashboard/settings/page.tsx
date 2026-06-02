@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
-import { KeyIcon, ArrowPathIcon, EyeIcon, EyeSlashIcon } from "@heroicons/react/24/outline";
+import { KeyIcon, ArrowPathIcon, EyeIcon, EyeSlashIcon, TrashIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
 import { PasswordInput, TestResultAlert, StatusBadge } from "./components";
 
 export default function SettingsPage() {
@@ -74,6 +74,12 @@ export default function SettingsPage() {
   const [showFirecrawlKey, setShowFirecrawlKey] = useState(false);
   const [showSendgridKey, setShowSendgridKey] = useState(false);
   const [showGoogleCalendarJson, setShowGoogleCalendarJson] = useState(false);
+
+  const wipeEverything = useMutation(api.wipeAllData.wipeEverything);
+  const [isWiping, setIsWiping] = useState(false);
+  const [wipeConfirmText, setWipeConfirmText] = useState("");
+  const [showWipeModal, setShowWipeModal] = useState(false);
+  const [wipeResult, setWipeResult] = useState<{ success?: boolean; message?: string } | null>(null);
 
   const testSerperKeyFn = useAction(api.settings.testSerperKey);
   const testFirecrawlKeyFn = useAction(api.settings.testFirecrawlKey);
@@ -1166,6 +1172,124 @@ export default function SettingsPage() {
           </form>
         </div>
       </div>
+
+      {/* Danger Zone */}
+      <div className="bg-card rounded-2xl border border-red-500/20 shadow-sm overflow-hidden">
+        <div className="p-8 space-y-7">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-red-500/10 rounded-xl border border-red-500/20 shadow-sm">
+                <ExclamationTriangleIcon className="w-6 h-6 text-red-400" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-foreground tracking-tight">
+                  Danger Zone
+                </h2>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Irreversible actions that permanently delete data.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between p-5 bg-red-500/5 rounded-xl border border-red-500/10">
+            <div>
+              <h3 className="text-sm font-semibold text-foreground">Wipe All Enrichment & Outreach Data</h3>
+              <p className="text-xs text-muted-foreground mt-1 max-w-md">
+                Deletes all stakeholders, signals, sequences, emails, replies, proposals, and priority scores. Resets all university enrichment fields (demographics, website, stage, etc.) while keeping university names and UGC status intact.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setShowWipeModal(true);
+                setWipeConfirmText("");
+                setWipeResult(null);
+              }}
+              disabled={isWiping}
+              className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98] flex items-center gap-2"
+            >
+              <TrashIcon className="w-4 h-4" />
+              Wipe Everything
+            </button>
+          </div>
+
+          {wipeResult && (
+            <div className={`p-4 rounded-xl border text-sm ${wipeResult.success ? "bg-emerald-500/5 border-emerald-500/20 text-emerald-400" : "bg-red-500/5 border-red-500/20 text-red-400"}`}>
+              {wipeResult.message}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Wipe Confirmation Modal */}
+      {showWipeModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+          <div className="bg-card border border-card-border rounded-2xl shadow-xl max-w-md w-full p-6 space-y-5 animate-in fade-in zoom-in duration-200">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-red-500/10 rounded-lg border border-red-500/20">
+                <ExclamationTriangleIcon className="w-5 h-5 text-red-400" />
+              </div>
+              <h3 className="text-lg font-semibold text-foreground">Confirm Data Wipe</h3>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              This will permanently delete all stakeholders, signals, sequences, emails, replies, proposals, and priority scores. All universities will be reset to &quot;new&quot; stage with enrichment fields cleared.
+            </p>
+            <p className="text-sm text-foreground font-medium">
+              Type <span className="font-mono bg-muted px-1.5 py-0.5 rounded text-xs">WIPE ALL DATA</span> to confirm:
+            </p>
+            <input
+              type="text"
+              value={wipeConfirmText}
+              onChange={(e) => setWipeConfirmText(e.target.value)}
+              placeholder="WIPE ALL DATA"
+              className="w-full h-11 rounded-lg border border-card-border bg-background px-4 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:border-red-500 transition-all shadow-sm"
+            />
+            <div className="flex items-center gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowWipeModal(false)}
+                className="px-5 py-2.5 bg-muted hover:bg-muted/80 text-foreground text-sm font-semibold rounded-lg transition-all border border-card-border"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (wipeConfirmText !== "WIPE ALL DATA") return;
+                  setIsWiping(true);
+                  try {
+                    const result = await wipeEverything({});
+                    setWipeResult({
+                      success: true,
+                      message: `Wiped ${result.universitiesReset} universities, deleted ${result.stakeholdersDeleted} stakeholders, ${result.signalsDeleted} signals, ${result.sequencesDeleted} sequences, ${result.emailsDeleted} emails, ${result.repliesDeleted} replies, ${result.proposalsDeleted} proposals, ${result.priorityScoresDeleted} scores.`,
+                    });
+                    setShowWipeModal(false);
+                  } catch (err: unknown) {
+                    setWipeResult({
+                      success: false,
+                      message: `Error: ${(err as Error).message || "Wipe failed"}`,
+                    });
+                    setShowWipeModal(false);
+                  } finally {
+                    setIsWiping(false);
+                    setWipeConfirmText("");
+                  }
+                }}
+                disabled={wipeConfirmText !== "WIPE ALL DATA" || isWiping}
+                className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white text-sm font-semibold rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98] flex items-center gap-2"
+              >
+                {isWiping ? (
+                  <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                ) : (
+                  <TrashIcon className="w-4 h-4" />
+                )}
+                {isWiping ? "Wiping..." : "Confirm Wipe"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

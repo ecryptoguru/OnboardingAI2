@@ -45,6 +45,28 @@ function deobfuscate(cipher: string): string {
   return out;
 }
 
+/**
+ * Trims whitespace and rejects values that contain non-printable or invalid
+ * HTTP header characters (common when a key was corrupted or copy-pasted
+ * with trailing newlines). Returns null if the value is unusable.
+ */
+function sanitizeApiKey(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  // Reject if any character is outside printable ASCII + high-byte range
+  // (undici throws "invalid X-API-KEY header" on control chars / newlines)
+  for (let i = 0; i < trimmed.length; i++) {
+    const code = trimmed.charCodeAt(i);
+    // Allow tab (9), space (32)–tilde (126), and extended ASCII (128–255)
+    if (code === 9) continue;
+    if (code >= 32 && code <= 126) continue;
+    if (code >= 128 && code <= 255) continue;
+    return null;
+  }
+  return trimmed;
+}
+
 export const getGeminiKeyStatus = query({
   handler: async (ctx) => {
     await ensureAuth(ctx);
@@ -68,10 +90,10 @@ export const getInternalGeminiKey = internalQuery({
       .first();
     if (doc?.value) {
       try {
-        return deobfuscate(doc.value);
+        return sanitizeApiKey(deobfuscate(doc.value)) ?? sanitizeApiKey(doc.value);
       } catch {
         // Fallback for plaintext legacy keys
-        return doc.value;
+        return sanitizeApiKey(doc.value);
       }
     }
     return process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY ?? null;
@@ -263,9 +285,9 @@ export const getInternalSerperKey = internalQuery({
       .first();
     if (doc?.value) {
       try {
-        return deobfuscate(doc.value);
+        return sanitizeApiKey(deobfuscate(doc.value)) ?? sanitizeApiKey(doc.value);
       } catch {
-        return doc.value;
+        return sanitizeApiKey(doc.value);
       }
     }
     // Fallback to env var if not yet seeded into settings DB
@@ -342,9 +364,9 @@ export const getInternalFirecrawlKey = internalQuery({
       .first();
     if (doc?.value) {
       try {
-        return deobfuscate(doc.value);
+        return sanitizeApiKey(deobfuscate(doc.value)) ?? sanitizeApiKey(doc.value);
       } catch {
-        return doc.value;
+        return sanitizeApiKey(doc.value);
       }
     }
     return process.env.FIRECRAWL_API_KEY ?? null;
@@ -441,9 +463,9 @@ export const getInternalSendgridKey = internalQuery({
       .first();
     if (doc?.value) {
       try {
-        return deobfuscate(doc.value);
+        return sanitizeApiKey(deobfuscate(doc.value)) ?? sanitizeApiKey(doc.value);
       } catch {
-        return doc.value;
+        return sanitizeApiKey(doc.value);
       }
     }
     return process.env.SENDGRID_API_KEY ?? null;
@@ -519,9 +541,9 @@ export const getInternalGoogleCalendarJson = internalQuery({
       .first();
     if (doc?.value) {
       try {
-        return deobfuscate(doc.value);
+        return sanitizeApiKey(deobfuscate(doc.value)) ?? sanitizeApiKey(doc.value);
       } catch {
-        return doc.value;
+        return sanitizeApiKey(doc.value);
       }
     }
     return process.env.GOOGLE_SERVICE_ACCOUNT_JSON ?? null;
@@ -614,9 +636,9 @@ export const getInternalGoogleCalendarId = internalQuery({
       .first();
     if (doc?.value) {
       try {
-        return deobfuscate(doc.value);
+        return sanitizeApiKey(deobfuscate(doc.value)) ?? sanitizeApiKey(doc.value) ?? "primary";
       } catch {
-        return doc.value;
+        return sanitizeApiKey(doc.value) ?? "primary";
       }
     }
     return process.env.GOOGLE_CALENDAR_ID ?? "primary";
@@ -698,9 +720,9 @@ export const getInternalSendgridFromEmail = internalQuery({
       .first();
     if (doc?.value) {
       try {
-        return deobfuscate(doc.value);
+        return sanitizeApiKey(deobfuscate(doc.value)) ?? sanitizeApiKey(doc.value) ?? "outreach@fretbox.in";
       } catch {
-        return doc.value;
+        return sanitizeApiKey(doc.value) ?? "outreach@fretbox.in";
       }
     }
     return process.env.SENDGRID_FROM_EMAIL ?? "outreach@fretbox.in";

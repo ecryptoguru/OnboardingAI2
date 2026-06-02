@@ -74,10 +74,10 @@ http.route({
   method: "POST",
   handler: httpAction(async (ctx, req) => {
     const secret = process.env.SENDGRID_WEBHOOK_SECRET;
-    const isProd = process.env.NODE_ENV === "production";
+    const requireAuth = process.env.REQUIRE_WEBHOOK_AUTH === "true";
 
-    if (isProd && !secret) {
-      console.error("[SendGrid] Missing SENDGRID_WEBHOOK_SECRET in production. Rejecting request.");
+    if (requireAuth && !secret) {
+      console.error("[SendGrid] Missing SENDGRID_WEBHOOK_SECRET with REQUIRE_WEBHOOK_AUTH=true. Rejecting request.");
       return new Response("Configuration Error", { status: 500 });
     }
 
@@ -146,10 +146,10 @@ http.route({
   handler: httpAction(async (ctx, req) => {
     // Shared-secret verification (set EMAIL_WEBHOOK_SECRET in Convex env vars)
     const secret = process.env.EMAIL_WEBHOOK_SECRET;
-    const isProd = process.env.NODE_ENV === "production";
+    const requireAuth = process.env.REQUIRE_WEBHOOK_AUTH === "true";
 
-    if (isProd && !secret) {
-      console.error("[Inbound Reply] Missing EMAIL_WEBHOOK_SECRET in production. Rejecting request.");
+    if (requireAuth && !secret) {
+      console.error("[Inbound Reply] Missing EMAIL_WEBHOOK_SECRET with REQUIRE_WEBHOOK_AUTH=true. Rejecting request.");
       return new Response("Configuration Error", { status: 500 });
     }
 
@@ -269,10 +269,10 @@ http.route({
     // Google Calendar push notifications include a channel token for verification
     const channelToken = req.headers.get("x-goog-channel-token") ?? "";
     const expectedToken = process.env.GOOGLE_CALENDAR_WEBHOOK_TOKEN;
-    const isProd = process.env.NODE_ENV === "production";
+    const requireAuth = process.env.REQUIRE_WEBHOOK_AUTH === "true";
 
-    if (isProd && !expectedToken) {
-      console.error("[GoogleCalendar] Missing GOOGLE_CALENDAR_WEBHOOK_TOKEN in production. Rejecting request.");
+    if (requireAuth && !expectedToken) {
+      console.error("[GoogleCalendar] Missing GOOGLE_CALENDAR_WEBHOOK_TOKEN with REQUIRE_WEBHOOK_AUTH=true. Rejecting request.");
       return new Response("Configuration Error", { status: 500 });
     }
 
@@ -319,9 +319,9 @@ http.route({
   path: "/test/run-pipeline",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
-    const isProd = process.env.NODE_ENV === "production";
-    if (isProd) {
-      console.error("[Pipeline Test] Attempted to run test pipeline in production. Forbidden.");
+    const testDisabled = process.env.DISABLE_TEST_ENDPOINTS === "true";
+    if (testDisabled) {
+      console.error("[Pipeline Test] Test endpoints are disabled. Forbidden.");
       return new Response("Forbidden", { status: 403 });
     }
 

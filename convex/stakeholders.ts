@@ -7,18 +7,33 @@ import {
 import { v } from "convex/values";
 import { validateAuth } from "./lib/auth_utils";
 
-// Normalize name for fuzzy matching: remove titles, dots, spaces, commas, hyphens
+// Source type aliases matching the schema union types
+type EmailSource = "scraped" | "regex" | "inferred" | "linkedin" | "manual";
+type PhoneSource = "scraped" | "regex" | "inferred" | "manual";
+
+// Normalize name for fuzzy matching: remove titles, then split into tokens,
+// sort alphabetically, and join. This makes "R. P. Singh" and "Rajesh Prasad Singh"
+// share the same surname token even if initials differ.
 function normalizeName(n?: string) {
-  return (n || "")
+  const raw = (n || "")
     .toLowerCase()
-    .replace(/\b(dr|prof|professor|mr|mrs|ms|shri|smt|er|engg)\b/g, "")
-    .replace(/[.\s,-]/g, "")
-    .trim();
+    .replace(/\b(dr|prof|professor|mr|mrs|ms|shri|smt|er|engg|arch)\b/g, "")
+    .replace(/\./g, " ")
+    .replace(/[,\-]/g, " ");
+  const tokens = raw.split(/\s+/).filter((t) => t.length > 0);
+  return tokens.sort().join(" ");
+}
+
+// Extract the last token as surname for looser matching
+function surnameOf(n?: string): string {
+  const tokens = (n || "").toLowerCase().replace(/\./g, " ").split(/\s+/).filter((t) => t.length > 0);
+  return tokens[tokens.length - 1] || "";
 }
 
 export const listByUniversity = query({
   args: { university_id: v.id("universities") },
   handler: async (ctx, args) => {
+    await validateAuth(ctx);
     const all = await ctx.db
       .query("stakeholders")
       .withIndex("by_university", (q) =>
@@ -43,6 +58,7 @@ export const listByUniversity = query({
 export const getPrimary = query({
   args: { university_id: v.id("universities") },
   handler: async (ctx, args) => {
+    await validateAuth(ctx);
     // Try indexed primary lookup first
     const primary = await ctx.db
       .query("stakeholders")
@@ -198,6 +214,8 @@ export const bulkInsertInternal = internalMutation({
         role: v.optional(v.string()),
         email: v.optional(v.string()),
         phone: v.optional(v.string()),
+        email_source: v.optional(v.string()),
+        phone_source: v.optional(v.string()),
       }),
     ),
     source: v.optional(v.string()),
@@ -213,6 +231,8 @@ export const bulkInsertInternal = internalMutation({
         phone: st.phone,
         is_primary: false,
         source: args.source || "scraper",
+        email_source: st.email_source as EmailSource | undefined,
+        phone_source: st.phone_source as PhoneSource | undefined,
         created_at: now,
       });
     }
@@ -229,6 +249,8 @@ export const upsertBulkInternal = internalMutation({
         email: v.optional(v.string()),
         phone: v.optional(v.string()),
         linkedin_url: v.optional(v.string()),
+        email_source: v.optional(v.string()),
+        phone_source: v.optional(v.string()),
       }),
     ),
     source: v.optional(v.string()),
@@ -331,13 +353,37 @@ export const upsertBulkInternal = internalMutation({
           return true;
 
         // Fuzzy name match (e.g. "Dr. D. P. Singh" vs "D P Singh")
+        // NEW: also check that roles aren't conflicting — two different people
+        // can share a similar name but have different roles.
         if (
           st.name &&
           e.name &&
           normalizeName(e.name) === normalizeName(st.name) &&
           normalizeName(st.name).length > 3
-        )
+        ) {
+          const roleA = (e.role || "").toLowerCase().trim();
+          const roleB = (st.role || "").toLowerCase().trim();
+          // If both have roles and they're clearly different → different person
+          if (roleA && roleB && roleA !== roleB &&
+              !roleA.includes(roleB) && !roleB.includes(roleA)) {
+            return false;
+          }
           return true;
+        }
+
+        // Surname-only fallback: if names share the same last word and one is short
+        // (e.g., "Prof. Singh" vs "V.K. Singh") — only match if roles are identical or empty
+        if (
+          st.name &&
+          e.name &&
+          surnameOf(st.name) === surnameOf(e.name) &&
+          surnameOf(st.name).length > 2
+        ) {
+          const roleA = (e.role || "").toLowerCase().trim();
+          const roleB = (st.role || "").toLowerCase().trim();
+          if (roleA && roleB && roleA !== roleB) return false;
+          return true;
+        }
 
         // Fallback: If both have a role, and the roles match exactly (e.g., both "Vice Chancellor"),
         // treat it as an update to the SAME stakeholder position rather than duplicating the role.
@@ -371,6 +417,8 @@ export const upsertBulkInternal = internalMutation({
           phone: st.phone ?? match.phone,
           linkedin_url: st.linkedin_url ?? match.linkedin_url,
           source: args.source ?? match.source ?? "deep_enrichment",
+          email_source: (st.email_source as EmailSource | undefined) ?? match.email_source,
+          phone_source: (st.phone_source as PhoneSource | undefined) ?? match.phone_source,
         });
       } else {
         // Insert new
@@ -385,6 +433,8 @@ export const upsertBulkInternal = internalMutation({
           linkedin_url: st.linkedin_url,
           is_primary: false,
           source: args.source || "deep_enrichment",
+          email_source: st.email_source as EmailSource | undefined,
+          phone_source: st.phone_source as PhoneSource | undefined,
           created_at: now,
         });
       }

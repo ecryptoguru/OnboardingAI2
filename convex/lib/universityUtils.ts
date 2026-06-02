@@ -85,6 +85,8 @@ export function namesMatch(a: string, b: string): boolean {
   const getAcronym = (s: string) =>
     s
       .toLowerCase()
+      .replace(/&/g, " and ")
+      .replace(/[^a-z0-9\s,]/g, "")
       .split(/[\s,]+/)
       .filter(
         (w) =>

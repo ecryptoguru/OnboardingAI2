@@ -4,15 +4,16 @@ import { api, internal } from "./_generated/api";
 const crons = cronJobs();
 
 // ─── Outreach cadence: check for due sequences every hour ─────────────────────
-crons.hourly(
+crons.interval(
   "process-outreach-sequences",
-  { minuteUTC: 0 },
+  { hours: 1 },
   api.actions.outreach.processDueSequences,
+  {},
 );
 
-crons.weekly(
+crons.cron(
   "weekly-cleanup",
-  { dayOfWeek: "sunday", hourUTC: 0, minuteUTC: 0 },
+  "0 0 * * 0",
   internal.proposals.cleanupOldProposalsInternal,
   { days: 30 },
 );

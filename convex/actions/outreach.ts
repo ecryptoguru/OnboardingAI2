@@ -4,7 +4,7 @@ import { action } from "../_generated/server";
 import { internal, api } from "../_generated/api";
 import { v } from "convex/values";
 import { TEMPLATES } from "../lib/emailTemplates";
-import * as Sentry from "@sentry/nextjs";
+import * as Sentry from "@sentry/node";
 
 /**
  * Orchestrates a single step in an outreach sequence.
@@ -168,7 +168,7 @@ export const processDueSequences = action({
   args: {},
   handler: async (ctx): Promise<{ processed: number }> => {
     // 1. Get all due sequences
-    const dueSequences = await ctx.runQuery(api.sequences.getDue, {});
+    const dueSequences = await ctx.runQuery(internal.sequences.getDueInternal, {});
     if (!dueSequences || dueSequences.length === 0) return { processed: 0 };
     console.log(`[Cron] Found ${dueSequences.length} due sequences`);
 

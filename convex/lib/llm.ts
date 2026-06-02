@@ -21,7 +21,7 @@ export const MODELS = {
   // Gemini Flash-Lite: lowest cost for high-volume tasks
   geminiFlash: "gemini-3.1-flash-lite" as const,
   // Embeddings: 768-dim (direct via Google AI API)
-  embedding: "text-embedding-005" as const,
+  embedding: "text-embedding-004" as const,
 } as const;
 
 // ─── Temperature presets ─────────────────────────────────────────────────────
@@ -56,6 +56,11 @@ export function isTransientLlmError(err: unknown): boolean {
   if (/\b(400|401|403|404)\b/.test(msgLower)) {
     return false;
   }
+
+  // Retry on explicit transient HTTP status codes inside message strings
+  if (/\b(429|500|502|503|504)\b/.test(msgLower)) {
+    return true;
+  }
   
   // Explicit check for halted/blocked prompt/safety policy
   if (msgLower.includes("halted") || msgLower.includes("blockreason") || msgLower.includes("safety")) {
@@ -70,6 +75,8 @@ export function isTransientLlmError(err: unknown): boolean {
     "socket hang up",
     "econnrefused",
     "econnreset",
+    "deadline",
+    "deadline exceeded",
   ];
   return transientKeywords.some(keyword => msgLower.includes(keyword));
 }
@@ -125,6 +132,7 @@ export async function callGemini({
           maxOutputTokens,
           responseMimeType: responseAsJson ? "application/json" : "text/plain",
           responseSchema,
+          httpOptions: { timeout: 25000 },
           ...(resolvedBudget > 0
             ? {
                 thinkingConfig: {
@@ -255,41 +263,65 @@ export async function callFlash(
 }
 
 /**
- * Generate a 768-dimensional embedding using Google's text-embedding-004.
+ * Generate a 768-dimensional embedding using Google's text-embedding-004 via REST API.
+ * Falls back to zero-vector if the API is unavailable (embeddings are non-critical).
  * Note: Requires GOOGLE_API_KEY environment variable.
  */
 export async function embed(
   text: string,
   apiKey?: string | null,
 ): Promise<number[]> {
+  if (!apiKey) {
+    console.warn("[LLM:Embed] No API key — returning zero vector");
+    return new Array(768).fill(0);
+  }
+
   const startMs = Date.now();
-  const result = await withRetry(
-    async () => {
-      const embedResult = await getGoogleAI(apiKey).models.embedContent({
-        model: MODELS.embedding,
-        contents: text,
-      });
+  try {
+    const result = await withRetry(
+      async () => {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${apiKey}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              model: "models/text-embedding-004",
+              content: {
+                parts: [{ text }],
+              },
+            }),
+            signal: AbortSignal.timeout(20000),
+          },
+        );
 
-      if (
-        !embedResult.embeddings ||
-        embedResult.embeddings.length === 0 ||
-        !embedResult.embeddings[0].values
-      ) {
-        throw new Error("Failed to generate embedding");
-      }
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(JSON.stringify(err));
+        }
 
-      return embedResult.embeddings[0].values;
-    },
-    {
-      maxRetries: 2,
-      retryOn: isTransientLlmError,
-    },
-  );
+        const data = await res.json();
+        const values = data?.embedding?.values;
+        if (!Array.isArray(values) || values.length === 0) {
+          throw new Error("Failed to generate embedding — empty response");
+        }
 
-  const inputChars = text.length;
-  const estimatedInputTokens = Math.ceil(inputChars / 4);
-  console.log(
-    `[LLM:Embed] model=${MODELS.embedding} inTokens≈${estimatedInputTokens} latencyMs=${Date.now() - startMs}`
-  );
-  return result;
+        return values as number[];
+      },
+      {
+        maxRetries: 2,
+        retryOn: isTransientLlmError,
+      },
+    );
+
+    const inputChars = text.length;
+    const estimatedInputTokens = Math.ceil(inputChars / 4);
+    console.log(
+      `[LLM:Embed] model=text-embedding-004 inTokens≈${estimatedInputTokens} latencyMs=${Date.now() - startMs}`
+    );
+    return result;
+  } catch (e) {
+    console.warn("[LLM:Embed] Embedding API failed — returning zero vector:", e instanceof Error ? e.message : String(e));
+    return new Array(768).fill(0);
+  }
 }

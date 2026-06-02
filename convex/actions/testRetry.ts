@@ -5,7 +5,7 @@ import { withRetry } from "../lib/utils";
 
 export const testRetryBypass = action({
   args: {},
-  handler: async (): Promise<any> => {
+  handler: async (): Promise<unknown> => {
     let attempts = 0;
     
     console.log("[TestRetry] Starting retry test...");
@@ -19,7 +19,7 @@ export const testRetryBypass = action({
         // Fail twice, succeed on 3rd
         if (attempts < 3) {
           const error = new Error("Simulated 429 Too Many Requests");
-          (error as any).status = 429;
+          (error as unknown as Record<string, unknown>).status = 429;
           throw error;
         }
         
