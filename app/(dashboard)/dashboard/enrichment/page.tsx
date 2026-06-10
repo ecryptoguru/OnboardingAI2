@@ -9,8 +9,11 @@ import { useRequireGeminiKey } from "../../../../components/ApiKeyModal";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
 
 const UniversityDetail = dynamic(
-  () => import("../../../../components/UniversityDetail").then((mod) => mod.UniversityDetail),
-  { ssr: false }
+  () =>
+    import("../../../../components/UniversityDetail").then(
+      (mod) => mod.UniversityDetail,
+    ),
+  { ssr: false },
 );
 
 export default function EnrichmentPage() {
@@ -23,7 +26,7 @@ export default function EnrichmentPage() {
   });
 
   const runDeepEnrichment = useAction(
-    api.actions.deepEnrichment.runDeepEnrichment,
+    api.actions.orchestrator.runEnrichmentChain,
   );
   const [enrichingIds, setEnrichingIds] = useState<Set<Id<"universities">>>(
     new Set(),
@@ -57,7 +60,9 @@ export default function EnrichmentPage() {
   };
 
   const filteredNew = filterBySearch(
-    newUniversities?.filter((u: Doc<"universities">) => !enrichingIds.has(u._id)),
+    newUniversities?.filter(
+      (u: Doc<"universities">) => !enrichingIds.has(u._id),
+    ),
   );
 
   const selectAll = () => {
@@ -220,27 +225,27 @@ export default function EnrichmentPage() {
           </div>
 
           {selectedNewIds.size > 0 && (
-          <button
-            type="button"
-            onClick={withKeyCheck(handleDeepEnrichSelected)}
-            className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors flex items-center gap-2"
-          >
-            <span>Deep Enrich {selectedNewIds.size} Selected</span>
-            <svg
-              className="w-4 h-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
+            <button
+              type="button"
+              onClick={withKeyCheck(handleDeepEnrichSelected)}
+              className="bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium px-4 py-2 rounded-lg shadow-sm transition-colors flex items-center gap-2"
             >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M13 10V3L4 14h7v7l9-11h-7z"
-              />
-            </svg>
-          </button>
-        )}
+              <span>Deep Enrich {selectedNewIds.size} Selected</span>
+              <svg
+                className="w-4 h-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M13 10V3L4 14h7v7l9-11h-7z"
+                />
+              </svg>
+            </button>
+          )}
         </div>
       </div>
 
@@ -300,7 +305,9 @@ export default function EnrichmentPage() {
                   </svg>
                 </div>
                 <p className="text-sm">
-                  {searchQuery.trim() ? "No matches found." : "No pending universities."}
+                  {searchQuery.trim()
+                    ? "No matches found."
+                    : "No pending universities."}
                 </p>
               </div>
             ) : (
@@ -343,10 +350,13 @@ export default function EnrichmentPage() {
                 <p className="text-sm">No enrichment processes running.</p>
               </div>
             ) : (
-              filterBySearch(newUniversities?.filter((u: Doc<"universities">) => enrichingIds.has(u._id)))
-                ?.map((uni: Doc<"universities">) =>
-                  renderUniversityCard(uni, true, true),
-                )
+              filterBySearch(
+                newUniversities?.filter((u: Doc<"universities">) =>
+                  enrichingIds.has(u._id),
+                ),
+              )?.map((uni: Doc<"universities">) =>
+                renderUniversityCard(uni, true, true),
+              )
             )}
           </div>
         </div>
@@ -394,10 +404,10 @@ export default function EnrichmentPage() {
                 </p>
               </div>
             ) : (
-              filterBySearch(enrichedUniversities)
-                ?.map((uni: Doc<"universities">) =>
+              filterBySearch(enrichedUniversities)?.map(
+                (uni: Doc<"universities">) =>
                   renderUniversityCard(uni, false, false),
-                )
+              )
             )}
           </div>
         </div>
@@ -414,7 +424,6 @@ export default function EnrichmentPage() {
         onClose={() => setSelectedId(null)}
       />
       {keyModal}
-
     </div>
   );
 }

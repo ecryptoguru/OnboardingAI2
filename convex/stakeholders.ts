@@ -6,6 +6,15 @@ import {
 } from "./_generated/server";
 import { v } from "convex/values";
 import { validateAuth } from "./lib/auth_utils";
+import {
+  canonicalizeInstitutionEmail,
+  choosePreferredRoleEmail,
+  isRoleBasedInstitutionEmail,
+  isSingletonRole,
+  normalizeInstitutionDomain,
+  normalizeStakeholderRole,
+} from "./lib/contactInference";
+import { normalizeIndianPhone } from "./lib/phone";
 
 // Source type aliases matching the schema union types
 type EmailSource = "scraped" | "regex" | "inferred" | "linkedin" | "manual";
@@ -26,8 +35,41 @@ function normalizeName(n?: string) {
 
 // Extract the last token as surname for looser matching
 function surnameOf(n?: string): string {
-  const tokens = (n || "").toLowerCase().replace(/\./g, " ").split(/\s+/).filter((t) => t.length > 0);
+  const tokens = (n || "")
+    .toLowerCase()
+    .replace(/\./g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length > 0);
   return tokens[tokens.length - 1] || "";
+}
+
+function stakeholderSignalScore(st: {
+  name?: string;
+  phone?: string;
+  linkedin_url?: string;
+  email?: string;
+}): number {
+  return (
+    (st.name ? 5 : 0) +
+    (st.phone ? 3 : 0) +
+    (st.linkedin_url ? 2 : 0) +
+    (st.email ? 1 : 0)
+  );
+}
+
+function sanitizeRole(role?: string): string | undefined {
+  return normalizeStakeholderRole(role);
+}
+
+function sanitizePhone(phone?: string): string | undefined {
+  return phone ? normalizeIndianPhone(phone) ?? undefined : undefined;
+}
+
+function sanitizeEmail(
+  email: string | undefined,
+  institutionDomain?: string,
+): string | undefined {
+  return canonicalizeInstitutionEmail(email, institutionDomain);
 }
 
 export const listByUniversity = query({
@@ -105,7 +147,12 @@ export const upsertByEmail = mutation({
   },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
-    const normalizedEmail = args.email.toLowerCase().trim();
+    const university = await ctx.db.get(args.university_id);
+    const institutionDomain = normalizeInstitutionDomain(university?.website);
+    const normalizedEmail =
+      sanitizeEmail(args.email, institutionDomain) ?? args.email.toLowerCase().trim();
+    const normalizedRole = sanitizeRole(args.role);
+    const normalizedPhone = sanitizePhone(args.phone);
     const existing = await ctx.db
       .query("stakeholders")
       .withIndex("by_email", (q) => q.eq("email", normalizedEmail))
@@ -114,8 +161,8 @@ export const upsertByEmail = mutation({
     if (existing) {
       await ctx.db.patch(existing._id, {
         name: args.name ?? existing.name,
-        role: args.role ?? existing.role,
-        phone: args.phone ?? existing.phone,
+        role: normalizedRole ?? existing.role,
+        phone: normalizedPhone ?? existing.phone,
         linkedin_url: args.linkedin_url ?? existing.linkedin_url,
       });
       return existing._id;
@@ -125,8 +172,8 @@ export const upsertByEmail = mutation({
       university_id: args.university_id,
       email: normalizedEmail,
       name: args.name,
-      role: args.role,
-      phone: args.phone,
+      role: normalizedRole,
+      phone: normalizedPhone,
       linkedin_url: args.linkedin_url,
       is_primary: args.is_primary ?? false,
       source: args.source ?? "scraper",
@@ -147,9 +194,13 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
+    const university = await ctx.db.get(args.university_id);
+    const institutionDomain = normalizeInstitutionDomain(university?.website);
     return await ctx.db.insert("stakeholders", {
       ...args,
-      email: args.email ? args.email.toLowerCase().trim() : undefined,
+      role: sanitizeRole(args.role),
+      email: sanitizeEmail(args.email, institutionDomain),
+      phone: sanitizePhone(args.phone),
       created_at: Date.now(),
     });
   },
@@ -166,7 +217,17 @@ export const update = mutation({
   handler: async (ctx, args) => {
     await validateAuth(ctx);
     const { id, ...fields } = args;
-    if (fields.email) fields.email = fields.email.toLowerCase().trim();
+    const existing = await ctx.db.get(id);
+    const university = existing
+      ? await ctx.db.get(existing.university_id)
+      : null;
+    const institutionDomain = normalizeInstitutionDomain(university?.website);
+    if (fields.email) {
+      fields.email =
+        sanitizeEmail(fields.email, institutionDomain) ??
+        fields.email.toLowerCase().trim();
+    }
+    if (fields.role) fields.role = sanitizeRole(fields.role);
     await ctx.db.patch(id, fields);
   },
 });
@@ -196,9 +257,13 @@ export const insertInternal = internalMutation({
     source: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
+    const university = await ctx.db.get(args.university_id);
+    const institutionDomain = normalizeInstitutionDomain(university?.website);
     return await ctx.db.insert("stakeholders", {
       ...args,
-      email: args.email ? args.email.toLowerCase().trim() : undefined,
+      role: sanitizeRole(args.role),
+      email: sanitizeEmail(args.email, institutionDomain),
+      phone: sanitizePhone(args.phone),
       is_primary: false,
       created_at: Date.now(),
     });
@@ -222,13 +287,15 @@ export const bulkInsertInternal = internalMutation({
   },
   handler: async (ctx, args) => {
     const now = Date.now();
+    const university = await ctx.db.get(args.university_id);
+    const institutionDomain = normalizeInstitutionDomain(university?.website);
     for (const st of args.stakeholders) {
       await ctx.db.insert("stakeholders", {
         university_id: args.university_id,
         name: st.name,
-        role: st.role,
-        email: st.email ? st.email.toLowerCase().trim() : undefined,
-        phone: st.phone,
+        role: sanitizeRole(st.role),
+        email: sanitizeEmail(st.email, institutionDomain),
+        phone: sanitizePhone(st.phone),
         is_primary: false,
         source: args.source || "scraper",
         email_source: st.email_source as EmailSource | undefined,
@@ -268,19 +335,16 @@ export const upsertBulkInternal = internalMutation({
 
     // Get university details for domain matching
     const university = await ctx.db.get(args.university_id);
-    const uniWebsite =
-      university?.website
-        ?.toLowerCase()
-        .replace(/^https?:\/\//, "")
-        .replace(/\/$/, "")
-        .replace(/^www\./, "") || "";
-    const uniDomain = uniWebsite.split("/")[0];
+    const uniDomain = normalizeInstitutionDomain(university?.website);
 
     for (const st of args.stakeholders) {
+      const normalizedRole = sanitizeRole(st.role);
+      const normalizedPhone = sanitizePhone(st.phone);
+      const sanitizedInputEmail = sanitizeEmail(st.email, uniDomain);
       // 1. Block generic placeholder emails and names
-      const emailLower = (st.email || "").toLowerCase();
+      const emailLower = (sanitizedInputEmail || "").toLowerCase();
       const nameLower = (st.name || "").toLowerCase();
-      const roleLower = (st.role || "").toLowerCase();
+      const roleLower = (normalizedRole || "").toLowerCase();
 
       // UGC Check (Strictly forbidden as per user rule)
       const isUGC =
@@ -290,17 +354,32 @@ export const upsertBulkInternal = internalMutation({
 
       const isPlaceholder =
         isUGC ||
-        (st.email &&
-          (emailLower.includes("@example.") || emailLower.includes("test@"))) ||
+        (sanitizedInputEmail &&
+          (emailLower.includes("@example.") ||
+            emailLower.includes("test@") ||
+            /^(admin|info|contact|noreply|webmaster|support|help|feedback)@/.test(
+              emailLower,
+            ) ||
+            emailLower.includes("placeholder@") ||
+            emailLower.includes("dummy@"))) ||
         (st.name &&
           (nameLower.startsWith("test ") ||
             nameLower === "test" ||
             nameLower === "unknown" ||
             nameLower === "n/a" ||
-            nameLower === "none"));
+            nameLower === "none" ||
+            /^(admin|info|contact|webmaster|administrator|office|department)$/.test(
+              nameLower,
+            )));
 
       // Name-Role Collision: If name matches role, it's just a position title, not a person
-      const isNameRoleCollision = st.name && st.role && nameLower === roleLower;
+      const isNameRoleCollision =
+        !!st.name &&
+        !!normalizedRole &&
+        (nameLower === roleLower ||
+          nameLower.includes(roleLower) ||
+          roleLower.includes(nameLower) ||
+          /\boffice\b/.test(nameLower));
 
       if (isPlaceholder || isNameRoleCollision) {
         console.log(
@@ -310,8 +389,8 @@ export const upsertBulkInternal = internalMutation({
       }
 
       // 2. Domain matching: strictly prevent cross-institution data (e.g. IIT BBS email for XIM)
-      let validatedEmail = st.email;
-      if (st.email && uniDomain) {
+      let validatedEmail = sanitizedInputEmail;
+      if (sanitizedInputEmail && uniDomain) {
         const emailDomain = emailLower.split("@")[1];
         const genericDomains = [
           "gmail.com",
@@ -332,7 +411,7 @@ export const upsertBulkInternal = internalMutation({
 
         if (!isMatch) {
           console.warn(
-            `[stakeholders] Rejecting cross-domain email: ${st.email} for university domain: ${uniDomain}`,
+            `[stakeholders] Rejecting cross-domain email: ${sanitizedInputEmail} for university domain: ${uniDomain}`,
           );
           validatedEmail = undefined;
         }
@@ -342,9 +421,9 @@ export const upsertBulkInternal = internalMutation({
 
       const match = existingStakeholders.find((e) => {
         if (
-          st.email &&
+          validatedEmail &&
           e.email &&
-          e.email.toLowerCase() === st.email.toLowerCase()
+          sanitizeEmail(e.email, uniDomain) === validatedEmail
         )
           return true;
 
@@ -361,11 +440,9 @@ export const upsertBulkInternal = internalMutation({
           normalizeName(e.name) === normalizeName(st.name) &&
           normalizeName(st.name).length > 3
         ) {
-          const roleA = (e.role || "").toLowerCase().trim();
-          const roleB = (st.role || "").toLowerCase().trim();
-          // If both have roles and they're clearly different → different person
-          if (roleA && roleB && roleA !== roleB &&
-              !roleA.includes(roleB) && !roleB.includes(roleA)) {
+          const roleA = normalizeStakeholderRole(e.role) || "";
+          const roleB = normalizeStakeholderRole(normalizedRole) || "";
+          if (roleA && roleB && roleA !== roleB) {
             return false;
           }
           return true;
@@ -379,26 +456,33 @@ export const upsertBulkInternal = internalMutation({
           surnameOf(st.name) === surnameOf(e.name) &&
           surnameOf(st.name).length > 2
         ) {
-          const roleA = (e.role || "").toLowerCase().trim();
-          const roleB = (st.role || "").toLowerCase().trim();
-          if (roleA && roleB && roleA !== roleB) return false;
-          return true;
+          const roleA = normalizeStakeholderRole(e.role) || "";
+          const roleB = normalizeStakeholderRole(normalizedRole) || "";
+          if (!roleA && !roleB) return true;
+          return false;
         }
 
         // Fallback: If both have a role, and the roles match exactly (e.g., both "Vice Chancellor"),
         // treat it as an update to the SAME stakeholder position rather than duplicating the role.
         if (
-          st.role &&
+          normalizedRole &&
           e.role &&
-          e.role.toLowerCase() === st.role.toLowerCase()
+          sanitizeRole(e.role)?.toLowerCase() === normalizedRole.toLowerCase()
         ) {
-          // Only match by role if they don't have explicitly conflicting emails
+          if (isSingletonRole(normalizedRole)) {
+            return true;
+          }
+          const canMergeRoleAliases =
+            isRoleBasedInstitutionEmail(validatedEmail, normalizedRole, uniDomain) &&
+            isRoleBasedInstitutionEmail(e.email, e.role, uniDomain);
           if (
-            st.email &&
+            validatedEmail &&
             e.email &&
-            st.email.toLowerCase() !== e.email.toLowerCase()
-          )
+            validatedEmail !== sanitizeEmail(e.email, uniDomain) &&
+            !canMergeRoleAliases
+          ) {
             return false;
+          }
           return true;
         }
 
@@ -408,28 +492,35 @@ export const upsertBulkInternal = internalMutation({
       if (match) {
         // Prefer NEW enrichment data over old — this fills in missing emails/phones from re-enrichment
         // Preserve existing email if the new one was rejected by domain check
+        const mergedEmail = choosePreferredRoleEmail(
+          normalizedRole ?? match.role,
+          sanitizeEmail(match.email, uniDomain),
+          validatedEmail,
+          uniDomain,
+        );
+        const mergedPhone = normalizedPhone ?? sanitizePhone(match.phone);
         await ctx.db.patch(match._id, {
           name: st.name ?? match.name,
-          role: st.role ?? match.role,
-          email: validatedEmail
-            ? validatedEmail.toLowerCase().trim()
-            : match.email,
-          phone: st.phone ?? match.phone,
+          role: normalizedRole ?? sanitizeRole(match.role) ?? match.role,
+          email: mergedEmail ? mergedEmail.toLowerCase().trim() : match.email,
+          phone: mergedPhone,
           linkedin_url: st.linkedin_url ?? match.linkedin_url,
           source: args.source ?? match.source ?? "deep_enrichment",
-          email_source: (st.email_source as EmailSource | undefined) ?? match.email_source,
-          phone_source: (st.phone_source as PhoneSource | undefined) ?? match.phone_source,
+          email_source:
+            (st.email_source as EmailSource | undefined) ?? match.email_source,
+          phone_source:
+            (st.phone_source as PhoneSource | undefined) ?? match.phone_source,
         });
       } else {
         // Insert new
         await ctx.db.insert("stakeholders", {
           university_id: args.university_id,
           name: st.name,
-          role: st.role,
+          role: normalizedRole,
           email: validatedEmail
             ? validatedEmail.toLowerCase().trim()
             : undefined,
-          phone: st.phone,
+          phone: normalizedPhone,
           linkedin_url: st.linkedin_url,
           is_primary: false,
           source: args.source || "deep_enrichment",
@@ -500,9 +591,100 @@ export const updateLinkedinInternal = internalMutation({
   args: {
     id: v.id("stakeholders"),
     linkedin_url: v.string(),
+    name: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    await ctx.db.patch(args.id, { linkedin_url: args.linkedin_url });
+    const existing = await ctx.db.get(args.id);
+    const university = existing
+      ? await ctx.db.get(existing.university_id)
+      : null;
+    const institutionDomain = normalizeInstitutionDomain(university?.website);
+    await ctx.db.patch(args.id, {
+      linkedin_url: args.linkedin_url,
+      name: args.name ?? existing?.name,
+      role: sanitizeRole(existing?.role) ?? existing?.role,
+      phone: sanitizePhone(existing?.phone),
+      email: sanitizeEmail(existing?.email, institutionDomain) ?? existing?.email,
+    });
+  },
+});
+
+export const dedupeSingletonRoleContactsInternal = internalMutation({
+  args: { university_id: v.id("universities") },
+  handler: async (ctx, args) => {
+    const university = await ctx.db.get(args.university_id);
+    const uniDomain = normalizeInstitutionDomain(university?.website);
+    const stakeholders = await ctx.db
+      .query("stakeholders")
+      .withIndex("by_university", (q) =>
+        q.eq("university_id", args.university_id),
+      )
+      .collect();
+
+    const grouped = new Map<string, typeof stakeholders>();
+    for (const stakeholder of stakeholders) {
+      const normalizedRole = sanitizeRole(stakeholder.role);
+      const normalizedPhone = sanitizePhone(stakeholder.phone);
+      const normalizedEmail = sanitizeEmail(stakeholder.email, uniDomain);
+      if (
+        normalizedRole !== stakeholder.role ||
+        normalizedPhone !== stakeholder.phone ||
+        normalizedEmail !== stakeholder.email
+      ) {
+        await ctx.db.patch(stakeholder._id, {
+          role: normalizedRole ?? stakeholder.role,
+          phone: normalizedPhone,
+          email: normalizedEmail,
+        });
+      }
+      const role = normalizedRole?.trim();
+      if (!role || !isSingletonRole(role)) continue;
+      const bucket = grouped.get(role) ?? [];
+      bucket.push({
+        ...stakeholder,
+        role,
+        phone: normalizedPhone,
+        email: normalizedEmail,
+      });
+      grouped.set(role, bucket);
+    }
+
+    for (const [role, group] of grouped) {
+      if (group.length <= 1) continue;
+
+      const sorted = [...group].sort((a, b) => {
+        const preferredEmail = choosePreferredRoleEmail(
+          role,
+          a.email,
+          b.email,
+          uniDomain,
+        );
+        if (preferredEmail === b.email) return 1;
+        if (preferredEmail === a.email) return -1;
+        return stakeholderSignalScore(b) - stakeholderSignalScore(a);
+      });
+      const keeper = sorted[0];
+      let mergedName = keeper.name;
+      let mergedEmail = keeper.email;
+      let mergedPhone = keeper.phone;
+      let mergedLinkedin = keeper.linkedin_url;
+      for (const duplicate of sorted.slice(1)) {
+        if (duplicate._id === keeper._id) continue;
+        mergedName = mergedName || duplicate.name;
+        mergedEmail =
+          choosePreferredRoleEmail(role, mergedEmail, duplicate.email, uniDomain) ||
+          mergedEmail;
+        mergedPhone = mergedPhone || duplicate.phone;
+        mergedLinkedin = mergedLinkedin || duplicate.linkedin_url;
+        await ctx.db.patch(keeper._id, {
+          name: mergedName,
+          email: mergedEmail,
+          phone: mergedPhone,
+          linkedin_url: mergedLinkedin,
+        });
+        await ctx.db.delete(duplicate._id);
+      }
+    }
   },
 });
 

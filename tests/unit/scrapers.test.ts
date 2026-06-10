@@ -2,47 +2,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert";
-
-/**
- * Mirror of extractContactsFromMarkdown from convex/lib/scrapers.ts
- */
-function extractContactsFromMarkdown(markdown: string): {
-  emails: string[];
-  phones: string[];
-} {
-  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
-  const phoneRegex = /(?:\+91[-\s]?|0[-\s]?)?\d(?:[\d\s-]){8,12}/g;
-
-  const emails = new Set(markdown.match(emailRegex) || []);
-  const rawPhones = new Set(markdown.match(phoneRegex) || []);
-
-  const validPhones = new Set<string>();
-  for (const p of rawPhones) {
-    const digits = p.replace(/\D/g, "");
-    if (digits.length >= 10) {
-      if (digits.length === 10 && /^[6-9]/.test(digits)) {
-        validPhones.add(`+91${digits}`);
-      } else if (
-        digits.length === 11 &&
-        digits.startsWith("0") &&
-        /^[6-9]/.test(digits.slice(1))
-      ) {
-        validPhones.add(`+91${digits.slice(1)}`);
-      } else if (digits.length === 11 && digits.startsWith("0")) {
-        validPhones.add(`+91-${digits.slice(1, 3)}-${digits.slice(3)}`);
-      } else if (digits.startsWith("91") && digits.length === 12) {
-        validPhones.add(`+${digits}`);
-      } else if (digits.length > 10) {
-        validPhones.add(`+${digits}`);
-      }
-    }
-  }
-
-  return {
-    emails: Array.from(emails),
-    phones: Array.from(validPhones),
-  };
-}
+import { extractContactsFromMarkdown } from "../../convex/lib/scrapers";
 
 describe("extractContactsFromMarkdown - Emails", () => {
   it("should extract institutional emails", () => {
@@ -123,6 +83,18 @@ describe("extractContactsFromMarkdown - Phones", () => {
     assert.strictEqual(result.phones.includes("+919876543210"), true);
     assert.strictEqual(result.phones.includes("+918765432109"), true);
   });
+
+  it("should reject malformed 13-digit values that are not Indian phones", () => {
+    const result = extractContactsFromMarkdown("VC: +2025052218580");
+    assert.deepStrictEqual(result.phones, []);
+  });
+
+  it("should ignore embedded timestamps while keeping valid phones", () => {
+    const result = extractContactsFromMarkdown(
+      "Updated: 2025052218580, VC: 9876543210",
+    );
+    assert.deepStrictEqual(result.phones, ["+919876543210"]);
+  });
 });
 
 describe("extractContactsFromMarkdown - Combined", () => {
@@ -166,10 +138,7 @@ describe("filterPdfUrls - PDF document detection", () => {
     /hostel/i,
   ];
 
-  function filterPdfUrls(
-    links: { url: string }[],
-    maxUrls = 3,
-  ): string[] {
+  function filterPdfUrls(links: { url: string }[], maxUrls = 3): string[] {
     const scored = links
       .filter((link) => link.url.toLowerCase().endsWith(".pdf"))
       .map((link) => {
@@ -206,7 +175,10 @@ describe("filterPdfUrls - PDF document detection", () => {
     assert.strictEqual(result.length, 2);
     // iqac/mandatory-disclosure.pdf scores 3 (pdf + iqac + mandatory-disclosure)
     // naac-ssr-report.pdf scores 2 (pdf + naac-ssr)
-    assert.strictEqual(result[0], "https://uni.edu/iqac/mandatory-disclosure.pdf");
+    assert.strictEqual(
+      result[0],
+      "https://uni.edu/iqac/mandatory-disclosure.pdf",
+    );
   });
 
   it("should ignore non-PDF URLs", () => {
@@ -221,8 +193,8 @@ describe("filterPdfUrls - PDF document detection", () => {
   it("should score multi-match PDFs higher and return sorted", () => {
     const links = [
       { url: "https://uni.edu/naac-ssr-aishe.pdf" }, // matches 3 patterns
-      { url: "https://uni.edu/hostel-rules.pdf" },   // matches 2 patterns
-      { url: "https://uni.edu/random.pdf" },         // matches 1 pattern
+      { url: "https://uni.edu/hostel-rules.pdf" }, // matches 2 patterns
+      { url: "https://uni.edu/random.pdf" }, // matches 1 pattern
     ];
     const result = filterPdfUrls(links);
     assert.strictEqual(result[0], "https://uni.edu/naac-ssr-aishe.pdf");

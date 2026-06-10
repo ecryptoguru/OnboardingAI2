@@ -22,7 +22,16 @@ export default function SignUpPage() {
     })
       .catch((err: Error) => {
         console.error(err);
-        setError("Could not create account. Try a different email.");
+        const message = err.message?.toLowerCase() || "";
+        if (message.includes("already") || message.includes("exist")) {
+          setError("An account with this email already exists. Please sign in instead.");
+        } else if (message.includes("password")) {
+          setError(err.message);
+        } else if (err.message) {
+          setError(err.message);
+        } else {
+          setError("Could not create account. Try a different email.");
+        }
       })
       .finally(() => {
         setLoading(false);

@@ -9,7 +9,7 @@ yarn-error.log*
 out/
 .vscode
 .agents
-.windsurf
+.devin
 
 # Convex
 .convex/

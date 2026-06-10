@@ -2,6 +2,7 @@ import { mutation, query, action, internalQuery, internalMutation } from "./_gen
 import { v } from "convex/values";
 import { GoogleGenAI } from "@google/genai";
 import { getAuthUserId } from "@convex-dev/auth/server";
+import { MODELS } from "./lib/llm";
 
 // ─── Auth helper ───────────────────────────────────────────────────────────
 // Centralises the dev-bypass check used across every settings endpoint.
@@ -133,13 +134,10 @@ export const testGeminiKey = action({
   handler: async (ctx, args) => {
     await ensureAuth(ctx);
 
-    // Keep in sync with MODELS.gemini in convex/lib/llm.ts
-    const TEST_MODEL = "gemini-3.5-flash";
-
     try {
-      const ai = new GoogleGenAI({ apiKey: args.apiKey });
+      const ai = new GoogleGenAI({ apiKey: args.apiKey, httpOptions: { timeout: 15000 } });
       const response = await ai.models.generateContent({
-        model: TEST_MODEL,
+        model: MODELS.gemini,
         contents: "Return only the word OK",
         config: { maxOutputTokens: 5 },
       });
@@ -322,6 +320,31 @@ export const setSerperKey = mutation({
   },
 });
 
+export const setSerperKeyInternal = internalMutation({
+  args: { apiKey: v.string() },
+  handler: async (ctx, args) => {
+    if (args.apiKey.length < 32) {
+      throw new Error("Invalid Serper API Key format");
+    }
+
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "serperApiKey"))
+      .first();
+
+    const cipher = obfuscate(args.apiKey);
+    if (doc) {
+      await ctx.db.patch(doc._id, { value: cipher });
+    } else {
+      await ctx.db.insert("systemSettings", {
+        configKey: "serperApiKey",
+        value: cipher,
+      });
+    }
+    return { success: true };
+  },
+});
+
 export const removeSerperKey = mutation({
   args: {},
   handler: async (ctx) => {
@@ -339,6 +362,7 @@ export const removeSerperKey = mutation({
   },
 });
 
+// Temporary internal mutation to clear old Serper key without auth
 // --- FIRECRAWL API KEY ---
 
 export const getFirecrawlKeyStatus = query({

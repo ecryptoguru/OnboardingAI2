@@ -1,6 +1,10 @@
 "use node";
 
-import * as Sentry from "@sentry/nextjs";
+import * as Sentry from "@sentry/node";
+import {
+  isValidIndianPhone as isValidIndianPhoneShared,
+  normalizeIndianPhone as normalizeIndianPhoneShared,
+} from "./phone";
 
 /**
  * Strip adversarial / prompt-injection patterns from any text before it reaches an LLM.
@@ -112,7 +116,11 @@ export async function withRetry<T>(
       }
 
       // Do NOT retry on safety/policy blocks
-      if (msgLower.includes("halted") || msgLower.includes("blockreason") || msgLower.includes("safety")) {
+      if (
+        msgLower.includes("halted") ||
+        msgLower.includes("blockreason") ||
+        msgLower.includes("safety")
+      ) {
         return false;
       }
 
@@ -130,7 +138,7 @@ export async function withRetry<T>(
         "econnrefused",
         "econnreset",
       ];
-      return transientKeywords.some(keyword => msgLower.includes(keyword));
+      return transientKeywords.some((keyword) => msgLower.includes(keyword));
     },
   } = options;
 
@@ -167,7 +175,12 @@ export async function withRetry<T>(
 /**
  * Validate that a number lies within a specified range.
  */
-export function validateRange(value: number, min: number, max: number, label = "Value"): number {
+export function validateRange(
+  value: number,
+  min: number,
+  max: number,
+  label = "Value",
+): number {
   if (typeof value !== "number" || Number.isNaN(value)) {
     throw new Error(`${label} must be a number`);
   }
@@ -234,31 +247,17 @@ export function isValidEmail(email: string): boolean {
   return /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(email);
 }
 
+export function normalizeIndianPhone(phone: string): string | null {
+  return normalizeIndianPhoneShared(phone);
+}
+
 /**
  * Validate Indian phone numbers.
  * Accepts: +91XXXXXXXXXX, +91-XXXX-XXXXXX, 0XXXXXXXXXX, XXXXXXXXXX (10-digit mobile)
  * Also accepts landlines with STD code.
  */
 export function isValidIndianPhone(phone: string): boolean {
-  if (!phone || typeof phone !== "string") return false;
-  const digits = phone.replace(/\D/g, "");
-  // +91XXXXXXXXXX (12 digits starting with 91)
-  if (digits.length === 12 && digits.startsWith("91")) {
-    return /^[6-9]/.test(digits.slice(2));
-  }
-  // 0XXXXXXXXXX (11 digits starting with 0) — mobile with trunk prefix
-  if (digits.length === 11 && digits.startsWith("0")) {
-    return /^[6-9]/.test(digits.slice(1));
-  }
-  // XXXXXXXXXX (10 digits) — standard mobile
-  if (digits.length === 10) {
-    return /^[6-9]/.test(digits);
-  }
-  // Landline: 0 + 2-4 digit STD + 6-8 digit number
-  if (digits.length >= 8 && digits.length <= 11 && digits.startsWith("0")) {
-    return true;
-  }
-  return false;
+  return isValidIndianPhoneShared(phone);
 }
 
 /**
@@ -270,8 +269,20 @@ export function toNum(val: unknown): number | undefined {
   if (val === null || val === undefined) return undefined;
   let normalized = val;
   if (typeof val === "string") {
-    normalized = val.replace(/,/g, "").trim();
-    if (normalized === "") return undefined;
+    const trimmed = val.trim();
+    if (trimmed === "") return undefined;
+
+    // Fast path: plain numeric strings
+    const noComma = trimmed.replace(/,/g, "");
+    if (/^-?\d+(\.\d+)?$/.test(noComma)) {
+      normalized = noComma;
+    } else {
+      // Recovery path: extract first numeric token from mixed strings
+      // e.g. "25,000 students", "Male: 12,345", "Hostelites=8765"
+      const token = trimmed.match(/-?\d[\d,]*(?:\.\d+)?/)?.[0];
+      if (!token) return undefined;
+      normalized = token.replace(/,/g, "");
+    }
   }
   const n = Number(normalized);
   return isNaN(n) ? undefined : n;
@@ -285,6 +296,98 @@ export function toNum(val: unknown): number | undefined {
 export function toNumStrict(val: unknown): number | undefined {
   const n = toNum(val);
   return n === 0 ? undefined : n;
+}
+
+export interface ParsedDemographics {
+  total_students?: number;
+  total_students_male?: number;
+  total_students_female?: number;
+  hostelites?: number;
+  hostelites_male?: number;
+  hostelites_female?: number;
+  day_scholars?: number;
+  day_scholars_male?: number;
+  day_scholars_female?: number;
+}
+
+/**
+ * Parse common demographics fields from mixed/tabular text.
+ * This is a deterministic fallback for cases where LLM extraction returns nulls.
+ */
+export function extractDemographicsFromText(text: string): ParsedDemographics {
+  const out: ParsedDemographics = {};
+  const compactText = text.replace(/\s+/g, " ");
+
+  function assignGenderSplit(
+    label: "hostelites" | "day_scholars",
+    maleValue?: number,
+    femaleValue?: number,
+  ) {
+    if (maleValue && maleValue > 50) {
+      out[`${label}_male` as "hostelites_male" | "day_scholars_male"] =
+        maleValue;
+    }
+    if (femaleValue && femaleValue > 50) {
+      out[`${label}_female` as "hostelites_female" | "day_scholars_female"] =
+        femaleValue;
+    }
+    if (maleValue && femaleValue) {
+      const derivedTotal = maleValue + femaleValue;
+      if (
+        !out[label] ||
+        typeof out[label] !== "number" ||
+        out[label]! < derivedTotal
+      ) {
+        out[label] = derivedTotal;
+      }
+    }
+  }
+
+  const maleFemalePair = text.match(
+    /male[^0-9]{0,25}([\d,]+)[^a-zA-Z0-9]{0,30}female[^0-9]{0,25}([\d,]+)/i,
+  );
+  const male = maleFemalePair ? toNum(maleFemalePair[1]) : undefined;
+  const female = maleFemalePair ? toNum(maleFemalePair[2]) : undefined;
+  if (male && male > 100) out.total_students_male = male;
+  if (female && female > 100) out.total_students_female = female;
+
+  const totalMatch = text.match(
+    /(total\s+(?:students|enrol+ed|enrollment|student\s+strength)|overall\s+students?)[^0-9]{0,25}([\d,]+)/i,
+  );
+  const total = totalMatch ? toNum(totalMatch[2]) : undefined;
+  if (total && total > 500) out.total_students = total;
+
+  const hostelMatch = text.match(
+    /(hostel(?:ite|er)?s?|hostellers?|hostel\s+strength|residential\s+students?)[^0-9]{0,25}([\d,]+)/i,
+  );
+  const hostel = hostelMatch ? toNumStrict(hostelMatch[2]) : undefined;
+  if (hostel && hostel > 100) out.hostelites = hostel;
+
+  const dayMatch = text.match(
+    /(day[\s-]*scholars?|non[\s-]*residential)[^0-9]{0,25}([\d,]+)/i,
+  );
+  const day = dayMatch ? toNumStrict(dayMatch[2]) : undefined;
+  if (day && day > 100) out.day_scholars = day;
+
+  const hostelSplitMatch = compactText.match(
+    /(hostel(?:ite|er)?s?|hostellers?|residential students?)[^0-9]{0,40}(?:male|boys)[^0-9]{0,20}([\d,]+)[^a-zA-Z0-9]{0,30}(?:female|girls)[^0-9]{0,20}([\d,]+)/i,
+  );
+  assignGenderSplit(
+    "hostelites",
+    hostelSplitMatch ? toNumStrict(hostelSplitMatch[2]) : undefined,
+    hostelSplitMatch ? toNumStrict(hostelSplitMatch[3]) : undefined,
+  );
+
+  const dayScholarSplitMatch = compactText.match(
+    /(day[\s-]*scholars?|non[\s-]*residential(?: students?)?)[^0-9]{0,40}male[^0-9]{0,20}([\d,]+)[^a-zA-Z0-9]{0,30}female[^0-9]{0,20}([\d,]+)/i,
+  );
+  assignGenderSplit(
+    "day_scholars",
+    dayScholarSplitMatch ? toNumStrict(dayScholarSplitMatch[2]) : undefined,
+    dayScholarSplitMatch ? toNumStrict(dayScholarSplitMatch[3]) : undefined,
+  );
+
+  return out;
 }
 
 /**

@@ -1,44 +1,32 @@
-/**
- * Quick sanity test for the embedding function.
- * Run: npx tsx tests/unit/embed.test.ts
- */
+"use node";
 
+import { describe, it } from "node:test";
+import assert from "node:assert";
 import { embed } from "../../convex/lib/llm";
 
-async function test() {
+describe("Embedding integration sanity", () => {
   const apiKey = process.env.GOOGLE_API_KEY || process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    console.error("❌ No GOOGLE_API_KEY or GEMINI_API_KEY env var set");
-    process.exit(1);
-  }
 
-  console.log("Testing embedding with text-embedding-005...");
-  try {
-    const vector = await embed("Kalinga Institute of Industrial Technology is a university in Odisha, India.", apiKey);
+  it(
+    "returns a 768-dim float array for a real text",
+    { skip: !apiKey },
+    async () => {
+      const vector = await embed(
+        "Kalinga Institute of Industrial Technology is a university in Odisha, India.",
+        apiKey,
+      );
 
-    if (!Array.isArray(vector)) {
-      console.error("❌ Result is not an array");
-      process.exit(1);
-    }
+      assert.ok(Array.isArray(vector), "Result should be an array");
+      assert.strictEqual(vector.length, 768, "Should have 768 dimensions");
 
-    if (vector.length !== 768) {
-      console.error(`❌ Expected 768 dimensions, got ${vector.length}`);
-      process.exit(1);
-    }
+      const hasInvalid = vector.some((v) => !Number.isFinite(v));
+      assert.strictEqual(hasInvalid, false, "Vector should not contain non-finite values");
+    },
+  );
 
-    // Sanity: values should be floats, not NaN or Infinity
-    const hasInvalid = vector.some((v) => !Number.isFinite(v));
-    if (hasInvalid) {
-      console.error("❌ Vector contains non-finite values");
-      process.exit(1);
-    }
-
-    console.log(`✅ Embedding OK: ${vector.length} dims, sample=[${vector.slice(0, 5).map((v) => v.toFixed(4)).join(", ")}...]`);
-    process.exit(0);
-  } catch (err) {
-    console.error("❌ embed() threw:", err);
-    process.exit(1);
-  }
-}
-
-test();
+  it("returns a zero vector when no API key is provided", async () => {
+    const vector = await embed("Some text", null);
+    assert.strictEqual(vector.length, 768);
+    assert.ok(vector.every((v) => v === 0), "All values should be zero");
+  });
+});

@@ -18,11 +18,13 @@ interface Phase {
 
 const phases: Phase[] = [
   { name: "discovery", order: 0, writesDemographics: false },
-  { name: "phase1_parallel", order: 1, writesDemographics: false },
-  { name: "inferContacts", order: 2, writesDemographics: false },
-  { name: "governmentData", order: 3, writesDemographics: true },
-  { name: "deepEnrichment", order: 4, writesDemographics: true },
-  { name: "scoring", order: 5, writesDemographics: false },
+  { name: "websiteReadyGate", order: 1, writesDemographics: false },
+  { name: "phase1_parallel", order: 2, writesDemographics: false },
+  { name: "inferContacts", order: 3, writesDemographics: false },
+  { name: "governmentData", order: 4, writesDemographics: true },
+  { name: "deepEnrichment", order: 5, writesDemographics: true },
+  { name: "socialMediaPostDeep", order: 6, writesDemographics: false },
+  { name: "scoring", order: 7, writesDemographics: false },
 ];
 
 function getPhase(name: string): Phase | undefined {
@@ -36,6 +38,14 @@ describe("Orchestrator Phase Sequencing", () => {
     assert.ok(gov.order < deep.order, "govData must precede deepEnrichment");
   });
 
+  it("website readiness gate runs before website-dependent phases", () => {
+    const gate = getPhase("websiteReadyGate")!;
+    const phase1 = getPhase("phase1_parallel")!;
+    const deep = getPhase("deepEnrichment")!;
+    assert.ok(gate.order < phase1.order);
+    assert.ok(gate.order < deep.order);
+  });
+
   it("both govData and deepEnrichment are marked as demographic writers", () => {
     const gov = getPhase("governmentData")!;
     const deep = getPhase("deepEnrichment")!;
@@ -45,7 +55,10 @@ describe("Orchestrator Phase Sequencing", () => {
 
   it("no other phase writes demographics", () => {
     const writers = phases.filter(
-      (p) => p.writesDemographics && p.name !== "governmentData" && p.name !== "deepEnrichment",
+      (p) =>
+        p.writesDemographics &&
+        p.name !== "governmentData" &&
+        p.name !== "deepEnrichment",
     );
     assert.deepStrictEqual(writers, []);
   });
@@ -64,6 +77,27 @@ describe("Orchestrator Phase Sequencing", () => {
     const gov = getPhase("governmentData")!;
     const deep = getPhase("deepEnrichment")!;
     assert.ok(scoring.order > gov.order, "scoring must run after govData");
-    assert.ok(scoring.order > deep.order, "scoring must run after deepEnrichment");
+    assert.ok(
+      scoring.order > deep.order,
+      "scoring must run after deepEnrichment",
+    );
+  });
+
+  it("post-deep social enrichment runs after deepEnrichment", () => {
+    const postDeep = getPhase("socialMediaPostDeep")!;
+    const deep = getPhase("deepEnrichment")!;
+    assert.ok(
+      postDeep.order > deep.order,
+      "socialMediaPostDeep must run after deepEnrichment",
+    );
+  });
+
+  it("keeps government data step before deep enrichment for fallback safety", () => {
+    const gov = getPhase("governmentData")!;
+    const deep = getPhase("deepEnrichment")!;
+    assert.ok(
+      gov.order < deep.order,
+      "grounding-only gov fallback must still run before deepEnrichment",
+    );
   });
 });

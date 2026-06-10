@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useQuery } from "convex/react";
 import { api } from "../convex/_generated/api";
@@ -27,7 +27,13 @@ interface NavItem {
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
   const { signOut } = useAuthActions();
+
+  const handleSignOut = async () => {
+    await signOut();
+    router.push("/");
+  };
   const pendingCount = useQuery(api.emails.pendingCount) ?? 0;
   const unclassifiedReplies = useQuery(api.replies.unclassifiedCount) ?? 0;
 
@@ -141,7 +147,7 @@ export function Sidebar() {
       {/* Sign out */}
       <div className="p-4 border-t border-card-border">
         <button
-          onClick={() => void signOut()}
+          onClick={handleSignOut}
           className="flex w-full items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-muted-foreground hover:text-red-400 hover:bg-red-500/10 transition-all duration-200"
         >
           <ArrowRightOnRectangleIcon className="h-4 w-4" />

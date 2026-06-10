@@ -43,6 +43,13 @@ export const scrapeAntiRagging = action({
 
       console.log(`[AntiRagging] Scanning ${uniName}...`);
 
+      // .gov.in domains are IP-blocked from cloud envs — every Jina request times out.
+      // Skip the slow loop and return immediately so the orchestrator stays under 30s.
+      if (url.includes(".gov.in")) {
+        console.warn(`[AntiRagging] Skipping ${uniName} — .gov.in domains unreachable from cloud.`);
+        return { success: false, reason: "No anti-ragging pages" };
+      }
+
       // Try each known anti-ragging path via Jina Reader (free)
       const allEmails = new Set<string>();
       const allPhones = new Set<string>();
@@ -81,18 +88,26 @@ export const scrapeAntiRagging = action({
 
       console.log(`[AntiRagging] ${uniName}: ${emails.length} emails, ${phones.length} phones from ${foundPages} pages.`);
 
-      // Persist emails as stakeholders so they aren't lost.
-      // Anti-ragging committees are mandated by UGC and are a goldmine for real contacts.
-      if (emails.length > 0) {
-        const stakeholders = emails.map((email) => ({
-          name: undefined,
-          role: "Anti-Ragging Committee",
-          email,
-          phone: undefined,
-          email_source: "scraped" as const,
-          phone_source: undefined,
-        }));
+      // Persist both emails and phones so UGC-mandated committee contacts survive downstream cleanup.
+      const emailStakeholders = emails.map((email) => ({
+        name: undefined,
+        role: "Anti-Ragging Committee",
+        email,
+        phone: undefined,
+        email_source: "scraped" as const,
+        phone_source: undefined,
+      }));
+      const phoneStakeholders = phones.map((phone) => ({
+        name: undefined,
+        role: "Anti-Ragging Committee",
+        email: undefined,
+        phone,
+        email_source: undefined,
+        phone_source: "scraped" as const,
+      }));
 
+      if (emailStakeholders.length > 0 || phoneStakeholders.length > 0) {
+        const stakeholders = [...emailStakeholders, ...phoneStakeholders];
         await ctx.runMutation(internal.stakeholders.upsertBulkInternal, {
           university_id: args.universityId,
           stakeholders,

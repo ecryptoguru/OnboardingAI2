@@ -10,7 +10,7 @@ export function getGoogleAI(apiKey?: string | null): GoogleGenAI {
       "Google Gemini API Key is missing. Please configure it in the Settings dashboard.",
     );
   }
-  return new GoogleGenAI({ apiKey, httpOptions: { timeout: 20000 } });
+  return new GoogleGenAI({ apiKey, httpOptions: { timeout: 25000 } });
 }
 
 // ─── Model constants ──────────────────────────────────────────────────────────
@@ -20,8 +20,8 @@ export const MODELS = {
   gemini: "gemini-3.5-flash" as const,
   // Gemini Flash-Lite: lowest cost for high-volume tasks
   geminiFlash: "gemini-3.1-flash-lite" as const,
-  // Embeddings: 768-dim (direct via Google AI API)
-  embedding: "text-embedding-004" as const,
+  // Embeddings: 768-dim via Gemini Embedding API (truncated from 3072)
+  embedding: "gemini-embedding-001" as const,
 } as const;
 
 // ─── Temperature presets ─────────────────────────────────────────────────────
@@ -30,6 +30,159 @@ export const TEMP = {
   balanced: 0.3, // personalization
   creative: 0.6, // proposal writing
 } as const;
+
+const MODEL_PRICING_USD_PER_MILLION: Record<
+  string,
+  { input: number; output: number }
+> = {
+  "gemini-3.5-flash": { input: 1.5, output: 9.0 },
+  "gemini-3.1-flash-lite": { input: 0.075, output: 0.3 },
+};
+
+export interface LlmUsageEntry {
+  label: string;
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  inputCostUsd: number;
+  outputCostUsd: number;
+  totalCostUsd: number;
+  tokenSource: "api_usage" | "estimated";
+}
+
+export interface LlmUsageSummary {
+  calls: number;
+  inputTokens: number;
+  outputTokens: number;
+  totalTokens: number;
+  inputCostUsd: number;
+  outputCostUsd: number;
+  totalCostUsd: number;
+  entries: LlmUsageEntry[];
+}
+
+interface GeminiGenerateResponseLike {
+  usageMetadata?: object | null;
+}
+
+function roundUsd(value: number): number {
+  return Number(value.toFixed(6));
+}
+
+function estimateTokensFromText(text: string | undefined | null): number {
+  return Math.ceil((text || "").length / 4);
+}
+
+function getModelPricing(model: string): { input: number; output: number } {
+  return (
+    MODEL_PRICING_USD_PER_MILLION[model] ||
+    MODEL_PRICING_USD_PER_MILLION[MODELS.geminiFlash]
+  );
+}
+
+function readUsageNumber(
+  usage: object | null | undefined,
+  keys: string[],
+): number | undefined {
+  if (!usage) return undefined;
+  const record = usage as Record<string, unknown>;
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+export function createLlmUsageEntry({
+  label,
+  model,
+  response,
+  fallbackInputTokens = 0,
+  fallbackOutputTokens = 0,
+}: {
+  label: string;
+  model: string;
+  response?: GeminiGenerateResponseLike | null;
+  fallbackInputTokens?: number;
+  fallbackOutputTokens?: number;
+}): LlmUsageEntry {
+  const usage = response?.usageMetadata;
+  const usageRecord = usage as Record<string, unknown> | undefined;
+  const inputTokens =
+    readUsageNumber(usage, [
+      "promptTokenCount",
+      "inputTokenCount",
+      "promptTokens",
+    ]) ?? fallbackInputTokens;
+  const outputTokens =
+    readUsageNumber(usage, [
+      "candidatesTokenCount",
+      "candidateTokenCount",
+      "outputTokenCount",
+      "outputTokens",
+    ]) ?? fallbackOutputTokens;
+  const totalTokens =
+    readUsageNumber(usage, ["totalTokenCount", "totalTokens"]) ??
+    inputTokens + outputTokens;
+  const pricing = getModelPricing(model);
+  const inputCostUsd = (inputTokens / 1_000_000) * pricing.input;
+  const outputCostUsd = (outputTokens / 1_000_000) * pricing.output;
+
+  return {
+    label,
+    model,
+    inputTokens,
+    outputTokens,
+    totalTokens,
+    inputCostUsd: roundUsd(inputCostUsd),
+    outputCostUsd: roundUsd(outputCostUsd),
+    totalCostUsd: roundUsd(inputCostUsd + outputCostUsd),
+    tokenSource:
+      usageRecord &&
+      (typeof usageRecord.promptTokenCount === "number" ||
+        typeof usageRecord.inputTokenCount === "number" ||
+        typeof usageRecord.candidatesTokenCount === "number" ||
+        typeof usageRecord.outputTokenCount === "number")
+        ? "api_usage"
+        : "estimated",
+  };
+}
+
+export function summarizeLlmUsage(entries: LlmUsageEntry[]): LlmUsageSummary {
+  const summary = entries.reduce<LlmUsageSummary>(
+    (acc, entry) => {
+      acc.calls += 1;
+      acc.inputTokens += entry.inputTokens;
+      acc.outputTokens += entry.outputTokens;
+      acc.totalTokens += entry.totalTokens;
+      acc.inputCostUsd += entry.inputCostUsd;
+      acc.outputCostUsd += entry.outputCostUsd;
+      acc.totalCostUsd += entry.totalCostUsd;
+      acc.entries.push(entry);
+      return acc;
+    },
+    {
+      calls: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      inputCostUsd: 0,
+      outputCostUsd: 0,
+      totalCostUsd: 0,
+      entries: [],
+    },
+  );
+
+  return {
+    ...summary,
+    inputCostUsd: roundUsd(summary.inputCostUsd),
+    outputCostUsd: roundUsd(summary.outputCostUsd),
+    totalCostUsd: roundUsd(summary.totalCostUsd),
+  };
+}
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -96,6 +249,7 @@ export async function callGemini({
   thinkingBudget,
   maxOutputTokens = 8192,
   apiKey,
+  label,
 }: {
   systemPrompt: string;
   userPrompt: string;
@@ -106,7 +260,46 @@ export async function callGemini({
   thinkingBudget?: number;
   maxOutputTokens?: number;
   apiKey?: string | null;
+  label?: string;
 }): Promise<string> {
+  const result = await callGeminiWithUsage({
+    systemPrompt,
+    userPrompt,
+    temperature,
+    responseAsJson,
+    responseSchema,
+    model,
+    thinkingBudget,
+    maxOutputTokens,
+    apiKey,
+    label,
+  });
+  return result.text;
+}
+
+export async function callGeminiWithUsage({
+  systemPrompt,
+  userPrompt,
+  temperature = TEMP.balanced,
+  responseAsJson = false,
+  responseSchema,
+  model = MODELS.gemini,
+  thinkingBudget,
+  maxOutputTokens = 8192,
+  apiKey,
+  label = "gemini_call",
+}: {
+  systemPrompt: string;
+  userPrompt: string;
+  temperature?: number;
+  responseAsJson?: boolean;
+  responseSchema?: unknown;
+  model?: string;
+  thinkingBudget?: number;
+  maxOutputTokens?: number;
+  apiKey?: string | null;
+  label?: string;
+}): Promise<{ text: string; usage: LlmUsageEntry }> {
   // Pro models require thinkingBudget >= 512. Flash models work with thinkingBudget = 0.
   const isProModel = /\bpro\b/i.test(model);
   const resolvedBudget =
@@ -121,7 +314,7 @@ export async function callGemini({
   const aiClient = getGoogleAI(apiKey);
   const startMs = Date.now();
 
-  const text = await withRetry(
+  const { text, usage } = await withRetry(
     async () => {
       const response = await aiClient.models.generateContent({
         model,
@@ -156,13 +349,28 @@ export async function callGemini({
       const txt = response.text;
       if (!txt)
         throw new Error("Unexpected empty response from Gemini via Google SDK");
-      return txt;
+      return {
+        text: txt,
+        usage: createLlmUsageEntry({
+          label,
+          model,
+          response,
+          fallbackInputTokens: estimateTokensFromText(
+            `${systemPrompt}\n${userPrompt}`,
+          ),
+          fallbackOutputTokens: estimateTokensFromText(txt),
+        }),
+      };
     },
     { retryOn: isTransientLlmError }
   );
 
-  logLlmTelemetry({ model, systemPrompt, userPrompt, output: text, latencyMs: Date.now() - startMs });
-  return text;
+  logLlmTelemetry({
+    model,
+    usage,
+    latencyMs: Date.now() - startMs,
+  });
+  return { text, usage };
 }
 
 /**
@@ -184,6 +392,34 @@ export async function callGeminiWithGrounding({
   maxOutputTokens?: number;
   apiKey?: string | null;
 }): Promise<{ text: string; sources: string[] }> {
+  const result = await callGeminiWithGroundingAndUsage({
+    systemPrompt,
+    userPrompt,
+    temperature,
+    model,
+    maxOutputTokens,
+    apiKey,
+  });
+  return { text: result.text, sources: result.sources };
+}
+
+export async function callGeminiWithGroundingAndUsage({
+  systemPrompt,
+  userPrompt,
+  temperature = TEMP.balanced,
+  model = MODELS.gemini,
+  maxOutputTokens = 8192,
+  apiKey,
+  label = "gemini_grounding_call",
+}: {
+  systemPrompt: string;
+  userPrompt: string;
+  temperature?: number;
+  model?: string;
+  maxOutputTokens?: number;
+  apiKey?: string | null;
+  label?: string;
+}): Promise<{ text: string; sources: string[]; usage: LlmUsageEntry }> {
   const aiClient = getGoogleAI(apiKey);
   const startMs = Date.now();
 
@@ -197,6 +433,7 @@ export async function callGeminiWithGrounding({
           temperature,
           maxOutputTokens,
           tools: [{ googleSearch: {} }],
+          httpOptions: { timeout: 25000 },
         },
       });
 
@@ -215,12 +452,28 @@ export async function callGeminiWithGrounding({
           ?.map((c) => c.web?.uri)
           .filter((uri): uri is string => Boolean(uri)) || [];
 
-      return { text, sources };
+      return {
+        text,
+        sources,
+        usage: createLlmUsageEntry({
+          label,
+          model,
+          response,
+          fallbackInputTokens: estimateTokensFromText(
+            `${systemPrompt}\n${userPrompt}`,
+          ),
+          fallbackOutputTokens: estimateTokensFromText(text),
+        }),
+      };
     },
     { retryOn: isTransientLlmError }
   );
 
-  logLlmTelemetry({ model, systemPrompt, userPrompt, output: result.text, latencyMs: Date.now() - startMs });
+  logLlmTelemetry({
+    model,
+    usage: result.usage,
+    latencyMs: Date.now() - startMs,
+  });
   return result;
 }
 
@@ -228,13 +481,17 @@ export async function callGeminiWithGrounding({
  * Budget constants for Gemini thinking mode.
  * Higher budget = longer latency, deeper reasoning, higher cost.
  */
-function logLlmTelemetry({ model, systemPrompt, userPrompt, output, latencyMs }: { model: string; systemPrompt: string; userPrompt: string; output: string; latencyMs: number }) {
-  const inputChars = systemPrompt.length + userPrompt.length;
-  const outputChars = output.length;
-  const estimatedInputTokens = Math.ceil(inputChars / 4);
-  const estimatedOutputTokens = Math.ceil(outputChars / 4);
+function logLlmTelemetry({
+  model,
+  usage,
+  latencyMs,
+}: {
+  model: string;
+  usage: LlmUsageEntry;
+  latencyMs: number;
+}) {
   console.log(
-    `[LLM] model=${model} inTokens≈${estimatedInputTokens} outTokens≈${estimatedOutputTokens} latencyMs=${latencyMs}`,
+    `[LLM] model=${model} inTokens=${usage.inputTokens} outTokens=${usage.outputTokens} totalTokens=${usage.totalTokens} totalCostUsd=${usage.totalCostUsd.toFixed(6)} tokenSource=${usage.tokenSource} latencyMs=${latencyMs}`,
   );
 }
 
@@ -263,9 +520,10 @@ export async function callFlash(
 }
 
 /**
- * Generate a 768-dimensional embedding using Google's text-embedding-004 via REST API.
- * Falls back to zero-vector if the API is unavailable (embeddings are non-critical).
- * Note: Requires GOOGLE_API_KEY environment variable.
+ * Generate a 768-dimensional embedding using Google's Gemini Embedding API.
+ * Uses gemini-embedding-001 with outputDimensionality=768 to stay compatible
+ * with the existing 768-dim vector index. Falls back to zero-vector on failure.
+ * Note: Uses the same API key as Gemini chat (getInternalGeminiKey).
  */
 export async function embed(
   text: string,
@@ -276,22 +534,24 @@ export async function embed(
     return new Array(768).fill(0);
   }
 
+  const MODEL = MODELS.embedding;
   const startMs = Date.now();
   try {
     const result = await withRetry(
       async () => {
         const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key=${apiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:embedContent?key=${apiKey}`,
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              model: "models/text-embedding-004",
+              model: `models/${MODEL}`,
               content: {
                 parts: [{ text }],
               },
+              outputDimensionality: 768,
             }),
-            signal: AbortSignal.timeout(20000),
+            signal: AbortSignal.timeout(25000),
           },
         );
 
@@ -317,7 +577,7 @@ export async function embed(
     const inputChars = text.length;
     const estimatedInputTokens = Math.ceil(inputChars / 4);
     console.log(
-      `[LLM:Embed] model=text-embedding-004 inTokens≈${estimatedInputTokens} latencyMs=${Date.now() - startMs}`
+      `[LLM:Embed] model=${MODEL} inTokens≈${estimatedInputTokens} latencyMs=${Date.now() - startMs}`
     );
     return result;
   } catch (e) {

@@ -22,6 +22,7 @@ export const dispatchWebsiteValidation = mutation({
         await ctx.scheduler.runAfter(delayMs, api.actions.discovery.validateWebsite, {
           universityId: uni._id,
           website: uni.website,
+          universityName: uni.university_name,
         });
       } else {
         // Schedule discovery

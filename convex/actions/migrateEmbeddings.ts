@@ -9,7 +9,7 @@ import * as Sentry from "@sentry/node";
 const BATCH_SIZE = 20; // Process 20 signals at a time to stay within Convex action timeout
 
 /**
- * One-time migration: re-embeds all universitySignals using text-embedding-004.
+ * One-time migration: re-embeds all universitySignals using gemini-embedding-001.
  * Safe to run multiple times — each run processes all signals.
  *
  * Run via: npx convex run actions/migrateEmbeddings:runMigration
@@ -17,7 +17,7 @@ const BATCH_SIZE = 20; // Process 20 signals at a time to stay within Convex act
 export const runMigration = action({
   args: {},
   handler: async (ctx): Promise<{ migrated: number; failed: number; total: number }> => {
-    console.log("[EmbeddingMigration] Starting migration to text-embedding-004...");
+    console.log("[EmbeddingMigration] Starting migration to gemini-embedding-001...");
 
     // Fetch all signals
     const allSignals: { _id: Id<"universitySignals">; content: string }[] = await ctx.runQuery(internal.signals.getAllForMigration);

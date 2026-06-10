@@ -169,7 +169,7 @@ export default defineSchema({
     ),
     content: v.string(),
     source_url: v.optional(v.string()),
-    embedding: v.array(v.float64()), // 768-dim from text-embedding-004
+    embedding: v.array(v.float64()), // 768-dim from gemini-embedding-001
     created_at: v.number(),
   })
     .index("by_university", ["university_id"])

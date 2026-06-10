@@ -1,6 +1,6 @@
 "use node";
 
-import { withRetry } from "./utils";
+import { normalizeIndianPhone, withRetry } from "./utils";
 
 // ─── Firecrawl API Client ──────────────────────────────────────────────────
 // Provides synchronous Map (sitemap discovery) and Scrape (single-page) calls.
@@ -208,7 +208,9 @@ export async function downloadPdfBuffer(url: string): Promise<Buffer> {
  */
 interface PDFParser {
   getText(params?: Record<string, unknown>): Promise<{ text: string }>;
-  getTable(params?: Record<string, unknown>): Promise<{ pages: { tables: string[][][] }[] }>;
+  getTable(
+    params?: Record<string, unknown>,
+  ): Promise<{ pages: { tables: string[][][] }[] }>;
   destroy(): Promise<void>;
 }
 
@@ -267,7 +269,11 @@ export async function extractPdfTables(buffer: Buffer): Promise<string> {
         // Skip trivial single-cell or empty tables
         if (table.length < 2) continue;
         const rows = table
-          .map((row: string[]) => row.map((cell: string) => cell.replace(/\s+/g, " ").trim()).join(" | "))
+          .map((row: string[]) =>
+            row
+              .map((cell: string) => cell.replace(/\s+/g, " ").trim())
+              .join(" | "),
+          )
           .join("\n");
         chunks.push(rows);
       }
@@ -306,6 +312,11 @@ export interface RegexExtractionResult {
   phones: string[];
 }
 
+export interface ContactWithContext {
+  value: string;
+  context: string; // Surrounding text (±200 chars)
+}
+
 /**
  * Extract emails and Indian phone numbers from raw Markdown.
  * Returns two separate deduplicated lists — do NOT pair by index
@@ -318,37 +329,18 @@ export function extractContactsFromMarkdown(
   const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
   // Indian phone regex: matches mobiles and landlines with optional separators
   // Handles: +91-98765-43210, 09876543210, 9876543210, 011-1234-5678, 011-12345678
-  const phoneRegex = /(?:\+91[-\s]?|0[-\s]?)?\d(?:[\d\s-]){8,12}/g;
+  const phoneRegex =
+    /(?<!\d)(?:\+91[-\s]?[6-9]\d{4}[-\s]?\d{5}|0[6-9]\d{9}|[6-9]\d{9}|0\d{2,4}(?:[-\s]?\d{3,4}){2})(?!\d)/g;
 
   const emails = new Set(markdown.match(emailRegex) || []);
   const rawPhones = new Set(markdown.match(phoneRegex) || []);
 
-  // Normalize Indian phone numbers: keep any valid 10+ digit number
+  // Normalize Indian phone numbers and drop malformed long numeric strings.
   const validPhones = new Set<string>();
   for (const p of rawPhones) {
-    const digits = p.replace(/\D/g, "");
-    if (digits.length >= 10) {
-      if (digits.length === 10 && /^[6-9]/.test(digits)) {
-        // Standard 10-digit mobile
-        validPhones.add(`+91${digits}`);
-      } else if (
-        digits.length === 11 &&
-        digits.startsWith("0") &&
-        /^[6-9]/.test(digits.slice(1))
-      ) {
-        // 0-prefixed mobile: 09876543210 → +919876543210
-        validPhones.add(`+91${digits.slice(1)}`);
-      } else if (digits.length === 11 && digits.startsWith("0")) {
-        // Landline with STD code: 01112345678 → +91-11-12345678
-        validPhones.add(`+91-${digits.slice(1, 3)}-${digits.slice(3)}`);
-      } else if (digits.startsWith("91") && digits.length === 12) {
-        // Already has country code
-        validPhones.add(`+${digits}`);
-      } else if (digits.length > 10) {
-        // Other multi-digit numbers (international, PBX, etc.)
-        validPhones.add(`+${digits}`);
-      }
-      // Skip 10-digit numbers not starting with 6-9 (false positives)
+    const normalizedPhone = normalizeIndianPhone(p);
+    if (normalizedPhone) {
+      validPhones.add(normalizedPhone);
     }
   }
 
@@ -356,4 +348,96 @@ export function extractContactsFromMarkdown(
     emails: Array.from(emails),
     phones: Array.from(validPhones),
   };
+}
+
+/**
+ * Extract contacts WITH surrounding context for proximity-based association.
+ * Each contact includes ±200 characters of surrounding text so downstream
+ * heuristics can match phones to nearby names.
+ */
+export function extractContactsWithContext(
+  markdown: string,
+): { emails: ContactWithContext[]; phones: ContactWithContext[] } {
+  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+  const phoneRegex =
+    /(?<!\d)(?:\+91[-\s]?[6-9]\d{4}[-\s]?\d{5}|0[6-9]\d{9}|[6-9]\d{9}|0\d{2,4}(?:[-\s]?\d{3,4}){2})(?!\d)/g;
+
+  const emails: ContactWithContext[] = [];
+  const phones: ContactWithContext[] = [];
+
+  // Extract emails with context
+  let match;
+  const emailRegexClone = new RegExp(emailRegex.source, emailRegex.flags);
+  while ((match = emailRegexClone.exec(markdown)) !== null) {
+    const start = Math.max(0, match.index - 200);
+    const end = Math.min(markdown.length, match.index + match[0].length + 200);
+    emails.push({
+      value: match[0],
+      context: markdown.substring(start, end).toLowerCase(),
+    });
+  }
+
+  // Extract phones with context
+  const phoneRegexClone = new RegExp(phoneRegex.source, phoneRegex.flags);
+  while ((match = phoneRegexClone.exec(markdown)) !== null) {
+    const normalizedPhone = normalizeIndianPhone(match[0]);
+    if (!normalizedPhone) continue;
+
+    const start = Math.max(0, match.index - 200);
+    const end = Math.min(markdown.length, match.index + match[0].length + 200);
+    phones.push({
+      value: normalizedPhone,
+      context: markdown.substring(start, end).toLowerCase(),
+    });
+  }
+
+  return { emails, phones };
+}
+
+/**
+ * Match regex-extracted phones to named stakeholders using proximity heuristics.
+ * For each named stakeholder, look for a phone whose surrounding context
+ * contains the person's name or role.
+ */
+export function matchPhonesToStakeholders(
+  phones: ContactWithContext[],
+  stakeholders: Array<{ name?: string | null; role?: string | null }>,
+): Map<string, string> {
+  const matches = new Map<string, string>();
+  if (phones.length === 0 || stakeholders.length === 0) return matches;
+
+  for (const st of stakeholders) {
+    if (!st.name?.trim()) continue;
+
+    const nameParts = st.name
+      .toLowerCase()
+      .replace(/[.,]/g, "")
+      .split(/\s+/)
+      .filter((p) => p.length > 0);
+    const roleLower = (st.role || "").toLowerCase();
+
+    for (const phone of phones) {
+      // Skip if this phone is already matched
+      if (matches.has(phone.value)) continue;
+
+      const ctx = phone.context;
+      let score = 0;
+
+      // Name proximity: name parts appear in the phone's context
+      for (const part of nameParts) {
+        if (new RegExp(`\\b${part}\\b`).test(ctx)) score += 2;
+      }
+
+      // Role proximity: role appears in the phone's context
+      if (roleLower && ctx.includes(roleLower)) score += 1;
+
+      // If score is high enough, associate the phone
+      if (score >= 3 || (nameParts.length === 1 && score >= 2)) {
+        matches.set(phone.value, st.name);
+        break; // One phone per stakeholder
+      }
+    }
+  }
+
+  return matches;
 }
