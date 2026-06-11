@@ -69,6 +69,18 @@ export default function SettingsPage() {
     error?: string;
   } | null>(null);
 
+  const sendgridFromNameStatus = useQuery(api.settings.getSendgridFromNameStatus);
+  const setSendgridFromNameFn = useMutation(api.settings.setSendgridFromName);
+  const removeSendgridFromNameFn = useMutation(api.settings.removeSendgridFromName);
+
+  const [sendgridFromName, setSendgridFromName] = useState("");
+  const [isSavingSendgridFromName, setIsSavingSendgridFromName] = useState(false);
+  const [isRemovingSendgridFromName, setIsRemovingSendgridFromName] = useState(false);
+  const [sendgridFromNameTestResult, setSendgridFromNameTestResult] = useState<{
+    success?: boolean;
+    error?: string;
+  } | null>(null);
+
   const [showGeminiKey, setShowGeminiKey] = useState(false);
   const [showSerperKey, setShowSerperKey] = useState(false);
   const [showFirecrawlKey, setShowFirecrawlKey] = useState(false);
@@ -407,6 +419,49 @@ export default function SettingsPage() {
       });
     } finally {
       setIsRemovingSendgridFromEmail(false);
+    }
+  };
+
+  const handleSaveSendgridFromName = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!sendgridFromName) return;
+
+    setIsSavingSendgridFromName(true);
+    setSendgridFromNameTestResult(null);
+    try {
+      await setSendgridFromNameFn({ fromName: sendgridFromName });
+      setSendgridFromName("");
+      setSendgridFromNameTestResult({ success: true });
+    } catch (err: unknown) {
+      setSendgridFromNameTestResult({
+        success: false,
+        error: (err as Error).message || "Failed to save sender name.",
+      });
+    } finally {
+      setIsSavingSendgridFromName(false);
+    }
+  };
+
+  const handleRemoveSendgridFromName = async () => {
+    if (!confirm("Are you sure you want to reset the SendGrid Sender Name to default?"))
+      return;
+
+    setIsRemovingSendgridFromName(true);
+    setSendgridFromNameTestResult(null);
+    try {
+      await removeSendgridFromNameFn();
+      setSendgridFromName("");
+      setSendgridFromNameTestResult({
+        success: true,
+        error: "Sender Name reset to default successfully.",
+      });
+    } catch (err: unknown) {
+      setSendgridFromNameTestResult({
+        success: false,
+        error: (err as Error).message || "Failed to reset sender name.",
+      });
+    } finally {
+      setIsRemovingSendgridFromName(false);
     }
   };
 
@@ -982,6 +1037,92 @@ export default function SettingsPage() {
                   className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
                 >
                   {isRemovingSendgridFromEmail ? "Resetting..." : "Reset to Default"}
+                </button>
+              )}
+            </div>
+          </form>
+        </div>
+      </div>
+
+      {/* SendGrid Sender Name */}
+      <div className="bg-card rounded-2xl border border-card-border/60 shadow-sm overflow-hidden">
+        <div className="p-8 space-y-7">
+          <div className="flex items-start justify-between gap-4">
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-slate-500/10 rounded-xl border border-slate-500/20 shadow-sm">
+                <KeyIcon className="w-6 h-6 text-slate-400" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-foreground tracking-tight">
+                  SendGrid Sender Name
+                </h2>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  Display name shown as the sender for all outbound emails.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between p-5 bg-muted/40 rounded-xl border border-card-border/60">
+            <span className="text-sm font-medium text-foreground">
+              Current Sender Name
+            </span>
+            <StatusBadge
+              isConfigured={sendgridFromNameStatus?.hasSendgridFromName}
+              configuredLabel="Custom Sender Name"
+              configuredValue={sendgridFromNameStatus?.fromName}
+              unconfiguredLabel="Using Default (Ashish Gupta)"
+              useRed={false}
+            />
+          </div>
+
+          <form onSubmit={handleSaveSendgridFromName} className="space-y-5">
+            <div className="space-y-2.5">
+              <label
+                htmlFor="sendgridFromName"
+                className="text-sm font-semibold text-foreground"
+              >
+                Sender Display Name
+              </label>
+              <input
+                id="sendgridFromName"
+                type="text"
+                value={sendgridFromName}
+                onChange={(e) => setSendgridFromName(e.target.value)}
+                placeholder={
+                  sendgridFromNameStatus?.hasSendgridFromName
+                    ? sendgridFromNameStatus.fromName || "Ashish Gupta (Fretbox)"
+                    : "Ashish Gupta (Fretbox)"
+                }
+                className="flex h-11 w-full rounded-lg border border-card-border bg-background px-4 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-slate-500/50 focus:border-slate-500 transition-all shadow-sm"
+              />
+              <p className="text-[13px] text-muted-foreground">
+                This name appears in the recipient&apos;s inbox as the sender.
+              </p>
+            </div>
+
+            <TestResultAlert
+              result={sendgridFromNameTestResult}
+              successMessage="Sender Name saved successfully."
+            />
+
+            <div className="flex items-center gap-3 pt-5 border-t border-card-border">
+              <button
+                type="submit"
+                disabled={!sendgridFromName || isSavingSendgridFromName}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center min-w-[130px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
+              >
+                {isSavingSendgridFromName ? "Saving..." : "Save Name"}
+              </button>
+
+              {sendgridFromNameStatus?.hasSendgridFromName && (
+                <button
+                  type="button"
+                  onClick={handleRemoveSendgridFromName}
+                  disabled={isRemovingSendgridFromName}
+                  className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
+                >
+                  {isRemovingSendgridFromName ? "Resetting..." : "Reset to Default"}
                 </button>
               )}
             </div>

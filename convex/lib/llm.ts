@@ -2,6 +2,79 @@
 
 import { GoogleGenAI } from "@google/genai";
 import { withRetry } from "./utils";
+import { internal } from "../_generated/api";
+import { ActionCtx } from "../_generated/server";
+
+// ─── Prompt hash for deterministic cache lookup ──────────────────────────────
+function hashPrompt(inputs: string[]): string {
+  let hash = 0;
+  const text = inputs.join("\n");
+  for (let i = 0; i < text.length; i++) {
+    const chr = text.charCodeAt(i);
+    hash = ((hash << 5) - hash + chr) | 0;
+  }
+  return Math.abs(hash).toString(36) + "_" + text.length.toString(36);
+}
+
+async function checkDailyBudget(ctx: ActionCtx): Promise<void> {
+  // NOTE: This is a soft cap. Concurrent LLM calls may read the same budget
+  // value before any has been incremented, so the actual spend can slightly
+  // exceed the cap under burst load. This is acceptable for cost guardrails;
+  // tighten the cap or add queueing if stricter control is needed.
+  const budget = await ctx.runQuery(internal.llmBudget.getBudgetInternal, {});
+  if (!budget.withinBudget) {
+    throw new Error(
+      `Daily LLM budget exceeded: $${budget.totalCostUsd.toFixed(2)} / $${budget.maxBudgetUsd.toFixed(2)}. ` +
+        `Set LLM_DAILY_BUDGET_USD env var to raise the cap.`,
+    );
+  }
+}
+
+async function recordLlmSpend(ctx: ActionCtx, usage: LlmUsageEntry): Promise<void> {
+  await ctx.runMutation(internal.llmBudget.incrementBudgetInternal, {
+    costUsd: usage.totalCostUsd,
+    tokens: usage.totalTokens,
+  });
+}
+
+async function checkLlmCache(
+  ctx: ActionCtx,
+  systemPrompt: string,
+  userPrompt: string,
+  model: string,
+  temperature: number,
+): Promise<string | null> {
+  const h = hashPrompt([model, String(temperature), systemPrompt, userPrompt]);
+  const cached = await ctx.runQuery(internal.llmBudget.getCacheEntryInternal, {
+    promptHash: h,
+    model,
+    temperature,
+  });
+  if (cached) {
+    console.log(`[LLM] Cache hit for hash=${h} model=${model}`);
+    return cached.response;
+  }
+  return null;
+}
+
+async function storeLlmCache(
+  ctx: ActionCtx,
+  systemPrompt: string,
+  userPrompt: string,
+  model: string,
+  temperature: number,
+  response: string,
+  ttlMs = 48 * 60 * 60 * 1000,
+): Promise<void> {
+  const h = hashPrompt([model, String(temperature), systemPrompt, userPrompt]);
+  await ctx.runMutation(internal.llmBudget.setCacheEntryInternal, {
+    promptHash: h,
+    model,
+    temperature,
+    response,
+    expiresAt: Date.now() + ttlMs,
+  });
+}
 
 // ─── Direct Google SDK ───────────────────────────────────────────────
 export function getGoogleAI(apiKey?: string | null): GoogleGenAI {
@@ -36,7 +109,7 @@ const MODEL_PRICING_USD_PER_MILLION: Record<
   { input: number; output: number }
 > = {
   "gemini-3.5-flash": { input: 1.5, output: 9.0 },
-  "gemini-3.1-flash-lite": { input: 0.075, output: 0.3 },
+  "gemini-3.1-flash-lite": { input: 0.25, output: 1.5 },
 };
 
 export interface LlmUsageEntry {
@@ -194,30 +267,37 @@ export function isTransientLlmError(err: unknown): boolean {
   const status =
     (err as Record<string, unknown>)?.status ||
     (err as Record<string, unknown>)?.statusCode;
-  
-  if (
-    status === 429 ||
-    (typeof status === "number" && status >= 500 && status < 600)
-  ) {
-    return true;
+
+  // Structured status codes are the single source of truth when present.
+  if (typeof status === "number") {
+    if (status === 429 || (status >= 500 && status < 600)) return true;
+    if (status === 400 || status === 401 || status === 403 || status === 404)
+      return false;
+    // For other codes (e.g. 408) fall through to message analysis.
   }
-  
+
   const msg = err instanceof Error ? err.message : String(err);
   const msgLower = msg.toLowerCase();
 
-  // If the error message has standard non-transient status codes, do NOT retry.
-  if (/\b(400|401|403|404)\b/.test(msgLower)) {
+  // Explicit check for halted/blocked prompt/safety policy
+  if (
+    msgLower.includes("halted") ||
+    msgLower.includes("blockreason") ||
+    msgLower.includes("safety")
+  ) {
     return false;
   }
 
-  // Retry on explicit transient HTTP status codes inside message strings
-  if (/\b(429|500|502|503|504)\b/.test(msgLower)) {
-    return true;
-  }
-  
-  // Explicit check for halted/blocked prompt/safety policy
-  if (msgLower.includes("halted") || msgLower.includes("blockreason") || msgLower.includes("safety")) {
-    return false;
+  // Only regex-scan messages when there is NO structured status.
+  if (typeof status !== "number") {
+    // Retry on explicit transient HTTP status codes inside message strings
+    if (/\b(429|500|502|503|504)\b/.test(msgLower)) {
+      return true;
+    }
+    // Treat explicit non-transient codes in messages as non-retryable
+    if (/\b(400|401|403|404)\b/.test(msgLower)) {
+      return false;
+    }
   }
 
   const transientKeywords = [
@@ -231,7 +311,7 @@ export function isTransientLlmError(err: unknown): boolean {
     "deadline",
     "deadline exceeded",
   ];
-  return transientKeywords.some(keyword => msgLower.includes(keyword));
+  return transientKeywords.some((keyword) => msgLower.includes(keyword));
 }
 
 /**
@@ -250,6 +330,10 @@ export async function callGemini({
   maxOutputTokens = 8192,
   apiKey,
   label,
+  ctx,
+  skipBudgetCheck,
+  skipCache,
+  cacheTtlMs,
 }: {
   systemPrompt: string;
   userPrompt: string;
@@ -261,6 +345,10 @@ export async function callGemini({
   maxOutputTokens?: number;
   apiKey?: string | null;
   label?: string;
+  ctx?: ActionCtx;
+  skipBudgetCheck?: boolean;
+  skipCache?: boolean;
+  cacheTtlMs?: number;
 }): Promise<string> {
   const result = await callGeminiWithUsage({
     systemPrompt,
@@ -273,6 +361,10 @@ export async function callGemini({
     maxOutputTokens,
     apiKey,
     label,
+    ctx,
+    skipBudgetCheck,
+    skipCache,
+    cacheTtlMs,
   });
   return result.text;
 }
@@ -288,6 +380,10 @@ export async function callGeminiWithUsage({
   maxOutputTokens = 8192,
   apiKey,
   label = "gemini_call",
+  ctx,
+  skipBudgetCheck,
+  skipCache,
+  cacheTtlMs,
 }: {
   systemPrompt: string;
   userPrompt: string;
@@ -299,7 +395,32 @@ export async function callGeminiWithUsage({
   maxOutputTokens?: number;
   apiKey?: string | null;
   label?: string;
+  ctx?: ActionCtx;
+  skipBudgetCheck?: boolean;
+  skipCache?: boolean;
+  cacheTtlMs?: number;
 }): Promise<{ text: string; usage: LlmUsageEntry }> {
+  // ─── Guardrail 1: Cache lookup ────────────────────────────────────────────
+  if (ctx && !skipCache) {
+    const cached = await checkLlmCache(ctx, systemPrompt, userPrompt, model, temperature);
+    if (cached) {
+      return {
+        text: cached,
+        usage: createLlmUsageEntry({
+          label: `${label}_cached`,
+          model,
+          fallbackInputTokens: 0,
+          fallbackOutputTokens: 0,
+        }),
+      };
+    }
+  }
+
+  // ─── Guardrail 2: Budget check ────────────────────────────────────────────
+  if (ctx && !skipBudgetCheck) {
+    await checkDailyBudget(ctx);
+  }
+
   // Pro models require thinkingBudget >= 512. Flash models work with thinkingBudget = 0.
   const isProModel = /\bpro\b/i.test(model);
   const resolvedBudget =
@@ -370,6 +491,17 @@ export async function callGeminiWithUsage({
     usage,
     latencyMs: Date.now() - startMs,
   });
+
+  // ─── Guardrail 3: Record spend + store cache ──────────────────────────────
+  if (ctx) {
+    if (!skipBudgetCheck) {
+      await recordLlmSpend(ctx, usage);
+    }
+    if (!skipCache) {
+      await storeLlmCache(ctx, systemPrompt, userPrompt, model, temperature, text, cacheTtlMs);
+    }
+  }
+
   return { text, usage };
 }
 
@@ -384,6 +516,10 @@ export async function callGeminiWithGrounding({
   model = MODELS.gemini,
   maxOutputTokens = 8192,
   apiKey,
+  ctx,
+  skipBudgetCheck,
+  skipCache,
+  cacheTtlMs,
 }: {
   systemPrompt: string;
   userPrompt: string;
@@ -391,6 +527,10 @@ export async function callGeminiWithGrounding({
   model?: string;
   maxOutputTokens?: number;
   apiKey?: string | null;
+  ctx?: ActionCtx;
+  skipBudgetCheck?: boolean;
+  skipCache?: boolean;
+  cacheTtlMs?: number;
 }): Promise<{ text: string; sources: string[] }> {
   const result = await callGeminiWithGroundingAndUsage({
     systemPrompt,
@@ -399,6 +539,10 @@ export async function callGeminiWithGrounding({
     model,
     maxOutputTokens,
     apiKey,
+    ctx,
+    skipBudgetCheck,
+    skipCache,
+    cacheTtlMs,
   });
   return { text: result.text, sources: result.sources };
 }
@@ -411,6 +555,10 @@ export async function callGeminiWithGroundingAndUsage({
   maxOutputTokens = 8192,
   apiKey,
   label = "gemini_grounding_call",
+  ctx,
+  skipBudgetCheck,
+  skipCache,
+  cacheTtlMs,
 }: {
   systemPrompt: string;
   userPrompt: string;
@@ -419,7 +567,33 @@ export async function callGeminiWithGroundingAndUsage({
   maxOutputTokens?: number;
   apiKey?: string | null;
   label?: string;
+  ctx?: ActionCtx;
+  skipBudgetCheck?: boolean;
+  skipCache?: boolean;
+  cacheTtlMs?: number;
 }): Promise<{ text: string; sources: string[]; usage: LlmUsageEntry }> {
+  // ─── Guardrail 1: Cache lookup ────────────────────────────────────────────
+  if (ctx && !skipCache) {
+    const cached = await checkLlmCache(ctx, systemPrompt, userPrompt, model, temperature);
+    if (cached) {
+      return {
+        text: cached,
+        sources: [],
+        usage: createLlmUsageEntry({
+          label: `${label}_cached`,
+          model,
+          fallbackInputTokens: 0,
+          fallbackOutputTokens: 0,
+        }),
+      };
+    }
+  }
+
+  // ─── Guardrail 2: Budget check ────────────────────────────────────────────
+  if (ctx && !skipBudgetCheck) {
+    await checkDailyBudget(ctx);
+  }
+
   const aiClient = getGoogleAI(apiKey);
   const startMs = Date.now();
 
@@ -474,6 +648,17 @@ export async function callGeminiWithGroundingAndUsage({
     usage: result.usage,
     latencyMs: Date.now() - startMs,
   });
+
+  // ─── Guardrail 3: Record spend + store cache ──────────────────────────────
+  if (ctx) {
+    if (!skipBudgetCheck) {
+      await recordLlmSpend(ctx, result.usage);
+    }
+    if (!skipCache) {
+      await storeLlmCache(ctx, systemPrompt, userPrompt, model, temperature, result.text, cacheTtlMs);
+    }
+  }
+
   return result;
 }
 

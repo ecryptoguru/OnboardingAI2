@@ -27,7 +27,7 @@ describe("createLlmUsageEntry", () => {
     assert.strictEqual(usage.outputTokens, 250);
     assert.strictEqual(usage.totalTokens, 1250);
     assert.strictEqual(usage.tokenSource, "api_usage");
-    assert.strictEqual(usage.totalCostUsd, 0.00015);
+    assert.strictEqual(usage.totalCostUsd, 0.000625);
   });
 
   it("falls back to estimated token counts when metadata is absent", () => {
@@ -77,6 +77,6 @@ describe("summarizeLlmUsage", () => {
     assert.strictEqual(summary.inputTokens, 300);
     assert.strictEqual(summary.outputTokens, 130);
     assert.strictEqual(summary.totalTokens, 430);
-    assert.strictEqual(summary.totalCostUsd, 0.000062);
+    assert.strictEqual(summary.totalCostUsd, 0.00027);
   });
 });

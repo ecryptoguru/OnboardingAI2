@@ -62,19 +62,28 @@ export const listPaginated = query({
     await validateAuth(ctx);
 
     if (args.type && args.type !== "All") {
-      return await ctx.db
+      let q = ctx.db
         .query("universities")
-        .withIndex("by_type", (q) => q.eq("type", args.type))
-        .paginate(args.paginationOpts);
+        .withIndex("by_type", (q) => q.eq("type", args.type));
+      if (args.status) {
+        q = q.filter((q) => q.eq(q.field("website_status"), args.status));
+      }
+      if (args.stage) {
+        q = q.filter((q) => q.eq(q.field("outreach_stage"), args.stage));
+      }
+      return q.paginate(args.paginationOpts);
     }
 
     if (args.status) {
-      return await ctx.db
+      let q = ctx.db
         .query("universities")
         .withIndex("by_website_status", (q) =>
           q.eq("website_status", args.status!),
-        )
-        .paginate(args.paginationOpts);
+        );
+      if (args.stage) {
+        q = q.filter((q) => q.eq(q.field("outreach_stage"), args.stage));
+      }
+      return q.paginate(args.paginationOpts);
     }
 
     if (args.stage) {
@@ -106,19 +115,28 @@ export const list = query({
     const limit = args.limit ?? 500;
 
     if (args.type && args.type !== "All") {
-      return await ctx.db
+      let q = ctx.db
         .query("universities")
-        .withIndex("by_type", (q) => q.eq("type", args.type))
-        .take(limit);
+        .withIndex("by_type", (q) => q.eq("type", args.type));
+      if (args.status) {
+        q = q.filter((q) => q.eq(q.field("website_status"), args.status));
+      }
+      if (args.stage) {
+        q = q.filter((q) => q.eq(q.field("outreach_stage"), args.stage));
+      }
+      return q.take(limit);
     }
 
     if (args.status) {
-      return await ctx.db
+      let q = ctx.db
         .query("universities")
         .withIndex("by_website_status", (q) =>
           q.eq("website_status", args.status!),
-        )
-        .take(limit);
+        );
+      if (args.stage) {
+        q = q.filter((q) => q.eq(q.field("outreach_stage"), args.stage));
+      }
+      return q.take(limit);
     }
 
     if (args.stage) {

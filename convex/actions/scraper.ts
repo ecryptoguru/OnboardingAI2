@@ -1,6 +1,6 @@
 "use node";
 
-import { action } from "../_generated/server";
+import { action, ActionCtx } from "../_generated/server";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import {
@@ -10,6 +10,7 @@ import {
   LlmUsageSummary,
   MODELS,
   summarizeLlmUsage,
+  TEMP,
 } from "../lib/llm";
 import {
   withRetry,
@@ -183,6 +184,7 @@ async function fetchGovInContentViaSearch(
 async function fetchViaGeminiGrounding(
   universityName: string,
   apiKey: string,
+  ctx: ActionCtx,
 ): Promise<{ text: string; usage?: LlmUsageEntry }> {
   const prompt =
     `Find the official administration page of ${universityName} in India. ` +
@@ -196,9 +198,11 @@ async function fetchViaGeminiGrounding(
     systemPrompt:
       "You are a research assistant. Use Google Search to find official university administration contacts. Return only factual data found on official university websites.",
     userPrompt: prompt,
-    temperature: 0.1,
+    temperature: TEMP.deterministic,
     model: MODELS.geminiFlash,
     label: "scraper_grounding_fallback",
+    ctx,
+    skipCache: true,
   });
 
   if (result.text && result.text.length >= MIN_CONTENT_LENGTH) {
@@ -407,6 +411,7 @@ export const scrapeUniversity = action({
             const groundingResult = await fetchViaGeminiGrounding(
               university.university_name,
               apiKey,
+              ctx,
             );
             if (groundingResult.usage) {
               llmUsageEntries.push(groundingResult.usage);
@@ -576,10 +581,12 @@ export const scrapeUniversity = action({
           model: MODELS.geminiFlash,
           systemPrompt: SCRAPER_SYSTEM_PROMPT(TARGET_ROLES),
           userPrompt: safeContent,
-          temperature: 0.1,
+          temperature: TEMP.deterministic,
           responseAsJson: true,
           responseSchema: SCRAPER_SCHEMA,
           label: "scraper_primary_extraction",
+          ctx,
+          skipCache: true,
         });
         llmUsageEntries.push(result.usage);
         console.log(`[Scraper] Gemini latency: ${Date.now() - startMs}ms`);
@@ -608,9 +615,11 @@ export const scrapeUniversity = action({
             systemPrompt:
               "Extract ONLY names and roles of university officials from the text. Ignore contact info. Output JSON: {stakeholders: [{name: string, role: string}]}. Use the person's full name with title.",
             userPrompt: safeContent.substring(0, 100000),
-            temperature: 0.1,
+            temperature: TEMP.deterministic,
             responseAsJson: true,
             label: "scraper_name_only_fallback",
+            ctx,
+            skipCache: true,
           });
           llmUsageEntries.push(fallbackResult.usage);
           const fallbackParsed = JSON.parse(fallbackResult.text);

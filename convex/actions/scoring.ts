@@ -7,7 +7,7 @@ import { callFlash } from "../lib/llm";
 import { calculateDeterministicScore } from "../lib/scoring";
 import { SCORING_SYSTEM_PROMPT, SCORING_SCHEMA } from "../lib/prompts";
 import * as Sentry from "@sentry/node";
-import { validateRange } from "../lib/utils";
+import { validateRange, sanitizeLlmOutput } from "../lib/utils";
 
 // SYSTEM_PROMPT removed (using centralized prompts)
 
@@ -90,6 +90,8 @@ ${signalText || "None found"}
             responseSchema: SCORING_SCHEMA,
             temperature: 0.1, // low temp for objective scoring
             // Flash default — no thinkingBudget needed, fast & cheap
+            ctx,
+            skipCache: true,
           });
           console.log(
             `[Scoring] Flash-Lite latency: ${Date.now() - startMs}ms`,
@@ -101,7 +103,7 @@ ${signalText || "None found"}
             typeof parsed.ai_reasoning === "string" &&
             parsed.ai_reasoning.trim().length > 0
           ) {
-            ai_reasoning = parsed.ai_reasoning;
+            ai_reasoning = sanitizeLlmOutput(parsed.ai_reasoning);
           }
           console.log(
             `[Scoring] AI Score from Gemini: ${ai_score}/10. Reasoning: ${ai_reasoning}`,

@@ -48,6 +48,8 @@ export const classifyReply = action({
         maxOutputTokens: 32, // classification needs only a few tokens
         responseAsJson: true,
         responseSchema: REPLY_CLASSIFIER_SCHEMA,
+        ctx,
+        skipCache: true,
       });
       const latencyMs = Date.now() - startMs;
       console.log(`[ReplyClassifier] Flash-Lite latency: ${latencyMs}ms`);
@@ -84,7 +86,11 @@ export const classifyReply = action({
       });
 
       // 3. Trigger Auto-Reply if applicable (enabled by default)
-      const shouldTriggerAutoReply = args.triggerAutoReply !== false;
+      // HITL GATE: Low-confidence high-stakes classifications require human review.
+      const isHighStakes = result === "meeting_request" || result === "positive_interest";
+      const hasLowConfidence = confidence < 0.85;
+      const shouldTriggerAutoReply = args.triggerAutoReply !== false && !(isHighStakes && hasLowConfidence);
+
       if (shouldTriggerAutoReply) {
         await ctx.scheduler.runAfter(0, api.actions.autoReply.sendAutoReply, {
           universityId: reply.university_id,
@@ -92,9 +98,15 @@ export const classifyReply = action({
           classification: result,
         });
       } else {
-        console.log(
-          `[ReplyClassifier] Auto-reply suppressed for replyId=${args.replyId}`,
-        );
+        if (isHighStakes && hasLowConfidence) {
+          console.warn(
+            `[ReplyClassifier] Auto-reply BLOCKED for replyId=${args.replyId}: classification="${result}" with confidence=${confidence.toFixed(2)} (< 0.85). Human review required.`,
+          );
+        } else {
+          console.log(
+            `[ReplyClassifier] Auto-reply suppressed for replyId=${args.replyId}`,
+          );
+        }
       }
 
       // 4. Update university outreach stage based on classification
@@ -121,23 +133,41 @@ export const classifyReply = action({
       // proposals to the wrong person at the wrong time and avoids arbitrary calendar invites.
       if (result === "meeting_request") {
         try {
-          const proposalId = await ctx.runMutation(
-            internal.proposals.createInternal,
+          const existingProposals = await ctx.runQuery(
+            internal.proposals.listByUniversityInternal,
             {
               university_id: reply.university_id,
-              stakeholder_id: reply.stakeholder_id,
             },
           );
+          const hasUnsentProposal = (existingProposals as Array<{ stakeholder_id?: string; status: string }>)
+            .some(
+              (p) =>
+                p.stakeholder_id === reply.stakeholder_id &&
+                p.status !== "sent",
+            );
+          if (hasUnsentProposal) {
+            console.log(
+              `[ReplyClassifier] Unsent proposal already exists for ${reply.university_id}/${reply.stakeholder_id}, skipping creation.`,
+            );
+          } else {
+            const proposalId = await ctx.runMutation(
+              internal.proposals.createInternal,
+              {
+                university_id: reply.university_id,
+                stakeholder_id: reply.stakeholder_id,
+              },
+            );
 
-          // Flag the proposal as awaiting human time-confirmation instead of auto-creating a calendar event
-          await ctx.runMutation(internal.proposals.updateInternal, {
-            id: proposalId,
-            calendar_event_status: "pending",
-          });
+            // Flag the proposal as awaiting human time-confirmation instead of auto-creating a calendar event
+            await ctx.runMutation(internal.proposals.updateInternal, {
+              id: proposalId,
+              calendar_event_status: "pending",
+            });
 
-          console.log(
-            `[ReplyClassifier] Created draft proposal for ${reply.university_id} — human must confirm meeting time before generating.`,
-          );
+            console.log(
+              `[ReplyClassifier] Created draft proposal for ${reply.university_id} — human must confirm meeting time before generating.`,
+            );
+          }
         } catch (pErr) {
           console.warn(
             "[ReplyClassifier] Draft proposal creation failed (non-fatal):",

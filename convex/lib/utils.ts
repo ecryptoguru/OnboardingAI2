@@ -96,24 +96,20 @@ export async function withRetry<T>(
     maxDelay = 10000,
     factor = 2,
     retryOn = (err: unknown) => {
-      // Retry on 429 (Rate Limit) or 5xx (Server Error)
       const status =
         (err as Record<string, unknown>)?.status ||
         (err as Record<string, unknown>)?.statusCode;
-      if (
-        status === 429 ||
-        (typeof status === "number" && status >= 500 && status < 600)
-      ) {
-        return true;
+
+      // Structured status codes are the single source of truth when present.
+      if (typeof status === "number") {
+        if (status === 429 || (status >= 500 && status < 600)) return true;
+        if (status === 400 || status === 401 || status === 403 || status === 404)
+          return false;
+        // For other codes (e.g. 408) fall through to message analysis.
       }
 
       const msg = err instanceof Error ? err.message : String(err);
       const msgLower = msg.toLowerCase();
-
-      // Do NOT retry on explicit non-transient status codes
-      if (/\b(400|401|403|404)\b/.test(msgLower)) {
-        return false;
-      }
 
       // Do NOT retry on safety/policy blocks
       if (
@@ -124,9 +120,12 @@ export async function withRetry<T>(
         return false;
       }
 
-      // Look for explicit transient HTTP status codes inside message strings
-      const httpCodeMatch = msgLower.match(/\b(429|500|502|503|504)\b/);
-      if (httpCodeMatch) return true;
+      // Only regex-scan messages when there is NO structured status.
+      if (typeof status !== "number") {
+        const httpCodeMatch = msgLower.match(/\b(429|500|502|503|504)\b/);
+        if (httpCodeMatch) return true;
+        if (/\b(400|401|403|404)\b/.test(msgLower)) return false;
+      }
 
       // Look for typical transient/network/timeout indicators
       const transientKeywords = [
@@ -394,6 +393,25 @@ export function extractDemographicsFromText(text: string): ParsedDemographics {
  * Lightweight runtime validator for parsed LLM JSON output.
  * Throws a descriptive error instead of letting malformed data propagate.
  */
+/**
+ * Lightweight safety filter for LLM-generated output before persistence or email.
+ * Strips injection artifacts, unexpected contact info, and placeholder text.
+ */
+export function sanitizeLlmOutput(text: string): string {
+  let cleaned = text;
+
+  // Strip any remaining injection artifacts
+  cleaned = sanitizeLlmInput(cleaned);
+
+  // Remove common LLM placeholder markers
+  cleaned = cleaned.replace(/\[Name\]/gi, "").replace(/\[University\]/gi, "").replace(/\[Role\]/gi, "");
+
+  // Collapse multiple spaces
+  cleaned = cleaned.replace(/\s{2,}/g, " ").trim();
+
+  return cleaned;
+}
+
 export function validateJsonOutput<T extends Record<string, unknown>>(
   parsed: unknown,
   requiredFields: (keyof T)[],

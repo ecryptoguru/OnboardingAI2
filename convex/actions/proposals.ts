@@ -4,7 +4,7 @@ import { action } from "../_generated/server";
 import { internal, api } from "../_generated/api";
 import { v } from "convex/values";
 import { callGemini, TEMP, MODELS } from "../lib/llm";
-import { validateJsonOutput, sanitizeLlmInput } from "../lib/utils";
+import { validateJsonOutput, sanitizeLlmInput, sanitizeLlmOutput } from "../lib/utils";
 import { recommendModules, suggestPricingTier } from "../lib/moduleRecommender";
 import { PROPOSAL_SYSTEM_PROMPT, PROPOSAL_SCHEMA } from "../lib/prompts";
 import * as Sentry from "@sentry/node";
@@ -81,6 +81,8 @@ export const generateProposal = action({
         model: MODELS.complex,
         responseAsJson: true,
         responseSchema: PROPOSAL_SCHEMA,
+        ctx,
+        skipCache: true,
       });
       console.log(
         `[ProposalGenerator] Gemini latency: ${Date.now() - startMs}ms`,
@@ -92,13 +94,28 @@ export const generateProposal = action({
         "Proposal output",
       );
 
+      // Safety: sanitize all string fields before persistence
+      function sanitizeDeep(value: unknown): unknown {
+        if (typeof value === "string") return sanitizeLlmOutput(value);
+        if (Array.isArray(value)) return value.map(sanitizeDeep);
+        if (value && typeof value === "object") {
+          const obj: Record<string, unknown> = {};
+          for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+            obj[k] = sanitizeDeep(v);
+          }
+          return obj;
+        }
+        return value;
+      }
+      const safeContent = sanitizeDeep(proposalContent) as ProposalContent;
+
       // Set status to "ready" immediately — no PDF step needed
       await ctx.runMutation(internal.proposals.updateInternal, {
         id: args.proposalId,
-        agenda: Array.isArray(proposalContent.agenda)
-          ? proposalContent.agenda.join("\n")
-          : proposalContent.agenda || "",
-        proposal_json: JSON.stringify(proposalContent),
+        agenda: Array.isArray(safeContent.agenda)
+          ? safeContent.agenda.join("\n")
+          : (safeContent.agenda as string) || "",
+        proposal_json: JSON.stringify(safeContent),
         recommended_modules: recommendedModules.map((m) => m.id),
         status: "ready",
       });
@@ -142,6 +159,11 @@ export const emailProposal = action({
       });
       if (st?.name) stakeholderName = st.name;
     }
+
+    const dbFromName = await ctx.runQuery(
+      internal.settings.getInternalSendgridFromName,
+    );
+    const fromName = dbFromName || "Ashish Gupta (Fretbox)";
 
     interface ProposalJson {
       executive_summary?:
@@ -292,7 +314,7 @@ export const emailProposal = action({
       <hr style="border:none;border-top:1px solid #e5e7eb;margin:0 0 20px;">
       <p style="margin:0;color:#9ca3af;font-size:12px;line-height:1.7;">
         Warm regards,<br>
-        <strong style="color:#374151;">Ashish Gupta</strong><br>
+        <strong style="color:#374151;">${escapeHtml(fromName)}</strong><br>
         Partnerships Lead — <strong style="color:#374151;">Fretbox</strong><br>
         <a href="mailto:outreach@fretbox.in" style="color:#3b82f6;text-decoration:none;">outreach@fretbox.in</a>
       </p>

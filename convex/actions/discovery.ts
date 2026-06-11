@@ -17,6 +17,25 @@ import {
 import { callGeminiWithGrounding, MODELS } from "../lib/llm";
 
 /**
+ * Lightweight HEAD check to confirm a URL is reachable.
+ * Used to validate Gemini Grounding URLs before accepting them.
+ */
+async function validateUrlLive(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(8000) });
+    return res.ok;
+  } catch {
+    // If HEAD fails, try GET as fallback (some servers don't support HEAD)
+    try {
+      const res = await fetch(url, { method: "GET", signal: AbortSignal.timeout(8000) });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
+/**
  * Generate progressively shorter query variants for Serper fallback.
  * Keeps the first N words (with generic filler removed) to improve hit rate on long names.
  */
@@ -336,6 +355,8 @@ export const discoverWebsite = action({
             temperature: 0,
             model: MODELS.gemini, // fast, cheap, with search
             apiKey: geminiKey,
+            ctx,
+            skipCache: true,
           });
 
           let foundUrl = "";
@@ -373,10 +394,19 @@ export const discoverWebsite = action({
             }
           }
           if (foundUrl) {
-            console.log(`[Discovery] Gemini Grounding found: ${foundUrl}`);
-            organicResults = [{ link: foundUrl }];
-            data = { organic: organicResults };
-          } else {
+            const isLive = await validateUrlLive(foundUrl);
+            if (isLive) {
+              console.log(`[Discovery] Gemini Grounding found (live): ${foundUrl}`);
+              organicResults = [{ link: foundUrl }];
+              data = { organic: organicResults };
+            } else {
+              console.warn(
+                `[Discovery] Gemini Grounding URL unreachable, discarding: ${foundUrl}`,
+              );
+              foundUrl = "";
+            }
+          }
+          if (!foundUrl) {
             console.warn(
               `[Discovery] Gemini Grounding returned no sources or URL for ${args.universityName}`,
             );

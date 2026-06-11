@@ -537,6 +537,8 @@ ${contextBlocks.join("\n\n")}
         responseSchema: DEEP_ENRICHMENT_SCHEMA,
         maxOutputTokens: 4096,
         label: "gov_data_structured_extraction",
+        ctx,
+        skipCache: true,
       });
       llmUsageEntries.push(extractionResult.usage);
 

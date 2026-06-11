@@ -798,3 +798,91 @@ export const removeSendgridFromEmail = mutation({
     return { success: true };
   },
 });
+
+// ─── SENDGRID FROM NAME ────────────────────────────────────────────────────
+
+export const getSendgridFromNameStatus = query({
+  handler: async (ctx) => {
+    await ensureAuth(ctx);
+
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "sendgridFromName"))
+      .first();
+
+    let fromName: string | null = null;
+    if (doc?.value) {
+      try {
+        fromName = deobfuscate(doc.value);
+      } catch {
+        fromName = doc.value;
+      }
+    }
+
+    return {
+      hasSendgridFromName: !!doc?.value,
+      fromName,
+    };
+  },
+});
+
+export const getInternalSendgridFromName = internalQuery({
+  handler: async (ctx) => {
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "sendgridFromName"))
+      .first();
+    if (doc?.value) {
+      try {
+        return (deobfuscate(doc.value) ?? doc.value).trim() || "Ashish Gupta (Fretbox)";
+      } catch {
+        return (doc.value || "Ashish Gupta (Fretbox)").trim();
+      }
+    }
+    return (process.env.SENDGRID_FROM_NAME || "Ashish Gupta (Fretbox)").trim();
+  },
+});
+
+export const setSendgridFromName = mutation({
+  args: { fromName: v.string() },
+  handler: async (ctx, args) => {
+    await ensureAuth(ctx);
+
+    if (args.fromName.length < 2) {
+      throw new Error("Sender name must be at least 2 characters");
+    }
+
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "sendgridFromName"))
+      .first();
+
+    const cipher = obfuscate(args.fromName);
+    if (doc) {
+      await ctx.db.patch(doc._id, { value: cipher });
+    } else {
+      await ctx.db.insert("systemSettings", {
+        configKey: "sendgridFromName",
+        value: cipher,
+      });
+    }
+    return { success: true };
+  },
+});
+
+export const removeSendgridFromName = mutation({
+  args: {},
+  handler: async (ctx) => {
+    await ensureAuth(ctx);
+
+    const doc = await ctx.db
+      .query("systemSettings")
+      .withIndex("by_key", (q) => q.eq("configKey", "sendgridFromName"))
+      .first();
+
+    if (doc) {
+      await ctx.db.delete(doc._id);
+    }
+    return { success: true };
+  },
+});

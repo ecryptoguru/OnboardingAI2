@@ -173,8 +173,8 @@ export const processDueSequences = action({
     console.log(`[Cron] Found ${dueSequences.length} due sequences`);
 
     // 2. Process each sequence with a capped batch and staggered delays
-    const MAX_BATCH = 50;
-    const staggerMs = 500;
+    const MAX_BATCH = 100;
+    const staggerMs = 250;
     const batch = dueSequences.slice(0, MAX_BATCH);
 
     for (let i = 0; i < batch.length; i++) {

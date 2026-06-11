@@ -285,6 +285,23 @@ export default defineSchema({
     resetAt: v.number(),
   }).index("by_key", ["key"]),
 
+  // ─── LLM Daily Budget ─────────────────────────────────────────────────────
+  llmBudget: defineTable({
+    dateKey: v.string(), // "2026-06-11"
+    totalCostUsd: v.number(),
+    totalTokens: v.number(),
+    updatedAt: v.number(),
+  }).index("by_date", ["dateKey"]),
+
+  // ─── LLM Response Cache (deterministic tasks only) ──────────────────────────
+  llmCache: defineTable({
+    promptHash: v.string(),
+    model: v.string(),
+    temperature: v.number(),
+    response: v.string(),
+    expiresAt: v.number(),
+  }).index("by_hash_model_temp", ["promptHash", "model", "temperature"]),
+
   // ─── Settings ─────────────────────────────────────────────────────────────
   systemSettings: defineTable({
     configKey: v.string(), // e.g. "geminiApiKey"

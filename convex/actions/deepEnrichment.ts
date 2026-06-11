@@ -50,7 +50,6 @@ import {
   runWithSerperBudget,
 } from "../lib/serperBudget";
 import * as Sentry from "@sentry/node";
-import { error } from "console";
 
 const TARGET_ROLES = [
   "Owner",
@@ -839,6 +838,8 @@ ${safeContext}
             thinkingBudget: THINKING.off,
             maxOutputTokens: 8192,
             label: "deep_enrichment_synthesis",
+            ctx,
+            skipCache: true,
           });
           llmUsageEntries.push(result.usage);
           console.log(

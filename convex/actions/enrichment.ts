@@ -377,6 +377,8 @@ export const discoverSocialAndMedia = action({
                 temperature: 0.3,
                 maxOutputTokens: 2048,
                 label: "social_news_grounding",
+                ctx,
+                skipCache: true,
               });
             },
             { maxRetries: 1 },

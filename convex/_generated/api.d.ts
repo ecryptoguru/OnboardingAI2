@@ -44,6 +44,7 @@ import type * as lib_contactInference from "../lib/contactInference.js";
 import type * as lib_discoveryCandidates from "../lib/discoveryCandidates.js";
 import type * as lib_emailTemplates from "../lib/emailTemplates.js";
 import type * as lib_googleCalendar from "../lib/googleCalendar.js";
+import type * as llmBudget from "../llmBudget.js";
 import type * as lib_llm from "../lib/llm.js";
 import type * as lib_moduleRecommender from "../lib/moduleRecommender.js";
 import type * as lib_phone from "../lib/phone.js";
@@ -113,6 +114,7 @@ declare const fullApi: ApiFromModules<{
   "lib/discoveryCandidates": typeof lib_discoveryCandidates;
   "lib/emailTemplates": typeof lib_emailTemplates;
   "lib/googleCalendar": typeof lib_googleCalendar;
+  llmBudget: typeof llmBudget;
   "lib/llm": typeof lib_llm;
   "lib/moduleRecommender": typeof lib_moduleRecommender;
   "lib/phone": typeof lib_phone;

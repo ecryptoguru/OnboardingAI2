@@ -3,10 +3,10 @@ import { api, internal } from "./_generated/api";
 
 const crons = cronJobs();
 
-// ─── Outreach cadence: check for due sequences every hour ─────────────────────
+// ─── Outreach cadence: check for due sequences every 15 minutes ──────────────
 crons.interval(
   "process-outreach-sequences",
-  { hours: 1 },
+  { minutes: 15 },
   api.actions.outreach.processDueSequences,
   {},
 );

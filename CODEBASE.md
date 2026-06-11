@@ -205,7 +205,7 @@ All prompts are centralized in `convex/lib/prompts.ts`. Do not inline prompts in
 Every Gemini call is tracked via `createLlmUsageEntry()` and `summarizeLlmUsage()` in `convex/lib/llm.ts`:
 - Reads **exact token counts** from Gemini `usageMetadata` (`promptTokenCount`, `candidatesTokenCount`)
 - Falls back to char-length estimates only when metadata is absent
-- Costs computed from `MODEL_PRICING_USD_PER_MILLION` (Flash-Lite: $0.075/$0.30 per million; Flash: $1.50/$9.00 per million)
+- Costs computed from `MODEL_PRICING_USD_PER_MILLION` (Flash-Lite: $0.25/$1.50 per million; Flash: $1.50/$9.00 per million)
 - Aggregated at orchestrator level so `verifyUniversityDirect` reports per-unipeline LLM cost
 
 ### 3. Vector Search & RAG
