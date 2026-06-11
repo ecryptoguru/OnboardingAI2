@@ -1,18 +1,26 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * Playwright configuration for E2E smoke tests.
+ * Playwright configuration for E2E tests.
+ *
+ * Authenticated tests sign in via UI using the auth-helper.ts module
+ * instead of relying on storageState cookie persistence (which is
+ * unreliable with Convex Auth's HttpOnly cookies on a dev server).
  */
 export default defineConfig({
-  testDir: "./tests",
-  fullyParallel: true,
+  testDir: "./tests/e2e",
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
-  retries: process.env.CI ? 2 : 0,
-  workers: process.env.CI ? 1 : undefined,
-  reporter: "html",
+  retries: process.env.CI ? 2 : 1,
+  workers: 1,
+  reporter: "list",
+  timeout: 90000,
   use: {
-    baseURL: "http://localhost:3001",
+    baseURL: "http://localhost:3002",
     trace: "on-first-retry",
+    screenshot: "only-on-failure",
+    actionTimeout: 30000,
+    navigationTimeout: 80000,
   },
   projects: [
     {

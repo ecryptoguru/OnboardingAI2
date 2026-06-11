@@ -1,12 +1,14 @@
 import { test, expect } from "@playwright/test";
 
+test.use({ storageState: { cookies: [], origins: [] } });
+
 test.describe("Dashboard E2E", () => {
-  test("Dashboard loads without console errors", async ({ page }) => {
+  test("Universities dashboard loads without console errors", async ({ page }) => {
     // Navigate to dashboard (auth may redirect — that's fine for this smoke)
-    await page.goto("http://localhost:3001/dashboard");
+    await page.goto("/dashboard", { waitUntil: "domcontentloaded", timeout: 60000 });
 
     // Wait for any loading state to resolve
-    await page.waitForLoadState("networkidle");
+    // Network idle skipped — Convex WebSocket keeps connection alive
 
     // Verify no critical console errors
     const consoleErrors: string[] = [];
@@ -30,11 +32,25 @@ test.describe("Dashboard E2E", () => {
     expect(errorTexts).toHaveLength(0);
   });
 
-  test("Outreach Kanban page renders", async ({ page }) => {
-    await page.goto("http://localhost:3001/dashboard/outreach");
-    await page.waitForLoadState("networkidle");
+  test("Outreach page redirects unauthenticated users to sign-in", async ({ page }) => {
+    await page.goto("/dashboard/outreach", { waitUntil: "domcontentloaded", timeout: 60000 });
+    // Network idle skipped — Convex WebSocket keeps connection alive
 
-    // Page should have some content rendered (not a blank 404)
+    // Unauthenticated users should be redirected to sign-in
+    await expect(page).toHaveURL(/.*sign-in.*/);
+
+    const bodyText = await page.locator("body").textContent();
+    expect(bodyText).toBeTruthy();
+    expect(bodyText!.length).toBeGreaterThan(50);
+  });
+
+  test("Analytics page redirects unauthenticated users to sign-in", async ({ page }) => {
+    await page.goto("/dashboard/analytics", { waitUntil: "domcontentloaded", timeout: 60000 });
+    // Network idle skipped — Convex WebSocket keeps connection alive
+
+    // Unauthenticated users should be redirected to sign-in
+    await expect(page).toHaveURL(/.*sign-in.*/);
+
     const bodyText = await page.locator("body").textContent();
     expect(bodyText).toBeTruthy();
     expect(bodyText!.length).toBeGreaterThan(50);

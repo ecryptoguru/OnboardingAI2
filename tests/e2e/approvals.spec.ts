@@ -1,5 +1,7 @@
 import { test, expect } from "@playwright/test";
 
+test.use({ storageState: { cookies: [], origins: [] } });
+
 /**
  * E2E smoke test for the HITL Approvals page.
  *
@@ -12,8 +14,7 @@ import { test, expect } from "@playwright/test";
 
 test.describe("Approvals Page E2E", () => {
   test("Approvals page loads without console errors", async ({ page }) => {
-    await page.goto("http://localhost:3001/dashboard/approvals");
-    await page.waitForLoadState("networkidle");
+    await page.goto("/dashboard/approvals", { waitUntil: "domcontentloaded" });
 
     const consoleErrors: string[] = [];
     page.on("console", (msg) => {
@@ -36,8 +37,8 @@ test.describe("Approvals Page E2E", () => {
   });
 
   test("Approvals page has expected UI elements", async ({ page }) => {
-    await page.goto("http://localhost:3001/dashboard/approvals");
-    await page.waitForLoadState("networkidle");
+    await page.goto("/dashboard/approvals", { waitUntil: "domcontentloaded", timeout: 60000 });
+    // Network idle skipped — Convex WebSocket keeps connection alive
 
     // Body should render real content (not blank 404 or auth spinner forever)
     const bodyText = await page.locator("body").textContent();
@@ -56,7 +57,7 @@ test.describe("Approvals Page E2E", () => {
   });
 
   test("Approvals page is not a 500", async ({ page }) => {
-    const response = await page.goto("http://localhost:3001/dashboard/approvals");
+    const response = await page.goto("/dashboard/approvals", { waitUntil: "domcontentloaded", timeout: 60000 });
     expect(response?.status()).not.toBe(500);
   });
 });

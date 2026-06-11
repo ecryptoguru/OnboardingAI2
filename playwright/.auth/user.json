@@ -1,0 +1,14 @@
+{
+  "cookies": [],
+  "origins": [
+    {
+      "origin": "http://localhost:3001",
+      "localStorage": [
+        {
+          "name": "__convexAuthServerStateFetchTime_httpsexuberantsnake522convexcloud",
+          "value": "1781127534485"
+        }
+      ]
+    }
+  ]
+}
