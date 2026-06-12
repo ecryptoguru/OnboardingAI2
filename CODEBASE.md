@@ -44,7 +44,7 @@ Next.js 15 App Router frontend.
   - `dashboard/outreach/page.tsx`: Sequence management, reply inbox, email thread viewer
   - `dashboard/outreach/demo/page.tsx`: Outreach demo/visualization page
   - `dashboard/approvals/page.tsx`: Pending email approvals queue
-  - `dashboard/proposals/page.tsx`: Generated proposals, PDF viewer, Google Calendar integration
+  - `dashboard/proposals/page.tsx`: Generated proposals, PDF viewer, Google Calendar integration. Each proposal card shows meeting status (Confirmed / Pending / Not Scheduled) with an "Open Meet Link" when available. Includes a "Confirm Meeting & Create Meet Link" / "Reschedule Meeting" action that opens a datetime + duration picker modal. When a meeting is confirmed, the system calls `api.actions.proposals.confirmMeeting` to create the calendar event and attach the Meet link.
   - `dashboard/settings/page.tsx`: System configuration — API keys (Gemini, Serper, Firecrawl, SendGrid, Google Calendar), toggles, enrichment controls
   - `dashboard/settings/components.tsx`: Reusable settings UI components (PasswordInput, TestResultAlert, StatusBadge)
 - `/api/sync-ugc/route.ts`: Next.js proxy route for UGC.gov.in university data (rate-limited)
@@ -94,7 +94,7 @@ The entire backend ecosystem (Queries, Mutations, Actions, HTTP routes, Crons).
   - `outreach.ts`: Multi-stage email sequence dispatch & cadence logic. `processDueSequences` batches up to **100** sequences with **250ms** stagger (was 50/500ms). Emails are drafted as `pending_approval` (HITL), not sent immediately.
   - `personalize.ts`: AI email copy generation with prompt injection sanitization (`sanitizeLlmInput`) and output cleaning (`sanitizeLlmOutput`). Uses `skipCache: true` because prompts contain university-specific signals.
   - `scoring.ts`: Lead potential scoring (hostelites, NAAC, agility, digital signals, stakeholders, etc.). Uses `skipCache: true` because prompts contain university-specific data.
-  - `proposals.ts`: AI-generated proposals (rich HTML emailed directly, no PDF). Proposal email footer uses the configured `sendgridFromName`. Uses `skipCache: true` because prompts contain university-specific signals and stakeholder data.
+  - `proposals.ts`: AI-generated proposals (rich HTML emailed directly, no PDF). Proposal email footer uses the configured `sendgridFromName`. Uses `skipCache: true` because prompts contain university-specific signals and stakeholder data. Also exports `confirmMeeting` action, which creates a Google Calendar event with a Google Meet link for a proposal, persists `calendar_event_id` / `meet_link` / `calendar_event_status`, and returns actionable success/error info.
   - `replyClassifier.ts`: Inbound reply classification (meeting_request, positive_interest, opt_out, etc.). **HITL gate**: low-confidence (< 0.85) high-stakes classifications (`meeting_request`, `positive_interest`) block auto-reply and require human review. Duplicate-unsent-proposal prevention before creating draft proposals.
   - `autoReply.ts`: Automated response sending for positive replies & meeting requests
   - `email.ts`: SendGrid email dispatch with retry logic

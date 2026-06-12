@@ -7,6 +7,7 @@ import { callGemini, TEMP, MODELS } from "../lib/llm";
 import { validateJsonOutput, sanitizeLlmInput, sanitizeLlmOutput } from "../lib/utils";
 import { recommendModules, suggestPricingTier } from "../lib/moduleRecommender";
 import { PROPOSAL_SYSTEM_PROMPT, PROPOSAL_SCHEMA } from "../lib/prompts";
+import { createMeetingEvent } from "../lib/googleCalendar";
 import * as Sentry from "@sentry/node";
 
 interface ProposalContent extends Record<string, unknown> {
@@ -128,6 +129,105 @@ export const generateProposal = action({
       });
       return { success: false, error: String(e) };
     }
+  },
+});
+
+export const confirmMeeting = action({
+  args: {
+    proposalId: v.id("proposals"),
+    startTime: v.number(),
+    durationMinutes: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const proposal = await ctx.runQuery(internal.proposals.getInternal, {
+      id: args.proposalId,
+    });
+    if (!proposal) {
+      return { success: false, error: "Proposal not found" };
+    }
+
+    const university = await ctx.runQuery(internal.universities.getInternal, {
+      universityId: proposal.university_id,
+    });
+    if (!university) {
+      return { success: false, error: "University not found" };
+    }
+
+    const stakeholder = proposal.stakeholder_id
+      ? await ctx.runQuery(internal.stakeholders.getByIdInternal, {
+          id: proposal.stakeholder_id,
+        })
+      : null;
+
+    const startTimeMs = args.startTime;
+    if (!Number.isFinite(startTimeMs) || startTimeMs <= 0) {
+      return { success: false, error: "Invalid meeting time" };
+    }
+    if (startTimeMs < Date.now() - 5 * 60 * 1000) {
+      return { success: false, error: "Meeting time cannot be in the past" };
+    }
+
+    const duration = Math.max(15, Math.min(args.durationMinutes ?? 30, 120));
+    const start = new Date(startTimeMs);
+    const end = new Date(startTimeMs + duration * 60 * 1000);
+
+    const [serviceAccountJson, calendarId] = await Promise.all([
+      ctx.runQuery(internal.settings.getInternalGoogleCalendarJson),
+      ctx.runQuery(internal.settings.getInternalGoogleCalendarId),
+    ]);
+
+    const summary = `Fretbox × ${university.university_name} — Product Demo`;
+    const descriptionLines = [
+      `University: ${university.university_name}`,
+      stakeholder?.name ? `Stakeholder: ${stakeholder.name}` : undefined,
+      stakeholder?.role ? `Role: ${stakeholder.role}` : undefined,
+      stakeholder?.email ? `Email: ${stakeholder.email}` : undefined,
+      "",
+      "Agenda:",
+      "- Current campus workflow and challenges",
+      "- Fretbox product walkthrough",
+      "- Q&A and rollout next steps",
+    ].filter(Boolean);
+
+    const meeting = await createMeetingEvent({
+      summary,
+      description: descriptionLines.join("\n"),
+      startTime: start,
+      endTime: end,
+      attendeeEmail: stakeholder?.email,
+      serviceAccountJson: serviceAccountJson ?? undefined,
+      calendarId: calendarId ?? undefined,
+    });
+
+    if (!meeting.success) {
+      await ctx.runMutation(internal.proposals.updateInternal, {
+        id: args.proposalId,
+        meeting_date: startTimeMs,
+        calendar_event_status: "pending",
+      });
+      return {
+        success: false,
+        error:
+          meeting.error === "GOOGLE_CALENDAR_NOT_CONFIGURED"
+            ? "Google Calendar is not configured. Add calendar credentials in Settings."
+            : meeting.error || "Failed to create calendar event",
+      };
+    }
+
+    await ctx.runMutation(internal.proposals.updateInternal, {
+      id: args.proposalId,
+      meeting_date: startTimeMs,
+      calendar_event_id: meeting.eventId,
+      meet_link: meeting.meetLink,
+      calendar_event_status: "confirmed",
+    });
+
+    return {
+      success: true,
+      eventId: meeting.eventId,
+      meetLink: meeting.meetLink,
+      meetingDate: startTimeMs,
+    };
   },
 });
 

@@ -12,11 +12,9 @@ test.describe("Theme Toggle", () => {
       page.locator("button").filter({ hasText: /theme|dark|light/i }),
     ];
 
-    let found = false;
     for (const toggle of possibleToggles) {
       const count = await toggle.count();
       if (count > 0) {
-        found = true;
         break;
       }
     }

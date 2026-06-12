@@ -266,8 +266,8 @@ export default function ProposalsPage() {
             No proposals yet
           </h3>
           <p className="text-muted-foreground text-sm max-w-sm">
-            Proposals are generated automatically when a Calendly meeting is
-            booked, or use the Generate Proposal button above.
+            Proposals are created when meeting intent is detected from replies,
+            or you can generate one manually above.
           </p>
         </div>
       ) : (
@@ -307,11 +307,14 @@ function ProposalCard({
   const { show, toastElement } = useToast();
   const removeProposal = useMutation(api.proposals.remove);
   const generateProposal = useAction(api.actions.proposals.generateProposal);
+  const confirmMeeting = useAction(api.actions.proposals.confirmMeeting);
 
   const [regenerating, setRegenerating] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [showMeetingModal, setShowMeetingModal] = useState(false);
+  const [confirmingMeeting, setConfirmingMeeting] = useState(false);
 
   const { withKeyCheck, keyModal: cardKeyModal } = useRequireGeminiKey();
 
@@ -379,6 +382,29 @@ function ProposalCard({
   const isReady = proposal.status === "ready";
   const isSent = proposal.status === "sent";
   const isDraft = proposal.status === "draft";
+  const meetingPending = proposal.calendar_event_status === "pending";
+  const meetingConfirmed = proposal.calendar_event_status === "confirmed";
+
+  const handleConfirmMeeting = async (startTime: number, durationMinutes: number) => {
+    setConfirmingMeeting(true);
+    try {
+      const result = (await confirmMeeting({
+        proposalId: proposal._id,
+        startTime,
+        durationMinutes,
+      })) as { success?: boolean; error?: string; meetLink?: string };
+      if (!result.success) {
+        show(result.error || "Failed to confirm meeting", "error");
+        return;
+      }
+      show("Meeting confirmed and Google Meet link created.", "success");
+      setShowMeetingModal(false);
+    } catch (e) {
+      show(`Meeting confirmation failed: ${e}`, "error");
+    } finally {
+      setConfirmingMeeting(false);
+    }
+  };
 
   return (
     <>
@@ -411,6 +437,32 @@ function ProposalCard({
             {proposal.meeting_date
               ? new Date(proposal.meeting_date).toLocaleDateString()
               : "TBD"}
+          </div>
+
+          <div className="mb-4 flex items-center gap-2">
+            {meetingConfirmed ? (
+              <span className="px-2 py-1 rounded-md text-[10px] uppercase font-bold tracking-wider border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
+                Meeting Confirmed
+              </span>
+            ) : meetingPending ? (
+              <span className="px-2 py-1 rounded-md text-[10px] uppercase font-bold tracking-wider border bg-amber-500/10 text-amber-500 border-amber-500/30">
+                Meeting Pending
+              </span>
+            ) : (
+              <span className="px-2 py-1 rounded-md text-[10px] uppercase font-bold tracking-wider border bg-muted text-muted-foreground border-card-border/60">
+                Meeting Not Scheduled
+              </span>
+            )}
+            {proposal.meet_link && (
+              <a
+                href={proposal.meet_link}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-blue-400 hover:text-blue-300 underline underline-offset-2"
+              >
+                Open Meet Link
+              </a>
+            )}
           </div>
 
           <div className="mb-4">
@@ -534,6 +586,20 @@ function ProposalCard({
                 )}
               </div>
             )}
+            {!confirmDelete && !isDraft && (
+              <button
+                type="button"
+                onClick={() => setShowMeetingModal(true)}
+                disabled={confirmingMeeting}
+                className="w-full py-2 rounded-xl text-xs font-semibold border border-card-border/70 bg-card hover:bg-muted/70 transition-colors text-foreground disabled:opacity-60"
+              >
+                {confirmingMeeting
+                  ? "Confirming Meeting..."
+                  : meetingConfirmed
+                    ? "Reschedule Meeting"
+                    : "Confirm Meeting & Create Meet Link"}
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -546,9 +612,115 @@ function ProposalCard({
           validStakeholders={validStakeholders}
         />
       )}
+      {showMeetingModal && (
+        <MeetingConfirmModal
+          universityName={proposal.university_name || "this university"}
+          initialStartTime={proposal.meeting_date}
+          onClose={() => setShowMeetingModal(false)}
+          onConfirm={handleConfirmMeeting}
+          loading={confirmingMeeting}
+        />
+      )}
       {cardKeyModal}
       {toastElement}
     </>
+  );
+}
+
+function MeetingConfirmModal({
+  universityName,
+  initialStartTime,
+  onClose,
+  onConfirm,
+  loading,
+}: {
+  universityName: string;
+  initialStartTime?: number;
+  onClose: () => void;
+  onConfirm: (startTime: number, durationMinutes: number) => Promise<void>;
+  loading: boolean;
+}) {
+  const defaultDate = new Date(
+    initialStartTime && initialStartTime > Date.now()
+      ? initialStartTime
+      : Date.now() + 24 * 60 * 60 * 1000,
+  );
+  defaultDate.setMinutes(0, 0, 0);
+  const toLocalInputValue = (value: Date) => {
+    const localMs = value.getTime() - value.getTimezoneOffset() * 60_000;
+    return new Date(localMs).toISOString().slice(0, 16);
+  };
+
+  const [dateTime, setDateTime] = useState(toLocalInputValue(defaultDate));
+  const [duration, setDuration] = useState("30");
+
+  const handleSubmit = async () => {
+    const startMs = new Date(dateTime).getTime();
+    if (!Number.isFinite(startMs)) return;
+    await onConfirm(startMs, Number(duration));
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+      <div className="bg-card border border-card-border/80 rounded-2xl p-6 w-full max-w-md shadow-2xl">
+        <h2 className="text-xl font-bold font-heading text-foreground mb-1">
+          Confirm Meeting
+        </h2>
+        <p className="text-muted-foreground text-sm mb-6">
+          Choose a time for {universityName}. We&apos;ll create a calendar event and
+          attach a Google Meet link.
+        </p>
+
+        <div className="space-y-4">
+          <div>
+            <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+              Start Time
+            </label>
+            <input
+              type="datetime-local"
+              value={dateTime}
+              onChange={(e) => setDateTime(e.target.value)}
+              className="w-full bg-background border border-card-border/80 text-foreground rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500/50"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+              Duration
+            </label>
+            <select
+              value={duration}
+              onChange={(e) => setDuration(e.target.value)}
+              className="w-full bg-background border border-card-border/80 text-foreground rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-emerald-500/50"
+            >
+              <option value="15">15 minutes</option>
+              <option value="30">30 minutes</option>
+              <option value="45">45 minutes</option>
+              <option value="60">60 minutes</option>
+            </select>
+          </div>
+        </div>
+
+        <div className="flex gap-3 mt-6 pt-4 border-t border-card-border/50">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={loading}
+            className="flex-1 py-2 text-sm font-medium text-muted-foreground bg-muted rounded-lg hover:bg-zinc-700 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={loading || !dateTime}
+            className="flex-[2] py-2 text-sm font-bold bg-emerald-600 hover:bg-emerald-500 disabled:bg-muted disabled:text-muted-foreground disabled:opacity-50 text-white rounded-lg transition-colors shadow-sm"
+          >
+            {loading ? "Confirming..." : "Confirm & Generate Link"}
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 /* ──────────────────────────────────────────────────────────

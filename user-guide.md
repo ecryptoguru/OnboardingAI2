@@ -10,8 +10,9 @@
 2. **Add API Keys** — Go to **Settings → API Keys** and add:
    - **Gemini API Key** — Powers AI enrichment and email personalization.
    - **Serper API Key** — Discovers and validates university websites.
+   - **Firecrawl API Key** — Powers deep site crawling and contact/content extraction.
    - **SendGrid API Key** — Sends emails and tracks delivery.
-   - **SendGrid From Email** — The sender address for all outreach.
+   - **SendGrid From Email** — A verified sender address for all outreach.
    - *(Optional)* **Google Calendar Service Account** — Enables calendar events and Meet links from proposals.
 3. **Seed Universities** — Go to **Universities** and click **Sync UGC** to import the latest government-recognized Indian university dataset.
 4. **Enrich** — Select 5–10 universities on the **Enrichment** page and click **Run Deep Enrichment**.
@@ -69,7 +70,7 @@ Type at least two characters in the search bar to find universities by name. Res
 > **Edge case:** Duplicate `university_name` entries are skipped during upload.
 
 ### Sync from UGC
-Click **Sync UGC** to fetch the latest full Indian university dataset from UGC.gov.in. This is the fastest way to seed your database with government-recognized institutions.
+Click **Sync UGC** to fetch the latest full Indian university dataset from UGC.gov.in. The sync imports the full source dataset (not a narrowed subset), making this the fastest way to seed government-recognized institutions.
 
 ### Validate Websites
 Click **Validate Websites** to run automated website verification across your database. This checks which universities have valid, discoverable, or invalid websites.
@@ -132,6 +133,7 @@ The **Outreach** page is a Kanban-style pipeline that tracks where each universi
 2. Click it to view details.
 3. Click **🚀 Begin Sequence**.
 4. The AI drafts a personalized email and places it in the **Approvals** queue for human review before sending.
+5. Once approved, the send is tracked using the provider message ID so downstream delivery/reply events map correctly back to the draft.
 
 > **Example:** The AI might draft: *"Hi Dr. Sharma, I noticed Delhi University serves 70,000+ students across 12 hostels. Fretbox helps institutions like yours reduce inventory loss by 30%..."*
 
@@ -139,7 +141,7 @@ The **Outreach** page is a Kanban-style pipeline that tracks where each universi
 Each pipeline card has a **↩️ Move back a step** button if you need to rewind a university to the previous stage (e.g., move from *Replied* back to *Outreach Active*).
 
 ### Managing Replies
-When a stakeholder replies, the system auto-classifies:
+When a stakeholder replies, the system resolves the conversation context and auto-classifies:
 
 | Classification | Action |
 |----------------|--------|
@@ -149,10 +151,14 @@ When a stakeholder replies, the system auto-classifies:
 | `not_interested` / `opt_out` | Stop outreach |
 | `out_of_office` | Temporary absence; retry later |
 
+Replies that cannot be confidently mapped to a known thread stay visible in review queues so they can be handled manually.
+
 Unread or unclassified replies show a badge on the **Outreach** sidebar item.
 
 ### Auto-Replies
-For `meeting_request` and `positive_interest` replies, the system automatically sends a polite response and proposes meeting times. This happens immediately after classification without manual intervention.
+For `meeting_request` and `positive_interest` replies, the system automatically sends a polite response. When a `meeting_request` is detected, the system creates a **draft proposal** for that university and flags it as awaiting human time confirmation. A human must then review and confirm the meeting time in the **Proposals** page before a Google Calendar event and Meet link are created.
+
+Auto-replies are sent only when a valid conversation context is available.
 
 ---
 
@@ -171,6 +177,8 @@ All AI-drafted emails land here for human review before they are sent. This is a
 | **Edit** | Modify subject or body, then approve |
 | **Reject** | Deletes the draft permanently |
 
+Approved sends are linked to SendGrid message identifiers so status updates (delivered, bounced, etc.) can be reconciled reliably.
+
 ### Bulk Approve
 If you have multiple pending drafts, click **Approve All** to send them all at once.
 
@@ -182,13 +190,15 @@ If you have multiple pending drafts, click **Approve All** to send them all at o
 
 ## 7. Proposals
 
-Proposals are AI-generated PDF documents tailored to each university.
+Proposals are AI-generated rich HTML documents tailored to each university.
 
-### Generating a Proposal
+### When Proposals Are Created
+Proposals are created automatically when the system detects **meeting intent** from a stakeholder reply. You can also create one manually:
+
 1. Go to **Proposals**.
 2. Click **Generate Proposal**.
 3. Select a **university**. You may also select a **stakeholder** to personalize the addressee (optional).
-4. The AI produces a structured PDF containing:
+4. The AI produces a structured document containing:
    - Executive summary
    - Problem statement
    - Solution overview
@@ -200,12 +210,27 @@ Proposals are AI-generated PDF documents tailored to each university.
 
 ### Viewing & Sending
 - **Preview & Send** — Preview the generated document inline, edit content if needed, and send.
-- **Regenerate Content** — If the PDF fails to generate, click to retry.
+- **Regenerate Content** — If generation fails, click to retry.
+
+### Confirming a Meeting
+When a proposal has **Meeting Pending** status (created from a `meeting_request` reply):
+1. Click **Confirm Meeting & Create Meet Link** on the proposal card.
+2. Choose a **date and time** from the picker, and select a **duration** (15/30/45/60 minutes).
+3. Click **Confirm & Generate Link**.
+4. The system creates a Google Calendar event with a Google Meet link and updates the proposal to **Meeting Confirmed**.
+5. Once confirmed, click **Open Meet Link** to join the call.
+
+> **Tip:** If you need to reschedule, click **Reschedule Meeting** on any confirmed proposal to change the time.
 
 ### Google Calendar Integration
-If configured in Settings, you can create a Google Calendar event with a Google Meet link directly from a proposal. Meeting details are stored with the proposal for reference.
+To enable automatic calendar event creation:
+1. Go to **Settings → Google Calendar**.
+2. Add your **Service Account JSON** (from Google Cloud).
+3. Set a **Calendar ID** (use `primary` or a specific calendar).
 
-> **Edge case:** Proposals require at least one enriched university. If no stakeholders exist for the selected university, the proposal will be generically addressed.
+Once configured, clicking **Confirm Meeting** on a proposal will create a calendar event with an attached Google Meet link and send an invite to the stakeholder email if available.
+
+> **Edge case:** Proposals require at least one enriched university. If no stakeholders exist for the selected university, the proposal will be generically addressed. Calendar events can still be created, but no attendee will be invited automatically.
 
 ---
 
@@ -231,12 +256,14 @@ Track delivery metrics for each sequence step (Steps 1–4):
 | **Clicked** | Recipients clicked a link |
 | **Bounced** | Invalid email address or mailbox full |
 
+Delivery metrics are reconciled from provider webhooks to the original approved draft, improving attribution accuracy for analytics.
+
 ### Reply Intent Breakdown
 A grid of classification cards shows how stakeholders have responded and the percentage of total replies each represents.
 
 | Classification | Typical Follow-Up |
 |---------------|-----------------|
-| `meeting_request` | Schedule via Google Calendar |
+| `meeting_request` | Draft proposal created; confirm meeting time in Proposals page |
 | `positive_interest` | Continue sequence or send proposal |
 | `request_info` | Send FAQ or module details |
 | `not_interested` / `opt_out` | Stop outreach; move to *Not Interested* |
@@ -269,6 +296,8 @@ Add, test, and remove keys for the following services. Each shows a **status ind
 | **Service Account JSON** | Google Cloud service account key for creating calendar events and Google Meet links |
 | **Calendar ID** | Target calendar for meetings. Use `primary` or a specific calendar ID |
 
+When generating proposals, selecting a stakeholder ties scheduling context to that stakeholder record for cleaner follow-up workflows.
+
 ### Theme
 Use the **Theme Toggle** in the sidebar header (next to the logo) to switch between light and dark mode.
 
@@ -294,5 +323,6 @@ If a feature is not working as expected:
 2. **Check Analytics** — Look for bounced emails or failed enrichments.
 3. **Check Outreach** — Review unclassified replies that may need manual attention.
 4. **Check the university detail view** — Verify the university has a discovered website and at least one stakeholder before running enrichment or outreach.
+5. **Check reply/thread matching** — If a reply is not auto-processed, confirm it belongs to a tracked outreach thread and was sent from the configured verified sender.
 
 > **Still stuck?** Capture any error messages from the browser console and share them with your team.
