@@ -14,6 +14,7 @@ This document serves as the central reference point for AI coding agents to navi
 - **Styling:** Tailwind CSS v3.4.1, Glassmorphism design system (see `design-system/onboardingai/MASTER.md`)
 - **Icons:** Heroicons React
 - **AI Models:** Google Gemini 3.5 Flash (complex tasks), Gemini 3.1 Flash-Lite (high-volume), `gemini-embedding-001` (768-dim embeddings). Uses direct `@google/genai` SDK.
+- **LLM Guardrails:** Daily budget tracking (`llmBudget` table) + deterministic response cache (`llmCache` table) for cost control. Configured via `LLM_DAILY_BUDGET_USD` env var (default $50/day).
 - **External Services:**
   - SendGrid (Email dispatch & delivery tracking)
   - Serper (Web search & discovery)
@@ -65,7 +66,7 @@ The entire backend ecosystem (Queries, Mutations, Actions, HTTP routes, Crons).
   - `emails.ts`: Email log CRUD, delivery status tracking, approval workflows
   - `replies.ts`: Reply log management, classification review
   - `priorityScores.ts`: Lead scoring storage (deterministic + AI + final composite)
-  - `settings.ts`: System settings key-value store. **All API keys are DB-backed with obfuscation** (`geminiApiKey`, `serperApiKey`, `firecrawlApiKey`, `sendgridApiKey`, `googleCalendarJson`, `googleCalendarId`, `sendgridFromEmail`). Provides status queries, test actions, and internal getters with env fallbacks.
+  - `settings.ts`: System settings key-value store. **All API keys are DB-backed with obfuscation** (`geminiApiKey`, `serperApiKey`, `firecrawlApiKey`, `sendgridApiKey`, `googleCalendarJson`, `googleCalendarId`, `sendgridFromEmail`, `sendgridFromName`). Provides status queries, set/remove mutations, test actions, and internal getters with env fallbacks. Display names use `.trim()` only (not `sanitizeApiKey`).
   - `rateLimits.ts`: Persistent rate-limiting for external APIs
   - `admin.ts`: Admin operations (e.g., `resetUniversityEnrichment`)
   - `dbReset.ts`: Database reset utilities
@@ -74,27 +75,27 @@ The entire backend ecosystem (Queries, Mutations, Actions, HTTP routes, Crons).
   - `test.ts` / `testDeep.ts`: Test endpoints
 
 - **Infrastructure:**
-  - `schema.ts`: Full database schema with auth tables, indexes, search indexes, vector index (768-dim)
-  - `crons.ts`: Scheduled jobs — hourly outreach sequence processing, weekly proposal cleanup
+  - `schema.ts`: Full database schema with auth tables, indexes, search indexes, vector index (768-dim). Also defines `llmBudget` (daily spend tracking) and `llmCache` (deterministic response cache, 48h TTL).
+  - `crons.ts`: Scheduled jobs — outreach sequence processing every **15 minutes** (was hourly), weekly proposal cleanup. Batch cap = 100 sequences with 250ms stagger.
   - `dispatcher.ts`: Staggered job scheduling for website validation/discovery
   - `http.ts`: Convex HTTP webhooks (SendGrid delivery, inbound replies, Google Calendar push, auth routes)
   - `auth.ts` / `auth.config.ts`: Convex Auth configuration (Password provider)
 
 - `/actions/` (23 files)
   Heavy / side-effect serverless operations. **All action files must start with `"use node"`**:
-  - `deepEnrichment.ts`: AI-based deep enrichment — external source discovery (Serper + Firecrawl), stakeholder extraction, demographics synthesis via Gemini. Uses `callGeminiWithUsage` for structured JSON output.
-  - `discovery.ts`: University website discovery via Serper search, validation via HEAD/GET + Jina fallback, candidate ranking with owned-domain heuristics.
+  - `deepEnrichment.ts`: AI-based deep enrichment — external source discovery (Serper + Firecrawl), stakeholder extraction, demographics synthesis via Gemini. Uses `callGeminiWithUsage` with `skipCache: true` for structured JSON output (university-specific prompts).
+  - `discovery.ts`: University website discovery via Serper search, validation via HEAD/GET + Jina fallback, candidate ranking with owned-domain heuristics. **Gemini Grounding URLs are live-validated** (`validateUrlLive`) before acceptance to prevent hallucinated URLs.
   - `scraper.ts`: Web content extraction via Jina Reader, Firecrawl fallback, Gemini Grounding fallback for blocked domains. Primary stakeholder extraction with regex fallback.
   - `enrichment.ts`: Social & media enrichment — LinkedIn, news, image signal discovery via Serper. Signal upsert with deduplication.
   - `inferContacts.ts`: Role-based contact inference from scraped email patterns. Merges inferred aliases with canonical singleton roles.
   - `scrapeAntiRagging.ts`: Anti-ragging committee page scraping for additional stakeholder discovery.
   - `enrichGovernmentData.ts`: Government data enrichment — NIRF/AISHE/NAAC source discovery, PDF extraction (pdf-parse + Jina + Gemini inline PDF), structured demographic extraction. **Includes Gemini Grounding fallback** for blocked .gov.in domains. Returns exact `llmUsage` per call.
   - `orchestrator.ts`: **Orchestrates the full enrichment chain** in strict phase order: Discovery → Phase 1 (scrape + antiRagging + social) → Phase 2 (contact inference) → Phase 3 (government data) → Phase 4 (deep enrichment) → Phase 5 (social refresh) → Phase 6 (scoring). Aggregates `llmUsage` from all sub-actions. Government data runs **before** deep enrichment to prevent write races on demographics.
-  - `outreach.ts`: Multi-stage email sequence dispatch & cadence logic
-  - `personalize.ts`: AI email copy generation with prompt injection sanitization
-  - `scoring.ts`: Lead potential scoring (hostelites, NAAC, agility, digital signals, stakeholders, etc.)
-  - `proposals.ts`: AI-generated PDF proposals & module recommendations
-  - `replyClassifier.ts`: Inbound reply classification (meeting_request, positive_interest, opt_out, etc.)
+  - `outreach.ts`: Multi-stage email sequence dispatch & cadence logic. `processDueSequences` batches up to **100** sequences with **250ms** stagger (was 50/500ms). Emails are drafted as `pending_approval` (HITL), not sent immediately.
+  - `personalize.ts`: AI email copy generation with prompt injection sanitization (`sanitizeLlmInput`) and output cleaning (`sanitizeLlmOutput`). Uses `skipCache: true` because prompts contain university-specific signals.
+  - `scoring.ts`: Lead potential scoring (hostelites, NAAC, agility, digital signals, stakeholders, etc.). Uses `skipCache: true` because prompts contain university-specific data.
+  - `proposals.ts`: AI-generated proposals (rich HTML emailed directly, no PDF). Proposal email footer uses the configured `sendgridFromName`. Uses `skipCache: true` because prompts contain university-specific signals and stakeholder data.
+  - `replyClassifier.ts`: Inbound reply classification (meeting_request, positive_interest, opt_out, etc.). **HITL gate**: low-confidence (< 0.85) high-stakes classifications (`meeting_request`, `positive_interest`) block auto-reply and require human review. Duplicate-unsent-proposal prevention before creating draft proposals.
   - `autoReply.ts`: Automated response sending for positive replies & meeting requests
   - `email.ts`: SendGrid email dispatch with retry logic
   - `ingest.ts`: CSV/UGC data ingestion helpers
@@ -108,6 +109,11 @@ The entire backend ecosystem (Queries, Mutations, Actions, HTTP routes, Crons).
 - `/lib/` (18 files)
   Shared backend utilities:
   - `llm.ts`: Gemini SDK wrappers (`callGemini`, `callGeminiWithUsage`, `callGeminiWithGrounding`, `callGeminiWithGroundingAndUsage`, `callFlash`, `embed`). **Exact cost tracking** via `createLlmUsageEntry` / `summarizeLlmUsage` using Gemini `usageMetadata`. Model constants (`MODELS`), temperature presets (`TEMP`), thinking budgets (`THINKING`). All calls use `httpOptions: { timeout: 25000 }`.
+    - **Guardrail 1 (Cache):** Deterministic cache lookup via `llmCache` table (48h TTL). Dynamic/personalized calls pass `skipCache: true`.
+    - **Guardrail 2 (Budget):** Daily spend check against `llmBudget` table (soft cap — concurrent reads may slightly exceed under burst load).
+    - **Guardrail 3 (Spend):** Records actual cost after each call. Pricing: Flash-Lite $0.25/$1.50 per million; Flash $1.50/$9.00 per million.
+    - **`isTransientLlmError`:** Structured status codes (429, 5xx) are primary source of truth; message-regex is fallback. Explicitly non-retryable: 400/401/403/404, safety/policy blocks (`halted`, `blockreason`, `safety`).
+  - `llmBudget.ts`: Internal queries/mutations for daily LLM budget (`getBudgetInternal`, `incrementBudgetInternal`) and response cache (`getCacheEntryInternal`, `setCacheEntryInternal`).
   - `prompts.ts`: Centralized prompt library for unified AI governance
   - `emailTemplates.ts`: Typed email template functions (intro, follow-up, auto-reply, proposal)
   - `proposalPdf.tsx`: React-PDF components for proposal generation
@@ -118,7 +124,7 @@ The entire backend ecosystem (Queries, Mutations, Actions, HTTP routes, Crons).
   - `cadence.ts`: Outreach timing/cadence rules
   - `universityUtils.ts`: University data normalization helpers
   - `auth_utils.ts`: Convex Auth helper functions (`validateAuth`)
-  - `utils.ts`: Shared utilities — `withRetry` (exponential backoff + `isTransientLlmError`), `withConcurrencyLimit`, `truncateAtNewline`, `sanitizeLlmInput`, `validateJsonOutput`, phone validation helpers.
+  - `utils.ts`: Shared utilities — `withRetry` (exponential backoff + `isTransientLlmError`), `withConcurrencyLimit`, `truncateAtNewline`, `sanitizeLlmInput`, `sanitizeLlmOutput`, `validateJsonOutput`, phone validation helpers. `sanitizeLlmOutput` strips injection artifacts and placeholder markers (`[Name]`, `[University]`, `[Role]`) before persistence or email.
   - `async.ts`: `raceWithTimeout` helper. **⚠️ Must NEVER be used with Convex `ctx.runAction(...)`** — it does not cancel the underlying promise and causes "outstanding action call" warnings.
   - `contactInference.ts`: Role-based institutional email inference. Normalizes domains, detects role-based aliases, canonicalizes singleton roles (Vice Chancellor → vc, Registrar → registrar, etc.).
   - `discoveryCandidates.ts`: Website discovery candidate ranking — owned-domain heuristics, hosted-portal detection (.edu.in, .gov.in, .ac.in), education-TLD scoring, deduplication.
@@ -200,13 +206,18 @@ Convex is the single source of truth. Discovery, Scraping, and Scoring use batch
 
 All prompts are centralized in `convex/lib/prompts.ts`. Do not inline prompts inside actions.
 
-### 2. LLM Usage Tracking & Exact Cost Accounting
+### 2. LLM Usage Tracking, Cost Guardrails & Response Caching
 
 Every Gemini call is tracked via `createLlmUsageEntry()` and `summarizeLlmUsage()` in `convex/lib/llm.ts`:
 - Reads **exact token counts** from Gemini `usageMetadata` (`promptTokenCount`, `candidatesTokenCount`)
 - Falls back to char-length estimates only when metadata is absent
 - Costs computed from `MODEL_PRICING_USD_PER_MILLION` (Flash-Lite: $0.25/$1.50 per million; Flash: $1.50/$9.00 per million)
 - Aggregated at orchestrator level so `verifyUniversityDirect` reports per-unipeline LLM cost
+
+**Three guardrails** are applied automatically when `ctx` is passed to any LLM wrapper:
+1. **Cache lookup** (`llmCache` table, 48h TTL): Deterministic prompts with identical `(model, temperature, systemPrompt, userPrompt)` return cached responses at zero cost. Dynamic/personalized calls **must** pass `skipCache: true` (enforced in all university-specific actions).
+2. **Budget check** (`llmBudget` table): Daily soft cap (default $50, configurable via `LLM_DAILY_BUDGET_USD`). Concurrent calls may slightly exceed under burst load — tighten the cap or add queueing if stricter control is needed.
+3. **Spend recording**: Actual cost is persisted after each call for auditability.
 
 ### 3. Vector Search & RAG
 
@@ -225,7 +236,7 @@ Every Gemini call is tracked via `createLlmUsageEntry()` and `summarizeLlmUsage(
 
 Government data **must** run before deep enrichment because both write to `demographics`. The orchestrator aggregates `llmUsage` from every phase.
 
-Sequences follow a deterministic state machine: Draft -> Scheduled -> Sent -> Replied/Bounced. Emails are dynamically generated via Gemini AI prompt injection using enrichment data. Auto-replies trigger for positive classifications with threaded `Message-ID` headers for conversation tracking.
+Sequences follow a HITL-aware state machine: **Draft** (`pending_approval`) → Human Approval → **Sent** → Replied/Bounced. Emails are dynamically generated via Gemini AI prompt injection using enrichment data. Auto-replies trigger for positive classifications **unless** the `replyClassifier` HITL gate blocks low-confidence (< 0.85) high-stakes classifications (`meeting_request`, `positive_interest`). Threaded `Message-ID` headers enable conversation tracking.
 
 ### 5. API Key Management (DB-Backed)
 
@@ -234,8 +245,14 @@ All external API keys are stored in the `systemSettings` table with **XOR obfusc
 - `serperApiKey` — `getInternalSerperKey` reads DB first, falls back to `SERPER_API_KEY`
 - `firecrawlApiKey` — `getInternalFirecrawlKey` reads DB first, falls back to `FIRECRAWL_API_KEY`
 - `sendgridApiKey` — `getInternalSendgridKey` reads DB first, falls back to `SENDGRID_API_KEY`
+- `sendgridFromEmail` — `getInternalSendgridFromEmail` reads DB first, falls back to `SENDGRID_FROM_EMAIL` / `outreach@fretbox.in`
+- `sendgridFromName` — `getInternalSendgridFromName` reads DB first, falls back to `SENDGRID_FROM_NAME` / `"Ashish Gupta (Fretbox)"`. Used in SendGrid `from.name` and proposal email HTML footer.
 
-Each has: status query (`get*KeyStatus`), set mutation (`set*Key`), test action (`test*Key`), remove mutation (`remove*Key`), and internal setter (`set*KeyInternal`) for seeding. Keys are sanitized on read to strip control characters.
+Each API key has: status query (`get*KeyStatus`), set mutation (`set*Key`), test action (`test*Key`), remove mutation (`remove*Key`), and internal setter (`set*KeyInternal`) for seeding. Keys are sanitized on read with `sanitizeApiKey()` to strip control characters. Display names (`sendgridFromName`) use `.trim()` only.
+
+**Stored-key testing** — `testGeminiKeyStored`, `testSerperKeyStored`, `testFirecrawlKeyStored`, `testSendgridKeyStored` (actions) let users validate already-saved keys without re-entering them. These call `internal.settings.getInternal*Key` via `ctx.runQuery` with explicit type casts to avoid circular dependency type errors.
+
+**Settings.ts model constant** — `GEMINI_TEST_MODEL = "gemini-3.5-flash"` is hardcoded directly in `settings.ts` (not imported from `./lib/llm`) because `llm.ts` has `"use node"` and importing it into a V8-isolate file causes esbuild to bundle Node built-ins into the browser bundle.
 
 ### 6. Webhook Hardening (HTTP Layer)
 
@@ -278,7 +295,12 @@ Flat design with glassmorphism accents. Fonts: Poppins (headings) + Open Sans (b
 7. **Rate Limiting:** Use `rateLimits` table + `withConcurrencyLimit` for external API call throttling.
 8. **Serper Budget:** Use `createSerperBudget` / `runWithSerperBudget` from `convex/lib/serperBudget.ts` to enforce per-university query caps and detect quota exhaustion.
 9. **Timeout Safety:** All Gemini SDK calls use `httpOptions: { timeout: 25000 }`. All `fetch()` calls use `AbortSignal.timeout(...)`. Do **not** wrap `ctx.runAction(...)` in `raceWithTimeout`.
-10. **API Key Validation:** Sanitize keys with `sanitizeApiKey()` before use to strip control characters that break HTTP headers.
+10. **API Key Validation:** Sanitize keys with `sanitizeApiKey()` before use to strip control characters that break HTTP headers. **Do NOT** use `sanitizeApiKey()` on human-readable display names (e.g., `sendgridFromName`) — use `.trim()` instead.
+11. **LLM Output Sanitization:** Always pipe LLM-generated text through `sanitizeLlmOutput()` before persistence or email injection. It strips leftover injection artifacts and placeholder markers (`[Name]`, `[University]`, `[Role]`).
+12. **Cache Policy:** Deterministic calls (same prompt, same model, same temperature) benefit from `llmCache`. Any call with university-specific, stakeholder-specific, or reply-specific data **must** pass `skipCache: true` to prevent cross-entity cache pollution.
+13. **Budget Soft Cap:** The `llmBudget` guard is a best-effort daily limit, not an atomic hard cap. Concurrent actions may slightly overspend under burst load. Set `LLM_DAILY_BUDGET_USD` conservatively.
+14. **No "use node" in Queries/Mutations:** Convex queries and mutations run in the V8 isolate runtime. Only **actions** can use `"use node"`. Files like `llmBudget.ts` that define `internalQuery` / `internalMutation` must remain V8-only. Importing a `"use node"` file (e.g., `llm.ts`) into a V8 file causes esbuild to bundle Node built-ins (`node:fs`, `node:http`, etc.) into the browser bundle, which crashes with "Could not resolve" errors.
+15. **Clean Convex Errors in UI:** Raw Convex mutation errors contain `[CONVEX M(...)] [Request ID: ...] Server Error Uncaught Error: ... Called by client` noise. Strip this metadata via a `cleanConvexError()` utility before displaying to users, so they see only the meaningful message (e.g., "Invalid Serper API Key format").
 
 ## 🏃‍♂️ Useful Commands
 

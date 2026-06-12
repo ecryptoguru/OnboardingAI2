@@ -60,6 +60,22 @@ interface TestResult {
   error?: string;
 }
 
+/** Strip Convex internal noise from thrown mutation errors. */
+function cleanConvexError(raw: string | undefined): string {
+  if (!raw) return "An unexpected error occurred.";
+  // Remove [CONVEX M(...)] [Request ID: ...] prefix
+  let cleaned = raw.replace(/\[CONVEX M\([^)]+\)\]\s*\[Request ID:\s*[a-f0-9]+\]\s*/gi, "");
+  // Remove "Server Error" prefix
+  cleaned = cleaned.replace(/^Server Error\s*/i, "");
+  // Remove "Uncaught Error:" prefix
+  cleaned = cleaned.replace(/^Uncaught Error:\s*/i, "");
+  // Remove stack-trace lines
+  cleaned = cleaned.replace(/\s+at handler \([^)]+\)\s*/gi, "");
+  // Remove "Called by client" suffix
+  cleaned = cleaned.replace(/\s*Called by client\s*$/i, "");
+  return cleaned.trim() || "An unexpected error occurred.";
+}
+
 interface TestResultAlertProps {
   result: TestResult | null;
   successMessage: string;
@@ -67,6 +83,8 @@ interface TestResultAlertProps {
 
 export function TestResultAlert({ result, successMessage }: TestResultAlertProps) {
   if (!result) return null;
+
+  const displayError = result.error ? cleanConvexError(result.error) : undefined;
 
   return (
     <div
@@ -82,7 +100,7 @@ export function TestResultAlert({ result, successMessage }: TestResultAlertProps
         <XCircleIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
       )}
       <div className="text-sm font-medium leading-relaxed">
-        {result.success ? successMessage : result.error}
+        {result.success ? successMessage : displayError}
       </div>
     </div>
   );

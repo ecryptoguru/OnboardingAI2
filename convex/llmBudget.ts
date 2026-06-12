@@ -1,5 +1,3 @@
-"use node";
-
 import { internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 

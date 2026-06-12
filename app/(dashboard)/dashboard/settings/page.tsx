@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { KeyIcon, ArrowPathIcon, EyeIcon, EyeSlashIcon, TrashIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
@@ -97,9 +97,18 @@ export default function SettingsPage() {
   const testFirecrawlKeyFn = useAction(api.settings.testFirecrawlKey);
   const testSendgridKeyFn = useAction(api.settings.testSendgridKey);
 
+  const testGeminiKeyStoredFn = useAction(api.settings.testGeminiKeyStored);
+  const testSerperKeyStoredFn = useAction(api.settings.testSerperKeyStored);
+  const testFirecrawlKeyStoredFn = useAction(api.settings.testFirecrawlKeyStored);
+  const testSendgridKeyStoredFn = useAction(api.settings.testSendgridKeyStored);
+
   const [isTestingSerper, setIsTestingSerper] = useState(false);
   const [isTestingFirecrawl, setIsTestingFirecrawl] = useState(false);
   const [isTestingSendgrid, setIsTestingSendgrid] = useState(false);
+  const [isTestingGeminiStored, setIsTestingGeminiStored] = useState(false);
+  const [isTestingSerperStored, setIsTestingSerperStored] = useState(false);
+  const [isTestingFirecrawlStored, setIsTestingFirecrawlStored] = useState(false);
+  const [isTestingSendgridStored, setIsTestingSendgridStored] = useState(false);
 
   const googleCalendarStatus = useQuery(api.settings.getGoogleCalendarStatus);
   const setGoogleCalendarJsonFn = useMutation(api.settings.setGoogleCalendarJson);
@@ -124,6 +133,25 @@ export default function SettingsPage() {
     success?: boolean;
     error?: string;
   } | null>(null);
+
+  // Sync text input states with query results so users can see current values
+  useEffect(() => {
+    if (sendgridFromEmailStatus?.fromEmail && !sendgridFromEmail) {
+      setSendgridFromEmail(sendgridFromEmailStatus.fromEmail);
+    }
+  }, [sendgridFromEmailStatus?.fromEmail, sendgridFromEmail]);
+
+  useEffect(() => {
+    if (sendgridFromNameStatus?.fromName && !sendgridFromName) {
+      setSendgridFromName(sendgridFromNameStatus.fromName);
+    }
+  }, [sendgridFromNameStatus?.fromName, sendgridFromName]);
+
+  useEffect(() => {
+    if (googleCalendarIdStatus?.calendarId && !googleCalendarId) {
+      setGoogleCalendarId(googleCalendarIdStatus.calendarId);
+    }
+  }, [googleCalendarIdStatus?.calendarId, googleCalendarId]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -224,6 +252,70 @@ export default function SettingsPage() {
       });
     } finally {
       setIsTestingSendgrid(false);
+    }
+  };
+
+  const handleTestGeminiStored = async () => {
+    setIsTestingGeminiStored(true);
+    setTestResult(null);
+    try {
+      const res = await testGeminiKeyStoredFn({});
+      setTestResult(res);
+    } catch (err: unknown) {
+      setTestResult({
+        success: false,
+        error: (err as Error).message || "Test failed.",
+      });
+    } finally {
+      setIsTestingGeminiStored(false);
+    }
+  };
+
+  const handleTestSerperStored = async () => {
+    setIsTestingSerperStored(true);
+    setSerperTestResult(null);
+    try {
+      const res = await testSerperKeyStoredFn({});
+      setSerperTestResult(res);
+    } catch (err: unknown) {
+      setSerperTestResult({
+        success: false,
+        error: (err as Error).message || "Test failed.",
+      });
+    } finally {
+      setIsTestingSerperStored(false);
+    }
+  };
+
+  const handleTestFirecrawlStored = async () => {
+    setIsTestingFirecrawlStored(true);
+    setFirecrawlTestResult(null);
+    try {
+      const res = await testFirecrawlKeyStoredFn({});
+      setFirecrawlTestResult(res);
+    } catch (err: unknown) {
+      setFirecrawlTestResult({
+        success: false,
+        error: (err as Error).message || "Test failed.",
+      });
+    } finally {
+      setIsTestingFirecrawlStored(false);
+    }
+  };
+
+  const handleTestSendgridStored = async () => {
+    setIsTestingSendgridStored(true);
+    setSendgridTestResult(null);
+    try {
+      const res = await testSendgridKeyStoredFn({});
+      setSendgridTestResult(res);
+    } catch (err: unknown) {
+      setSendgridTestResult({
+        success: false,
+        error: (err as Error).message || "Test failed.",
+      });
+    } finally {
+      setIsTestingSendgridStored(false);
     }
   };
 
@@ -624,7 +716,7 @@ export default function SettingsPage() {
               successMessage="Connection successful! Gemini API is responding correctly."
             />
 
-            <div className="flex items-center gap-3 pt-5 border-t border-card-border">
+            <div className="flex flex-wrap items-center gap-3 pt-5 border-t border-card-border">
               <button
                 type="button"
                 onClick={handleTest}
@@ -634,28 +726,39 @@ export default function SettingsPage() {
                 {isTesting ? (
                   <ArrowPathIcon className="w-4 h-4 animate-spin" />
                 ) : (
-                  "Test Connection"
+                  "Test New Key"
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleTestGeminiStored}
+                disabled={isTestingGeminiStored || isSaving || isTesting}
+                className="px-5 py-2.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-600 text-sm font-semibold rounded-lg transition-all border border-emerald-500/20 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 flex items-center justify-center min-w-[150px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
+              >
+                {isTestingGeminiStored ? (
+                  <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                ) : (
+                  "Test Current"
                 )}
               </button>
 
               <button
                 type="submit"
-                disabled={!apiKey || isSaving || isTesting}
+                disabled={!apiKey || isSaving || isTesting || isTestingGeminiStored}
                 className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center min-w-[130px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
               >
                 {isSaving ? "Saving..." : "Save Key"}
               </button>
 
-              {status?.hasGeminiKey && (
-                <button
-                  type="button"
-                  onClick={handleRemove}
-                  disabled={isRemoving}
-                  className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
-                >
-                  {isRemoving ? "Disconnecting..." : "Disconnect"}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleRemove}
+                disabled={isRemoving}
+                className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
+              >
+                {isRemoving ? "Disconnecting..." : "Disconnect"}
+              </button>
             </div>
           </form>
         </div>
@@ -723,7 +826,7 @@ export default function SettingsPage() {
               successMessage="Connection successful! Serper API key is valid."
             />
 
-            <div className="flex items-center gap-3 pt-5 border-t border-card-border">
+            <div className="flex flex-wrap items-center gap-3 pt-5 border-t border-card-border">
               <button
                 type="button"
                 onClick={handleTestSerper}
@@ -733,28 +836,39 @@ export default function SettingsPage() {
                 {isTestingSerper ? (
                   <ArrowPathIcon className="w-4 h-4 animate-spin" />
                 ) : (
-                  "Test Connection"
+                  "Test New Key"
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleTestSerperStored}
+                disabled={isTestingSerperStored || isSavingSerper || isTestingSerper}
+                className="px-5 py-2.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-600 text-sm font-semibold rounded-lg transition-all border border-emerald-500/20 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 flex items-center justify-center min-w-[150px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
+              >
+                {isTestingSerperStored ? (
+                  <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                ) : (
+                  "Test Current"
                 )}
               </button>
 
               <button
                 type="submit"
-                disabled={!serperApiKey || isSavingSerper || isTestingSerper}
+                disabled={!serperApiKey || isSavingSerper || isTestingSerper || isTestingSerperStored}
                 className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center min-w-[130px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
               >
                 {isSavingSerper ? "Saving..." : "Save Key"}
               </button>
 
-              {serperStatus?.hasSerperKey && (
-                <button
-                  type="button"
-                  onClick={handleRemoveSerper}
-                  disabled={isRemovingSerper}
-                  className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
-                >
-                  {isRemovingSerper ? "Disconnecting..." : "Disconnect"}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleRemoveSerper}
+                disabled={isRemovingSerper}
+                className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
+              >
+                {isRemovingSerper ? "Disconnecting..." : "Disconnect"}
+              </button>
             </div>
           </form>
         </div>
@@ -822,7 +936,7 @@ export default function SettingsPage() {
               successMessage="Connection successful! Firecrawl API key is valid."
             />
 
-            <div className="flex items-center gap-3 pt-5 border-t border-card-border">
+            <div className="flex flex-wrap items-center gap-3 pt-5 border-t border-card-border">
               <button
                 type="button"
                 onClick={handleTestFirecrawl}
@@ -832,28 +946,39 @@ export default function SettingsPage() {
                 {isTestingFirecrawl ? (
                   <ArrowPathIcon className="w-4 h-4 animate-spin" />
                 ) : (
-                  "Test Connection"
+                  "Test New Key"
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleTestFirecrawlStored}
+                disabled={isTestingFirecrawlStored || isSavingFirecrawl || isTestingFirecrawl}
+                className="px-5 py-2.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-600 text-sm font-semibold rounded-lg transition-all border border-emerald-500/20 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 flex items-center justify-center min-w-[150px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
+              >
+                {isTestingFirecrawlStored ? (
+                  <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                ) : (
+                  "Test Current"
                 )}
               </button>
 
               <button
                 type="submit"
-                disabled={!firecrawlApiKey || isSavingFirecrawl || isTestingFirecrawl}
+                disabled={!firecrawlApiKey || isSavingFirecrawl || isTestingFirecrawl || isTestingFirecrawlStored}
                 className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center min-w-[130px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
               >
                 {isSavingFirecrawl ? "Saving..." : "Save Key"}
               </button>
 
-              {firecrawlStatus?.hasFirecrawlKey && (
-                <button
-                  type="button"
-                  onClick={handleRemoveFirecrawl}
-                  disabled={isRemovingFirecrawl}
-                  className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
-                >
-                  {isRemovingFirecrawl ? "Disconnecting..." : "Disconnect"}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleRemoveFirecrawl}
+                disabled={isRemovingFirecrawl}
+                className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
+              >
+                {isRemovingFirecrawl ? "Disconnecting..." : "Disconnect"}
+              </button>
             </div>
           </form>
         </div>
@@ -921,7 +1046,7 @@ export default function SettingsPage() {
               successMessage="Connection successful! SendGrid API key is valid."
             />
 
-            <div className="flex items-center gap-3 pt-5 border-t border-card-border">
+            <div className="flex flex-wrap items-center gap-3 pt-5 border-t border-card-border">
               <button
                 type="button"
                 onClick={handleTestSendgrid}
@@ -931,28 +1056,39 @@ export default function SettingsPage() {
                 {isTestingSendgrid ? (
                   <ArrowPathIcon className="w-4 h-4 animate-spin" />
                 ) : (
-                  "Test Connection"
+                  "Test New Key"
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleTestSendgridStored}
+                disabled={isTestingSendgridStored || isSavingSendgrid || isTestingSendgrid}
+                className="px-5 py-2.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-600 text-sm font-semibold rounded-lg transition-all border border-emerald-500/20 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 flex items-center justify-center min-w-[150px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
+              >
+                {isTestingSendgridStored ? (
+                  <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                ) : (
+                  "Test Current"
                 )}
               </button>
 
               <button
                 type="submit"
-                disabled={!sendgridApiKey || isSavingSendgrid || isTestingSendgrid}
+                disabled={!sendgridApiKey || isSavingSendgrid || isTestingSendgrid || isTestingSendgridStored}
                 className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center min-w-[130px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
               >
                 {isSavingSendgrid ? "Saving..." : "Save Key"}
               </button>
 
-              {sendgridStatus?.hasSendgridKey && (
-                <button
-                  type="button"
-                  onClick={handleRemoveSendgrid}
-                  disabled={isRemovingSendgrid}
-                  className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
-                >
-                  {isRemovingSendgrid ? "Disconnecting..." : "Disconnect"}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleRemoveSendgrid}
+                disabled={isRemovingSendgrid}
+                className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
+              >
+                {isRemovingSendgrid ? "Disconnecting..." : "Disconnect"}
+              </button>
             </div>
           </form>
         </div>
@@ -1003,11 +1139,7 @@ export default function SettingsPage() {
                 type="email"
                 value={sendgridFromEmail}
                 onChange={(e) => setSendgridFromEmail(e.target.value)}
-                placeholder={
-                  sendgridFromEmailStatus?.hasSendgridFromEmail
-                    ? sendgridFromEmailStatus.fromEmail || "outreach@fretbox.in"
-                    : "outreach@fretbox.in"
-                }
+                placeholder="outreach@fretbox.in"
                 className="flex h-11 w-full rounded-lg border border-card-border bg-background px-4 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-slate-500/50 focus:border-slate-500 transition-all shadow-sm"
               />
               <p className="text-[13px] text-muted-foreground">
@@ -1029,16 +1161,14 @@ export default function SettingsPage() {
                 {isSavingSendgridFromEmail ? "Saving..." : "Save Email"}
               </button>
 
-              {sendgridFromEmailStatus?.hasSendgridFromEmail && (
-                <button
-                  type="button"
-                  onClick={handleRemoveSendgridFromEmail}
-                  disabled={isRemovingSendgridFromEmail}
-                  className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
-                >
-                  {isRemovingSendgridFromEmail ? "Resetting..." : "Reset to Default"}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleRemoveSendgridFromEmail}
+                disabled={isRemovingSendgridFromEmail}
+                className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
+              >
+                {isRemovingSendgridFromEmail ? "Resetting..." : "Reset to Default"}
+              </button>
             </div>
           </form>
         </div>
@@ -1089,11 +1219,7 @@ export default function SettingsPage() {
                 type="text"
                 value={sendgridFromName}
                 onChange={(e) => setSendgridFromName(e.target.value)}
-                placeholder={
-                  sendgridFromNameStatus?.hasSendgridFromName
-                    ? sendgridFromNameStatus.fromName || "Ashish Gupta (Fretbox)"
-                    : "Ashish Gupta (Fretbox)"
-                }
+                placeholder="Ashish Gupta (Fretbox)"
                 className="flex h-11 w-full rounded-lg border border-card-border bg-background px-4 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-slate-500/50 focus:border-slate-500 transition-all shadow-sm"
               />
               <p className="text-[13px] text-muted-foreground">
@@ -1115,16 +1241,14 @@ export default function SettingsPage() {
                 {isSavingSendgridFromName ? "Saving..." : "Save Name"}
               </button>
 
-              {sendgridFromNameStatus?.hasSendgridFromName && (
-                <button
-                  type="button"
-                  onClick={handleRemoveSendgridFromName}
-                  disabled={isRemovingSendgridFromName}
-                  className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
-                >
-                  {isRemovingSendgridFromName ? "Resetting..." : "Reset to Default"}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleRemoveSendgridFromName}
+                disabled={isRemovingSendgridFromName}
+                className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
+              >
+                {isRemovingSendgridFromName ? "Resetting..." : "Reset to Default"}
+              </button>
             </div>
           </form>
         </div>
@@ -1213,16 +1337,14 @@ export default function SettingsPage() {
                 {isSavingGoogleCalendar ? "Saving..." : "Save JSON"}
               </button>
 
-              {googleCalendarStatus?.hasGoogleCalendarServiceAccount && (
-                <button
-                  type="button"
-                  onClick={handleRemoveGoogleCalendar}
-                  disabled={isRemovingGoogleCalendar}
-                  className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
-                >
-                  {isRemovingGoogleCalendar ? "Removing..." : "Remove"}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleRemoveGoogleCalendar}
+                disabled={isRemovingGoogleCalendar}
+                className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
+              >
+                {isRemovingGoogleCalendar ? "Removing..." : "Remove"}
+              </button>
             </div>
           </form>
         </div>
@@ -1273,11 +1395,7 @@ export default function SettingsPage() {
                 type="text"
                 value={googleCalendarId}
                 onChange={(e) => setGoogleCalendarId(e.target.value)}
-                placeholder={
-                  googleCalendarIdStatus?.hasGoogleCalendarId
-                    ? googleCalendarIdStatus.calendarId || "primary"
-                    : "primary"
-                }
+                placeholder="primary"
                 className="flex h-11 w-full rounded-lg border border-card-border bg-background px-4 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-red-500/50 focus:border-red-500 transition-all shadow-sm"
               />
               <p className="text-[13px] text-muted-foreground">
@@ -1299,16 +1417,14 @@ export default function SettingsPage() {
                 {isSavingGoogleCalendarId ? "Saving..." : "Save ID"}
               </button>
 
-              {googleCalendarIdStatus?.hasGoogleCalendarId && (
-                <button
-                  type="button"
-                  onClick={handleRemoveGoogleCalendarId}
-                  disabled={isRemovingGoogleCalendarId}
-                  className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
-                >
-                  {isRemovingGoogleCalendarId ? "Resetting..." : "Reset to Default"}
-                </button>
-              )}
+              <button
+                type="button"
+                onClick={handleRemoveGoogleCalendarId}
+                disabled={isRemovingGoogleCalendarId}
+                className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
+              >
+                {isRemovingGoogleCalendarId ? "Resetting..." : "Reset to Default"}
+              </button>
             </div>
           </form>
         </div>

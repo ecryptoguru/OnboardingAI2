@@ -1,8 +1,10 @@
 import { mutation, query, action, internalQuery, internalMutation } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { GoogleGenAI } from "@google/genai";
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { MODELS } from "./lib/llm";
+
+const GEMINI_TEST_MODEL = "gemini-3.5-flash";
 
 // ─── Auth helper ───────────────────────────────────────────────────────────
 // Centralises the dev-bypass check used across every settings endpoint.
@@ -137,7 +139,7 @@ export const testGeminiKey = action({
     try {
       const ai = new GoogleGenAI({ apiKey: args.apiKey, httpOptions: { timeout: 15000 } });
       const response = await ai.models.generateContent({
-        model: MODELS.gemini,
+        model: GEMINI_TEST_MODEL,
         contents: "Return only the word OK",
         config: { maxOutputTokens: 5 },
       });
@@ -159,6 +161,31 @@ export const testGeminiKey = action({
         success: false,
         error: errorMessage,
       };
+    }
+  },
+});
+
+export const testGeminiKeyStored = action({
+  args: {},
+  handler: async (ctx) => {
+    await ensureAuth(ctx);
+    const key = await ctx.runQuery(internal.settings.getInternalGeminiKey) as string | null;
+    if (!key) {
+      return { success: false, error: "No Gemini API key configured." };
+    }
+    try {
+      const ai = new GoogleGenAI({ apiKey: key, httpOptions: { timeout: 15000 } });
+      const response = await ai.models.generateContent({
+        model: GEMINI_TEST_MODEL,
+        contents: "Return only the word OK",
+        config: { maxOutputTokens: 5 },
+      });
+      if (response && response.text && response.text.toLowerCase().includes("ok")) {
+        return { success: true };
+      }
+      return { success: false, error: "Received unexpected response from Gemini." };
+    } catch (e: unknown) {
+      return { success: false, error: (e instanceof Error ? e.message : "Failed to validate stored API key.") };
     }
   },
 });
@@ -206,6 +233,35 @@ export const testSerperKey = action({
   },
 });
 
+export const testSerperKeyStored = action({
+  args: {},
+  handler: async (ctx) => {
+    await ensureAuth(ctx);
+    const key = await ctx.runQuery(internal.settings.getInternalSerperKey) as string | null;
+    if (!key) {
+      return { success: false, error: "No Serper API key configured." };
+    }
+    try {
+      const res = await fetch("https://google.serper.dev/search", {
+        method: "POST",
+        headers: {
+          "X-API-KEY": key,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ q: "test" }),
+        signal: AbortSignal.timeout(10000),
+      });
+      if (res.ok) {
+        return { success: true };
+      }
+      const err = await res.text().catch(() => "Invalid response");
+      return { success: false, error: `Serper API error (${res.status}): ${err}` };
+    } catch (e: unknown) {
+      return { success: false, error: (e as Error).message || "Failed to test stored Serper key." };
+    }
+  },
+});
+
 export const testFirecrawlKey = action({
   args: { apiKey: v.string() },
   handler: async (ctx, args) => {
@@ -233,6 +289,35 @@ export const testFirecrawlKey = action({
   },
 });
 
+export const testFirecrawlKeyStored = action({
+  args: {},
+  handler: async (ctx) => {
+    await ensureAuth(ctx);
+    const key = await ctx.runQuery(internal.settings.getInternalFirecrawlKey) as string | null;
+    if (!key) {
+      return { success: false, error: "No Firecrawl API key configured." };
+    }
+    try {
+      const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ url: "https://example.com" }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (res.ok || res.status === 402) {
+        return { success: true };
+      }
+      const err = await res.text().catch(() => "Invalid response");
+      return { success: false, error: `Firecrawl API error (${res.status}): ${err}` };
+    } catch (e: unknown) {
+      return { success: false, error: (e as Error).message || "Failed to test stored Firecrawl key." };
+    }
+  },
+});
+
 export const testSendgridKey = action({
   args: { apiKey: v.string() },
   handler: async (ctx, args) => {
@@ -253,6 +338,31 @@ export const testSendgridKey = action({
       return { success: false, error: `SendGrid API error (${res.status}): ${err}` };
     } catch (e: unknown) {
       return { success: false, error: (e as Error).message || "Failed to test SendGrid key." };
+    }
+  },
+});
+
+export const testSendgridKeyStored = action({
+  args: {},
+  handler: async (ctx) => {
+    await ensureAuth(ctx);
+    const key = await ctx.runQuery(internal.settings.getInternalSendgridKey) as string | null;
+    if (!key) {
+      return { success: false, error: "No SendGrid API key configured." };
+    }
+    try {
+      const res = await fetch("https://api.sendgrid.com/v3/user/profile", {
+        method: "GET",
+        headers: { Authorization: `Bearer ${key}` },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (res.ok) {
+        return { success: true };
+      }
+      const err = await res.text().catch(() => "Invalid response");
+      return { success: false, error: `SendGrid API error (${res.status}): ${err}` };
+    } catch (e: unknown) {
+      return { success: false, error: (e as Error).message || "Failed to test stored SendGrid key." };
     }
   },
 });
