@@ -647,8 +647,12 @@ function MeetingConfirmModal({
   );
   defaultDate.setMinutes(0, 0, 0);
   const toLocalInputValue = (value: Date) => {
-    const localMs = value.getTime() - value.getTimezoneOffset() * 60_000;
-    return new Date(localMs).toISOString().slice(0, 16);
+    const year = value.getFullYear();
+    const month = String(value.getMonth() + 1).padStart(2, '0');
+    const day = String(value.getDate()).padStart(2, '0');
+    const hours = String(value.getHours()).padStart(2, '0');
+    const minutes = String(value.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
   };
 
   const [dateTime, setDateTime] = useState(toLocalInputValue(defaultDate));
