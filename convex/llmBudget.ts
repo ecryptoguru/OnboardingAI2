@@ -9,11 +9,9 @@ function getTodayKey(): string {
 }
 
 function getMaxBudgetUsd(): number {
-  const env = process.env.LLM_DAILY_BUDGET_USD;
-  if (env) {
-    const parsed = parseFloat(env);
-    if (!isNaN(parsed) && parsed > 0) return parsed;
-  }
+  // NOTE: Queries/mutations run in V8 isolate and cannot access process.env.
+  // Environment variable configuration should be handled at the action level
+  // or stored in the database if dynamic configuration is needed.
   return DEFAULT_DAILY_BUDGET_USD;
 }
 
