@@ -17,7 +17,7 @@ export default convexAuthNextjsMiddleware(
     }
   },
   {
-    convexUrl: "https://energetic-raven-535.convex.cloud",
+    convexUrl: process.env.NEXT_PUBLIC_CONVEX_URL!,
   },
 );
 

@@ -100,7 +100,7 @@ export function TestResultAlert({ result, successMessage }: TestResultAlertProps
         <XCircleIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
       )}
       <div className="text-sm font-medium leading-relaxed">
-        {result.success ? successMessage : displayError}
+        {result.success ? (result.error || successMessage) : displayError}
       </div>
     </div>
   );

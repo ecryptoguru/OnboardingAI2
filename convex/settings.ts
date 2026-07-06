@@ -1,10 +1,9 @@
-import { mutation, query, action, internalQuery, internalMutation, QueryCtx, MutationCtx, ActionCtx } from "./_generated/server";
+import { mutation, query, action, internalQuery, QueryCtx, MutationCtx, ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { GoogleGenAI } from "@google/genai";
 import { getAuthUserId } from "@convex-dev/auth/server";
-
-const GEMINI_TEST_MODEL = "gemini-3.5-flash";
+import { MODELS } from "./lib/models";
 
 // ─── Auth helper ───────────────────────────────────────────────────────────
 // Centralises the dev-bypass check used across every settings endpoint.
@@ -147,7 +146,7 @@ export const testGeminiKey = action({
     try {
       const ai = new GoogleGenAI({ apiKey: args.apiKey, httpOptions: { timeout: 15000 } });
       const response = await ai.models.generateContent({
-        model: GEMINI_TEST_MODEL,
+        model: MODELS.gemini,
         contents: "Return only the word OK",
         config: { maxOutputTokens: 5 },
       });
@@ -184,7 +183,7 @@ export const testGeminiKeyStored = action({
     try {
       const ai = new GoogleGenAI({ apiKey: key, httpOptions: { timeout: 15000 } });
       const response = await ai.models.generateContent({
-        model: GEMINI_TEST_MODEL,
+        model: MODELS.gemini,
         contents: "Return only the word OK",
         config: { maxOutputTokens: 5 },
       });
@@ -408,7 +407,6 @@ export const getSerperKeyStatus = query({
 
     return {
       hasSerperKey: !!doc?.value,
-      isEnvFallback: false,
     };
   },
 });
@@ -457,31 +455,6 @@ export const setSerperKey = mutation({
   },
 });
 
-export const setSerperKeyInternal = internalMutation({
-  args: { apiKey: v.string() },
-  handler: async (ctx, args) => {
-    if (args.apiKey.length < 32) {
-      throw new Error("Invalid Serper API Key format");
-    }
-
-    const doc = await ctx.db
-      .query("systemSettings")
-      .withIndex("by_key", (q) => q.eq("configKey", "serperApiKey"))
-      .first();
-
-    const cipher = obfuscate(args.apiKey);
-    if (doc) {
-      await ctx.db.patch(doc._id, { value: cipher });
-    } else {
-      await ctx.db.insert("systemSettings", {
-        configKey: "serperApiKey",
-        value: cipher,
-      });
-    }
-    return { success: true };
-  },
-});
-
 export const removeSerperKey = mutation({
   args: {},
   handler: async (ctx) => {
@@ -499,7 +472,6 @@ export const removeSerperKey = mutation({
   },
 });
 
-// Temporary internal mutation to clear old Serper key without auth
 // --- FIRECRAWL API KEY ---
 
 export const getFirecrawlKeyStatus = query({
@@ -543,27 +515,6 @@ export const setFirecrawlKey = mutation({
       throw new Error("Invalid Firecrawl API Key format");
     }
 
-    const doc = await ctx.db
-      .query("systemSettings")
-      .withIndex("by_key", (q) => q.eq("configKey", "firecrawlApiKey"))
-      .first();
-
-    const cipher = obfuscate(args.apiKey);
-    if (doc) {
-      await ctx.db.patch(doc._id, { value: cipher });
-    } else {
-      await ctx.db.insert("systemSettings", {
-        configKey: "firecrawlApiKey",
-        value: cipher,
-      });
-    }
-    return { success: true };
-  },
-});
-
-export const setFirecrawlKeyInternal = internalMutation({
-  args: { apiKey: v.string() },
-  handler: async (ctx, args) => {
     const doc = await ctx.db
       .query("systemSettings")
       .withIndex("by_key", (q) => q.eq("configKey", "firecrawlApiKey"))
@@ -1021,9 +972,9 @@ export const getInternalZeptomailFromName = internalQuery({
       .first();
     if (doc?.value) {
       try {
-        return (deobfuscate(doc.value) ?? doc.value).trim() || "Ashish Gupta (Fretbox)";
+        return sanitizeStringValue(deobfuscate(doc.value)) ?? sanitizeStringValue(doc.value) ?? "Ashish Gupta (Fretbox)";
       } catch {
-        return (doc.value || "Ashish Gupta (Fretbox)").trim();
+        return sanitizeStringValue(doc.value) ?? "Ashish Gupta (Fretbox)";
       }
     }
     return "Ashish Gupta (Fretbox)";

@@ -4,58 +4,65 @@ import { useState, useEffect } from "react";
 import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { KeyIcon, ArrowPathIcon, EyeIcon, EyeSlashIcon, TrashIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
-import { PasswordInput, TestResultAlert, StatusBadge } from "./components";
+import { TestResultAlert, StatusBadge } from "./components";
+import { ApiKeySection } from "./ApiKeySection";
 
 export default function SettingsPage() {
-  const status = useQuery(api.settings.getGeminiKeyStatus);
-  const setKey = useMutation(api.settings.setGeminiKey);
-  const testKey = useAction(api.settings.testGeminiKey);
-  const removeKey = useMutation(api.settings.removeGeminiKey);
+  // --- Gemini ---
+  const geminiStatus = useQuery(api.settings.getGeminiKeyStatus);
+  const setGeminiKeyFn = useMutation(api.settings.setGeminiKey);
+  const testGeminiKeyFn = useAction(api.settings.testGeminiKey);
+  const removeGeminiKeyFn = useMutation(api.settings.removeGeminiKey);
+  const testGeminiKeyStoredFn = useAction(api.settings.testGeminiKeyStored);
 
-  const [apiKey, setApiKey] = useState("");
-  const [isSaving, setIsSaving] = useState(false);
-  const [isTesting, setIsTesting] = useState(false);
-  const [isRemoving, setIsRemoving] = useState(false);
-  const [testResult, setTestResult] = useState<{
-    success?: boolean;
-    error?: string;
-  } | null>(null);
+  const [geminiTestResult, setGeminiTestResult] = useState<{ success?: boolean; error?: string } | null>(null);
+  const [isSavingGemini, setIsSavingGemini] = useState(false);
+  const [isTestingGemini, setIsTestingGemini] = useState(false);
+  const [isTestingGeminiStored, setIsTestingGeminiStored] = useState(false);
+  const [isRemovingGemini, setIsRemovingGemini] = useState(false);
+  const [showGeminiKey, setShowGeminiKey] = useState(false);
 
+  // --- Serper ---
   const serperStatus = useQuery(api.settings.getSerperKeyStatus);
   const setSerperKeyFn = useMutation(api.settings.setSerperKey);
+  const testSerperKeyFn = useAction(api.settings.testSerperKey);
   const removeSerperKeyFn = useMutation(api.settings.removeSerperKey);
+  const testSerperKeyStoredFn = useAction(api.settings.testSerperKeyStored);
 
-  const [serperApiKey, setSerperApiKey] = useState("");
+  const [serperTestResult, setSerperTestResult] = useState<{ success?: boolean; error?: string } | null>(null);
   const [isSavingSerper, setIsSavingSerper] = useState(false);
+  const [isTestingSerper, setIsTestingSerper] = useState(false);
+  const [isTestingSerperStored, setIsTestingSerperStored] = useState(false);
   const [isRemovingSerper, setIsRemovingSerper] = useState(false);
-  const [serperTestResult, setSerperTestResult] = useState<{
-    success?: boolean;
-    error?: string;
-  } | null>(null);
+  const [showSerperKey, setShowSerperKey] = useState(false);
 
+  // --- Firecrawl ---
   const firecrawlStatus = useQuery(api.settings.getFirecrawlKeyStatus);
   const setFirecrawlKeyFn = useMutation(api.settings.setFirecrawlKey);
+  const testFirecrawlKeyFn = useAction(api.settings.testFirecrawlKey);
   const removeFirecrawlKeyFn = useMutation(api.settings.removeFirecrawlKey);
+  const testFirecrawlKeyStoredFn = useAction(api.settings.testFirecrawlKeyStored);
 
-  const [firecrawlApiKey, setFirecrawlApiKey] = useState("");
+  const [firecrawlTestResult, setFirecrawlTestResult] = useState<{ success?: boolean; error?: string } | null>(null);
   const [isSavingFirecrawl, setIsSavingFirecrawl] = useState(false);
+  const [isTestingFirecrawl, setIsTestingFirecrawl] = useState(false);
+  const [isTestingFirecrawlStored, setIsTestingFirecrawlStored] = useState(false);
   const [isRemovingFirecrawl, setIsRemovingFirecrawl] = useState(false);
-  const [firecrawlTestResult, setFirecrawlTestResult] = useState<{
-    success?: boolean;
-    error?: string;
-  } | null>(null);
+  const [showFirecrawlKey, setShowFirecrawlKey] = useState(false);
 
+  // --- ZeptoMail ---
   const zeptomailStatus = useQuery(api.settings.getZeptomailKeyStatus);
   const setZeptomailKeyFn = useMutation(api.settings.setZeptomailKey);
+  const testZeptomailKeyFn = useAction(api.settings.testZeptomailKey);
   const removeZeptomailKeyFn = useMutation(api.settings.removeZeptomailKey);
+  const testZeptomailKeyStoredFn = useAction(api.settings.testZeptomailKeyStored);
 
-  const [zeptomailApiKey, setZeptomailApiKey] = useState("");
+  const [zeptomailTestResult, setZeptomailTestResult] = useState<{ success?: boolean; error?: string } | null>(null);
   const [isSavingZeptomail, setIsSavingZeptomail] = useState(false);
+  const [isTestingZeptomail, setIsTestingZeptomail] = useState(false);
+  const [isTestingZeptomailStored, setIsTestingZeptomailStored] = useState(false);
   const [isRemovingZeptomail, setIsRemovingZeptomail] = useState(false);
-  const [zeptomailTestResult, setZeptomailTestResult] = useState<{
-    success?: boolean;
-    error?: string;
-  } | null>(null);
+  const [showZeptomailKey, setShowZeptomailKey] = useState(false);
 
   const zeptomailFromEmailStatus = useQuery(api.settings.getZeptomailFromEmailStatus);
   const setZeptomailFromEmailFn = useMutation(api.settings.setZeptomailFromEmail);
@@ -81,10 +88,6 @@ export default function SettingsPage() {
     error?: string;
   } | null>(null);
 
-  const [showGeminiKey, setShowGeminiKey] = useState(false);
-  const [showSerperKey, setShowSerperKey] = useState(false);
-  const [showFirecrawlKey, setShowFirecrawlKey] = useState(false);
-  const [showZeptomailKey, setShowZeptomailKey] = useState(false);
   const [showGoogleCalendarJson, setShowGoogleCalendarJson] = useState(false);
 
   const wipeEverything = useMutation(api.wipeAllData.wipeEverything);
@@ -92,23 +95,6 @@ export default function SettingsPage() {
   const [wipeConfirmText, setWipeConfirmText] = useState("");
   const [showWipeModal, setShowWipeModal] = useState(false);
   const [wipeResult, setWipeResult] = useState<{ success?: boolean; message?: string } | null>(null);
-
-  const testSerperKeyFn = useAction(api.settings.testSerperKey);
-  const testFirecrawlKeyFn = useAction(api.settings.testFirecrawlKey);
-  const testZeptomailKeyFn = useAction(api.settings.testZeptomailKey);
-
-  const testGeminiKeyStoredFn = useAction(api.settings.testGeminiKeyStored);
-  const testSerperKeyStoredFn = useAction(api.settings.testSerperKeyStored);
-  const testFirecrawlKeyStoredFn = useAction(api.settings.testFirecrawlKeyStored);
-  const testZeptomailKeyStoredFn = useAction(api.settings.testZeptomailKeyStored);
-
-  const [isTestingSerper, setIsTestingSerper] = useState(false);
-  const [isTestingFirecrawl, setIsTestingFirecrawl] = useState(false);
-  const [isTestingZeptomail, setIsTestingZeptomail] = useState(false);
-  const [isTestingGeminiStored, setIsTestingGeminiStored] = useState(false);
-  const [isTestingSerperStored, setIsTestingSerperStored] = useState(false);
-  const [isTestingFirecrawlStored, setIsTestingFirecrawlStored] = useState(false);
-  const [isTestingZeptomailStored, setIsTestingZeptomailStored] = useState(false);
 
   const googleCalendarStatus = useQuery(api.settings.getGoogleCalendarStatus);
   const setGoogleCalendarJsonFn = useMutation(api.settings.setGoogleCalendarJson);
@@ -156,121 +142,84 @@ export default function SettingsPage() {
     }
   }, [googleCalendarIdStatus?.calendarId, googleCalendarId]);
 
-  const handleSave = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!apiKey) return;
+  // --- Handlers for standard API key sections (Gemini, Serper, Firecrawl, ZeptoMail) ---
 
-    setIsSaving(true);
-    setTestResult(null);
+  const handleSaveGemini = async (key: string) => {
+    setIsSavingGemini(true);
+    setGeminiTestResult(null);
     try {
-      await setKey({ apiKey });
-      setApiKey(""); // Clear it from local state after saving for security
-      setTestResult({ success: true });
-      // The status query will automatically update "Current Integration Status"
+      await setGeminiKeyFn({ apiKey: key });
+      setGeminiTestResult({ success: true });
     } catch (err: unknown) {
-      setTestResult({
-        success: false,
-        error: (err as Error).message || "Failed to save key.",
-      });
+      setGeminiTestResult({ success: false, error: (err as Error).message || "Failed to save key." });
     } finally {
-      setIsSaving(false);
+      setIsSavingGemini(false);
     }
   };
 
-  const handleTest = async () => {
-    if (!apiKey) {
-      setTestResult({ success: false, error: "Please enter a key to test." });
-      return;
-    }
-
-    setIsTesting(true);
-    setTestResult(null);
+  const handleTestGeminiNew = async (key: string) => {
+    setIsTestingGemini(true);
+    setGeminiTestResult(null);
     try {
-      const res = await testKey({ apiKey });
-      setTestResult(res);
+      const res = await testGeminiKeyFn({ apiKey: key });
+      setGeminiTestResult(res);
     } catch (err: unknown) {
-      setTestResult({
-        success: false,
-        error: (err as Error).message || "Test failed.",
-      });
+      setGeminiTestResult({ success: false, error: (err as Error).message || "Test failed." });
     } finally {
-      setIsTesting(false);
-    }
-  };
-
-  const handleTestSerper = async () => {
-    if (!serperApiKey) {
-      setSerperTestResult({ success: false, error: "Please enter a key to test." });
-      return;
-    }
-    setIsTestingSerper(true);
-    setSerperTestResult(null);
-    try {
-      const res = await testSerperKeyFn({ apiKey: serperApiKey });
-      setSerperTestResult(res);
-    } catch (err: unknown) {
-      setSerperTestResult({
-        success: false,
-        error: (err as Error).message || "Test failed.",
-      });
-    } finally {
-      setIsTestingSerper(false);
-    }
-  };
-
-  const handleTestFirecrawl = async () => {
-    if (!firecrawlApiKey) {
-      setFirecrawlTestResult({ success: false, error: "Please enter a key to test." });
-      return;
-    }
-    setIsTestingFirecrawl(true);
-    setFirecrawlTestResult(null);
-    try {
-      const res = await testFirecrawlKeyFn({ apiKey: firecrawlApiKey });
-      setFirecrawlTestResult(res);
-    } catch (err: unknown) {
-      setFirecrawlTestResult({
-        success: false,
-        error: (err as Error).message || "Test failed.",
-      });
-    } finally {
-      setIsTestingFirecrawl(false);
-    }
-  };
-
-  const handleTestZeptomail = async () => {
-    if (!zeptomailApiKey) {
-      setZeptomailTestResult({ success: false, error: "Please enter a key to test." });
-      return;
-    }
-    setIsTestingZeptomail(true);
-    setZeptomailTestResult(null);
-    try {
-      const res = await testZeptomailKeyFn({ apiKey: zeptomailApiKey });
-      setZeptomailTestResult(res);
-    } catch (err: unknown) {
-      setZeptomailTestResult({
-        success: false,
-        error: (err as Error).message || "Test failed.",
-      });
-    } finally {
-      setIsTestingZeptomail(false);
+      setIsTestingGemini(false);
     }
   };
 
   const handleTestGeminiStored = async () => {
     setIsTestingGeminiStored(true);
-    setTestResult(null);
+    setGeminiTestResult(null);
     try {
       const res = await testGeminiKeyStoredFn({});
-      setTestResult(res);
+      setGeminiTestResult(res);
     } catch (err: unknown) {
-      setTestResult({
-        success: false,
-        error: (err as Error).message || "Test failed.",
-      });
+      setGeminiTestResult({ success: false, error: (err as Error).message || "Test failed." });
     } finally {
       setIsTestingGeminiStored(false);
+    }
+  };
+
+  const handleRemoveGemini = async () => {
+    if (!confirm("Are you sure you want to disconnect the Gemini API? This will remove the stored key.")) return;
+    setIsRemovingGemini(true);
+    setGeminiTestResult(null);
+    try {
+      await removeGeminiKeyFn();
+      setGeminiTestResult({ success: true, error: "API Key removed successfully." });
+    } catch (err: unknown) {
+      setGeminiTestResult({ success: false, error: (err as Error).message || "Failed to remove key." });
+    } finally {
+      setIsRemovingGemini(false);
+    }
+  };
+
+  const handleSaveSerper = async (key: string) => {
+    setIsSavingSerper(true);
+    setSerperTestResult(null);
+    try {
+      await setSerperKeyFn({ apiKey: key });
+      setSerperTestResult({ success: true });
+    } catch (err: unknown) {
+      setSerperTestResult({ success: false, error: (err as Error).message || "Failed to save key." });
+    } finally {
+      setIsSavingSerper(false);
+    }
+  };
+
+  const handleTestSerperNew = async (key: string) => {
+    setIsTestingSerper(true);
+    setSerperTestResult(null);
+    try {
+      const res = await testSerperKeyFn({ apiKey: key });
+      setSerperTestResult(res);
+    } catch (err: unknown) {
+      setSerperTestResult({ success: false, error: (err as Error).message || "Test failed." });
+    } finally {
+      setIsTestingSerper(false);
     }
   };
 
@@ -281,12 +230,49 @@ export default function SettingsPage() {
       const res = await testSerperKeyStoredFn({});
       setSerperTestResult(res);
     } catch (err: unknown) {
-      setSerperTestResult({
-        success: false,
-        error: (err as Error).message || "Test failed.",
-      });
+      setSerperTestResult({ success: false, error: (err as Error).message || "Test failed." });
     } finally {
       setIsTestingSerperStored(false);
+    }
+  };
+
+  const handleRemoveSerper = async () => {
+    if (!confirm("Are you sure you want to disconnect the Serper API?")) return;
+    setIsRemovingSerper(true);
+    setSerperTestResult(null);
+    try {
+      await removeSerperKeyFn();
+      setSerperTestResult({ success: true, error: "API Key removed successfully." });
+    } catch (err: unknown) {
+      setSerperTestResult({ success: false, error: (err as Error).message || "Failed to remove key." });
+    } finally {
+      setIsRemovingSerper(false);
+    }
+  };
+
+  const handleSaveFirecrawl = async (key: string) => {
+    setIsSavingFirecrawl(true);
+    setFirecrawlTestResult(null);
+    try {
+      await setFirecrawlKeyFn({ apiKey: key });
+      setFirecrawlTestResult({ success: true });
+    } catch (err: unknown) {
+      setFirecrawlTestResult({ success: false, error: (err as Error).message || "Failed to save key." });
+    } finally {
+      setIsSavingFirecrawl(false);
+    }
+  };
+
+  const handleTestFirecrawlNew = async (key: string) => {
+    setIsTestingFirecrawl(true);
+    setFirecrawlTestResult(null);
+    try {
+      const res = await testFirecrawlKeyFn({ apiKey: key });
+      setFirecrawlTestResult(res);
+    } catch (err: unknown) {
+      setFirecrawlTestResult({ success: false, error: (err as Error).message || "Test failed." });
+    } finally {
+      setIsTestingFirecrawl(false);
     }
   };
 
@@ -297,12 +283,49 @@ export default function SettingsPage() {
       const res = await testFirecrawlKeyStoredFn({});
       setFirecrawlTestResult(res);
     } catch (err: unknown) {
-      setFirecrawlTestResult({
-        success: false,
-        error: (err as Error).message || "Test failed.",
-      });
+      setFirecrawlTestResult({ success: false, error: (err as Error).message || "Test failed." });
     } finally {
       setIsTestingFirecrawlStored(false);
+    }
+  };
+
+  const handleRemoveFirecrawl = async () => {
+    if (!confirm("Are you sure you want to disconnect the Firecrawl API?")) return;
+    setIsRemovingFirecrawl(true);
+    setFirecrawlTestResult(null);
+    try {
+      await removeFirecrawlKeyFn();
+      setFirecrawlTestResult({ success: true, error: "API Key removed successfully." });
+    } catch (err: unknown) {
+      setFirecrawlTestResult({ success: false, error: (err as Error).message || "Failed to remove key." });
+    } finally {
+      setIsRemovingFirecrawl(false);
+    }
+  };
+
+  const handleSaveZeptomail = async (key: string) => {
+    setIsSavingZeptomail(true);
+    setZeptomailTestResult(null);
+    try {
+      await setZeptomailKeyFn({ apiKey: key });
+      setZeptomailTestResult({ success: true });
+    } catch (err: unknown) {
+      setZeptomailTestResult({ success: false, error: (err as Error).message || "Failed to save key." });
+    } finally {
+      setIsSavingZeptomail(false);
+    }
+  };
+
+  const handleTestZeptomailNew = async (key: string) => {
+    setIsTestingZeptomail(true);
+    setZeptomailTestResult(null);
+    try {
+      const res = await testZeptomailKeyFn({ apiKey: key });
+      setZeptomailTestResult(res);
+    } catch (err: unknown) {
+      setZeptomailTestResult({ success: false, error: (err as Error).message || "Test failed." });
+    } finally {
+      setIsTestingZeptomail(false);
     }
   };
 
@@ -313,166 +336,27 @@ export default function SettingsPage() {
       const res = await testZeptomailKeyStoredFn({});
       setZeptomailTestResult(res);
     } catch (err: unknown) {
-      setZeptomailTestResult({
-        success: false,
-        error: (err as Error).message || "Test failed.",
-      });
+      setZeptomailTestResult({ success: false, error: (err as Error).message || "Test failed." });
     } finally {
       setIsTestingZeptomailStored(false);
     }
   };
 
-  const handleRemove = async () => {
-    if (
-      !confirm(
-        "Are you sure you want to disconnect the Gemini API? This will remove the stored key.",
-      )
-    )
-      return;
-
-    setIsRemoving(true);
-    setTestResult(null);
-    try {
-      await removeKey();
-      setApiKey("");
-      setTestResult({ success: true, error: "API Key removed successfully." });
-    } catch (err: unknown) {
-      setTestResult({
-        success: false,
-        error: (err as Error).message || "Failed to remove key.",
-      });
-    } finally {
-      setIsRemoving(false);
-    }
-  };
-
-  const handleSaveFirecrawl = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!firecrawlApiKey) return;
-
-    setIsSavingFirecrawl(true);
-    setFirecrawlTestResult(null);
-    try {
-      await setFirecrawlKeyFn({ apiKey: firecrawlApiKey });
-      setFirecrawlApiKey("");
-      setFirecrawlTestResult({ success: true });
-    } catch (err: unknown) {
-      setFirecrawlTestResult({
-        success: false,
-        error: (err as Error).message || "Failed to save key.",
-      });
-    } finally {
-      setIsSavingFirecrawl(false);
-    }
-  };
-
-  const handleRemoveFirecrawl = async () => {
-    if (!confirm("Are you sure you want to disconnect the Firecrawl API?"))
-      return;
-
-    setIsRemovingFirecrawl(true);
-    setFirecrawlTestResult(null);
-    try {
-      await removeFirecrawlKeyFn();
-      setFirecrawlApiKey("");
-      setFirecrawlTestResult({
-        success: true,
-        error: "API Key removed successfully.",
-      });
-    } catch (err: unknown) {
-      setFirecrawlTestResult({
-        success: false,
-        error: (err as Error).message || "Failed to remove key.",
-      });
-    } finally {
-      setIsRemovingFirecrawl(false);
-    }
-  };
-
-  const handleSaveZeptomail = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!zeptomailApiKey) return;
-
-    setIsSavingZeptomail(true);
-    setZeptomailTestResult(null);
-    try {
-      await setZeptomailKeyFn({ apiKey: zeptomailApiKey });
-      setZeptomailApiKey("");
-      setZeptomailTestResult({ success: true });
-    } catch (err: unknown) {
-      setZeptomailTestResult({
-        success: false,
-        error: (err as Error).message || "Failed to save key.",
-      });
-    } finally {
-      setIsSavingZeptomail(false);
-    }
-  };
-
   const handleRemoveZeptomail = async () => {
-    if (!confirm("Are you sure you want to disconnect the ZeptoMail API?"))
-      return;
-
+    if (!confirm("Are you sure you want to disconnect the ZeptoMail API?")) return;
     setIsRemovingZeptomail(true);
     setZeptomailTestResult(null);
     try {
       await removeZeptomailKeyFn();
-      setZeptomailApiKey("");
-      setZeptomailTestResult({
-        success: true,
-        error: "API Key removed successfully.",
-      });
+      setZeptomailTestResult({ success: true, error: "API Key removed successfully." });
     } catch (err: unknown) {
-      setZeptomailTestResult({
-        success: false,
-        error: (err as Error).message || "Failed to remove key.",
-      });
+      setZeptomailTestResult({ success: false, error: (err as Error).message || "Failed to remove key." });
     } finally {
       setIsRemovingZeptomail(false);
     }
   };
 
-  const handleSaveSerper = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!serperApiKey) return;
-
-    setIsSavingSerper(true);
-    setSerperTestResult(null);
-    try {
-      await setSerperKeyFn({ apiKey: serperApiKey });
-      setSerperApiKey("");
-      setSerperTestResult({ success: true });
-    } catch (err: unknown) {
-      setSerperTestResult({
-        success: false,
-        error: (err as Error).message || "Failed to save key.",
-      });
-    } finally {
-      setIsSavingSerper(false);
-    }
-  };
-
-  const handleRemoveSerper = async () => {
-    if (!confirm("Are you sure you want to disconnect the Serper API?")) return;
-
-    setIsRemovingSerper(true);
-    setSerperTestResult(null);
-    try {
-      await removeSerperKeyFn();
-      setSerperApiKey("");
-      setSerperTestResult({
-        success: true,
-        error: "API Key removed successfully.",
-      });
-    } catch (err: unknown) {
-      setSerperTestResult({
-        success: false,
-        error: (err as Error).message || "Failed to remove key.",
-      });
-    } finally {
-      setIsRemovingSerper(false);
-    }
-  };
+  // --- Handlers for custom sections (ZeptoMail From Email/Name, Google Calendar) ---
 
   const handleSaveZeptomailFromEmail = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -673,445 +557,93 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <div className="bg-card border border-card-border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-        <div className="p-6 border-b border-card-border bg-muted/20">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-blue-500/10 rounded-xl border border-blue-500/20 text-blue-500 shadow-inner">
-              <KeyIcon className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-foreground tracking-tight">
-                Google Gemini API Configuration
-              </h2>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                Used for complex reasoning, reply classification, and proposal
-                generation.
-              </p>
-            </div>
-          </div>
-        </div>
+      <ApiKeySection
+        title="Google Gemini API Configuration"
+        description="Used for complex reasoning, reply classification, and proposal generation."
+        iconColor="bg-blue-500/10 border border-blue-500/20 text-blue-500"
+        ringColor="blue"
+        isConfigured={geminiStatus?.hasGeminiKey}
+        placeholderConfigured="••••••••••••••••••••••••••••"
+        placeholderEmpty="AIzaSy..."
+        testResult={geminiTestResult}
+        isSaving={isSavingGemini}
+        isTestingNew={isTestingGemini}
+        isTestingStored={isTestingGeminiStored}
+        isRemoving={isRemovingGemini}
+        showKey={showGeminiKey}
+        onSave={handleSaveGemini}
+        onTestNew={handleTestGeminiNew}
+        onTestStored={handleTestGeminiStored}
+        onRemove={handleRemoveGemini}
+        onToggleShow={() => setShowGeminiKey((s) => !s)}
+        successMessage="Connection successful! Gemini API is responding correctly."
+      />
 
-        <div className="p-6 space-y-6">
-          <div className="flex items-center justify-between bg-background border border-card-border p-4 rounded-lg">
-            <span className="text-sm font-medium text-foreground">
-              Current Integration Status
-            </span>
-            <StatusBadge
-              isConfigured={status?.hasGeminiKey}
-              configuredLabel="Key Actively Configured"
-              unconfiguredLabel="Not Configured"
-            />
-          </div>
+      <ApiKeySection
+        title="Serper API Configuration"
+        description="Used for Google Search, News, and Image discovery during enrichment."
+        iconColor="bg-emerald-500/10 border border-emerald-500/20 text-emerald-500"
+        ringColor="emerald"
+        isConfigured={serperStatus?.hasSerperKey}
+        placeholderConfigured="••••••••••••••••••••••••••••"
+        placeholderEmpty="Paste your Serper API Key..."
+        testResult={serperTestResult}
+        isSaving={isSavingSerper}
+        isTestingNew={isTestingSerper}
+        isTestingStored={isTestingSerperStored}
+        isRemoving={isRemovingSerper}
+        showKey={showSerperKey}
+        onSave={handleSaveSerper}
+        onTestNew={handleTestSerperNew}
+        onTestStored={handleTestSerperStored}
+        onRemove={handleRemoveSerper}
+        onToggleShow={() => setShowSerperKey((s) => !s)}
+        successMessage="Connection successful! Serper API key is valid."
+      />
 
-          <form onSubmit={handleSave} className="space-y-5">
-            <div className="space-y-2.5">
-              <label
-                htmlFor="apiKey"
-                className="text-sm font-semibold text-foreground"
-              >
-                API Key
-              </label>
-              <PasswordInput
-                id="apiKey"
-                value={apiKey}
-                onChange={setApiKey}
-                placeholder={
-                  status?.hasGeminiKey
-                    ? "••••••••••••••••••••••••••••"
-                    : "AIzaSy..."
-                }
-                show={showGeminiKey}
-                onToggleShow={() => setShowGeminiKey((s) => !s)}
-                ringColor="blue"
-              />
-              <p className="text-[13px] text-muted-foreground">
-                Your key will be securely stored in the database. Leave blank to
-                keep the current key.
-              </p>
-            </div>
+      <ApiKeySection
+        title="Firecrawl API Configuration"
+        description="Used for deep web crawling, sitemap discovery, and contact extraction."
+        iconColor="bg-orange-500/10 border border-orange-500/20 text-orange-500"
+        ringColor="orange"
+        isConfigured={firecrawlStatus?.hasFirecrawlKey}
+        placeholderConfigured="••••••••••••••••••••••••••••"
+        placeholderEmpty="Paste your Firecrawl API Key..."
+        testResult={firecrawlTestResult}
+        isSaving={isSavingFirecrawl}
+        isTestingNew={isTestingFirecrawl}
+        isTestingStored={isTestingFirecrawlStored}
+        isRemoving={isRemovingFirecrawl}
+        showKey={showFirecrawlKey}
+        onSave={handleSaveFirecrawl}
+        onTestNew={handleTestFirecrawlNew}
+        onTestStored={handleTestFirecrawlStored}
+        onRemove={handleRemoveFirecrawl}
+        onToggleShow={() => setShowFirecrawlKey((s) => !s)}
+        successMessage="Connection successful! Firecrawl API key is valid."
+      />
 
-            <TestResultAlert
-              result={testResult}
-              successMessage="Connection successful! Gemini API is responding correctly."
-            />
-
-            <div className="flex flex-wrap items-center gap-3 pt-5 border-t border-card-border">
-              <button
-                type="button"
-                onClick={handleTest}
-                disabled={!apiKey || isTesting || isSaving}
-                className="px-5 py-2.5 bg-muted hover:bg-muted/80 text-foreground text-sm font-semibold rounded-lg transition-all border border-card-border focus:outline-none focus:ring-2 focus:ring-muted-foreground focus:ring-offset-2 flex items-center justify-center min-w-[150px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
-              >
-                {isTesting ? (
-                  <ArrowPathIcon className="w-4 h-4 animate-spin" />
-                ) : (
-                  "Test New Key"
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleTestGeminiStored}
-                disabled={isTestingGeminiStored || isSaving || isTesting}
-                className="px-5 py-2.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-600 text-sm font-semibold rounded-lg transition-all border border-emerald-500/20 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 flex items-center justify-center min-w-[150px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
-              >
-                {isTestingGeminiStored ? (
-                  <ArrowPathIcon className="w-4 h-4 animate-spin" />
-                ) : (
-                  "Test Current"
-                )}
-              </button>
-
-              <button
-                type="submit"
-                disabled={!apiKey || isSaving || isTesting || isTestingGeminiStored}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center min-w-[130px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
-              >
-                {isSaving ? "Saving..." : "Save Key"}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleRemove}
-                disabled={isRemoving}
-                className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
-              >
-                {isRemoving ? "Disconnecting..." : "Disconnect"}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-
-      <div className="bg-card border border-card-border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-        <div className="p-6 border-b border-card-border bg-muted/20">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-emerald-500/10 rounded-xl border border-emerald-500/20 text-emerald-500 shadow-inner">
-              <KeyIcon className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-foreground tracking-tight">
-                Serper API Configuration
-              </h2>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                Used for Google Search, News, and Image discovery during
-                enrichment.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="p-6 space-y-6">
-          <div className="flex items-center justify-between bg-background border border-card-border p-4 rounded-lg">
-            <span className="text-sm font-medium text-foreground">
-              Current Integration Status
-            </span>
-            <StatusBadge
-              isConfigured={serperStatus?.hasSerperKey}
-              configuredLabel="Key Actively Configured"
-              unconfiguredLabel="Not Configured"
-            />
-          </div>
-
-          <form onSubmit={handleSaveSerper} className="space-y-5">
-            <div className="space-y-2.5">
-              <label
-                htmlFor="serperApiKey"
-                className="text-sm font-semibold text-foreground"
-              >
-                API Key
-              </label>
-              <PasswordInput
-                id="serperApiKey"
-                value={serperApiKey}
-                onChange={setSerperApiKey}
-                placeholder={
-                  serperStatus?.hasSerperKey
-                    ? "••••••••••••••••••••••••••••"
-                    : "Paste your Serper API Key..."
-                }
-                show={showSerperKey}
-                onToggleShow={() => setShowSerperKey((s) => !s)}
-                ringColor="emerald"
-              />
-              <p className="text-[13px] text-muted-foreground">
-                Your key will be securely stored in the database. Leave blank to
-                keep the current key.
-              </p>
-            </div>
-
-            <TestResultAlert
-              result={serperTestResult}
-              successMessage="Connection successful! Serper API key is valid."
-            />
-
-            <div className="flex flex-wrap items-center gap-3 pt-5 border-t border-card-border">
-              <button
-                type="button"
-                onClick={handleTestSerper}
-                disabled={!serperApiKey || isTestingSerper || isSavingSerper}
-                className="px-5 py-2.5 bg-muted hover:bg-muted/80 text-foreground text-sm font-semibold rounded-lg transition-all border border-card-border focus:outline-none focus:ring-2 focus:ring-muted-foreground focus:ring-offset-2 flex items-center justify-center min-w-[150px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
-              >
-                {isTestingSerper ? (
-                  <ArrowPathIcon className="w-4 h-4 animate-spin" />
-                ) : (
-                  "Test New Key"
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleTestSerperStored}
-                disabled={isTestingSerperStored || isSavingSerper || isTestingSerper}
-                className="px-5 py-2.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-600 text-sm font-semibold rounded-lg transition-all border border-emerald-500/20 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 flex items-center justify-center min-w-[150px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
-              >
-                {isTestingSerperStored ? (
-                  <ArrowPathIcon className="w-4 h-4 animate-spin" />
-                ) : (
-                  "Test Current"
-                )}
-              </button>
-
-              <button
-                type="submit"
-                disabled={!serperApiKey || isSavingSerper || isTestingSerper || isTestingSerperStored}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center min-w-[130px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
-              >
-                {isSavingSerper ? "Saving..." : "Save Key"}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleRemoveSerper}
-                disabled={isRemovingSerper}
-                className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
-              >
-                {isRemovingSerper ? "Disconnecting..." : "Disconnect"}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-
-      <div className="bg-card border border-card-border rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
-        <div className="p-6 border-b border-card-border bg-muted/20">
-          <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-orange-500/10 rounded-xl border border-orange-500/20 text-orange-500 shadow-inner">
-              <KeyIcon className="w-5 h-5" />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-foreground tracking-tight">
-                Firecrawl API Configuration
-              </h2>
-              <p className="text-sm text-muted-foreground mt-0.5">
-                Used for deep web crawling, sitemap discovery, and contact
-                extraction.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="p-6 space-y-6">
-          <div className="flex items-center justify-between bg-background border border-card-border p-4 rounded-lg">
-            <span className="text-sm font-medium text-foreground">
-              Current Integration Status
-            </span>
-            <StatusBadge
-              isConfigured={firecrawlStatus?.hasFirecrawlKey}
-              configuredLabel="Key Actively Configured"
-              unconfiguredLabel="Not Configured"
-            />
-          </div>
-
-          <form onSubmit={handleSaveFirecrawl} className="space-y-5">
-            <div className="space-y-2.5">
-              <label
-                htmlFor="firecrawlApiKey"
-                className="text-sm font-semibold text-foreground"
-              >
-                API Key
-              </label>
-                <PasswordInput
-                  id="firecrawlApiKey"
-                  value={firecrawlApiKey}
-                  onChange={setFirecrawlApiKey}
-                  placeholder={
-                    firecrawlStatus?.hasFirecrawlKey
-                      ? "••••••••••••••••••••••••••••"
-                      : "Paste your Firecrawl API Key..."
-                  }
-                  show={showFirecrawlKey}
-                  onToggleShow={() => setShowFirecrawlKey((s) => !s)}
-                  ringColor="orange"
-                />
-                <p className="text-[13px] text-muted-foreground">
-                Your key will be securely stored in the database. Leave blank to
-                keep the current key.
-              </p>
-            </div>
-
-            <TestResultAlert
-              result={firecrawlTestResult}
-              successMessage="Connection successful! Firecrawl API key is valid."
-            />
-
-            <div className="flex flex-wrap items-center gap-3 pt-5 border-t border-card-border">
-              <button
-                type="button"
-                onClick={handleTestFirecrawl}
-                disabled={!firecrawlApiKey || isTestingFirecrawl || isSavingFirecrawl}
-                className="px-5 py-2.5 bg-muted hover:bg-muted/80 text-foreground text-sm font-semibold rounded-lg transition-all border border-card-border focus:outline-none focus:ring-2 focus:ring-muted-foreground focus:ring-offset-2 flex items-center justify-center min-w-[150px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
-              >
-                {isTestingFirecrawl ? (
-                  <ArrowPathIcon className="w-4 h-4 animate-spin" />
-                ) : (
-                  "Test New Key"
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleTestFirecrawlStored}
-                disabled={isTestingFirecrawlStored || isSavingFirecrawl || isTestingFirecrawl}
-                className="px-5 py-2.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-600 text-sm font-semibold rounded-lg transition-all border border-emerald-500/20 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 flex items-center justify-center min-w-[150px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
-              >
-                {isTestingFirecrawlStored ? (
-                  <ArrowPathIcon className="w-4 h-4 animate-spin" />
-                ) : (
-                  "Test Current"
-                )}
-              </button>
-
-              <button
-                type="submit"
-                disabled={!firecrawlApiKey || isSavingFirecrawl || isTestingFirecrawl || isTestingFirecrawlStored}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center min-w-[130px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
-              >
-                {isSavingFirecrawl ? "Saving..." : "Save Key"}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleRemoveFirecrawl}
-                disabled={isRemovingFirecrawl}
-                className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
-              >
-                {isRemovingFirecrawl ? "Disconnecting..." : "Disconnect"}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-
-      {/* ZeptoMail Configuration */}
-      <div className="bg-card rounded-2xl border border-card-border/60 shadow-sm overflow-hidden">
-        <div className="p-8 space-y-7">
-          <div className="flex items-start justify-between gap-4">
-            <div className="flex items-start gap-4">
-              <div className="p-3 bg-slate-500/10 rounded-xl border border-slate-500/20 shadow-sm">
-                <KeyIcon className="w-6 h-6 text-slate-400" />
-              </div>
-              <div>
-                <h2 className="text-lg font-semibold text-foreground tracking-tight">
-                  ZeptoMail Email API
-                </h2>
-                <p className="text-sm text-muted-foreground mt-0.5">
-                  Used for sending transactional emails and outreach sequences.
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div className="flex items-center justify-between p-5 bg-muted/40 rounded-xl border border-card-border/60">
-            <span className="text-sm font-medium text-foreground">
-              Current Integration Status
-            </span>
-            <StatusBadge
-              isConfigured={zeptomailStatus?.hasZeptomailKey}
-              configuredLabel="Key Actively Configured"
-              unconfiguredLabel="Not Configured"
-            />
-          </div>
-
-          <form onSubmit={handleSaveZeptomail} className="space-y-5">
-            <div className="space-y-2.5">
-              <label
-                htmlFor="zeptomailApiKey"
-                className="text-sm font-semibold text-foreground"
-              >
-                API Key
-              </label>
-                <PasswordInput
-                  id="zeptomailApiKey"
-                  value={zeptomailApiKey}
-                  onChange={setZeptomailApiKey}
-                  placeholder={
-                    zeptomailStatus?.hasZeptomailKey
-                      ? "••••••••••••••••••••••••••••"
-                      : "Paste your ZeptoMail API Key..."
-                  }
-                  show={showZeptomailKey}
-                  onToggleShow={() => setShowZeptomailKey((s) => !s)}
-                  ringColor="slate"
-                />
-                <p className="text-[13px] text-muted-foreground">
-                Your key will be securely stored in the database. Leave blank to
-                keep the current key.
-              </p>
-            </div>
-
-            <TestResultAlert
-              result={zeptomailTestResult}
-              successMessage="Connection successful! ZeptoMail API key is valid."
-            />
-
-            <div className="flex flex-wrap items-center gap-3 pt-5 border-t border-card-border">
-              <button
-                type="button"
-                onClick={handleTestZeptomail}
-                disabled={!zeptomailApiKey || isTestingZeptomail || isSavingZeptomail}
-                className="px-5 py-2.5 bg-muted hover:bg-muted/80 text-foreground text-sm font-semibold rounded-lg transition-all border border-card-border focus:outline-none focus:ring-2 focus:ring-muted-foreground focus:ring-offset-2 flex items-center justify-center min-w-[150px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
-              >
-                {isTestingZeptomail ? (
-                  <ArrowPathIcon className="w-4 h-4 animate-spin" />
-                ) : (
-                  "Test New Key"
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleTestZeptomailStored}
-                disabled={isTestingZeptomailStored || isSavingZeptomail || isTestingZeptomail}
-                className="px-5 py-2.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-600 text-sm font-semibold rounded-lg transition-all border border-emerald-500/20 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 flex items-center justify-center min-w-[150px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
-              >
-                {isTestingZeptomailStored ? (
-                  <ArrowPathIcon className="w-4 h-4 animate-spin" />
-                ) : (
-                  "Test Current"
-                )}
-              </button>
-
-              <button
-                type="submit"
-                disabled={!zeptomailApiKey || isSavingZeptomail || isTestingZeptomail || isTestingZeptomailStored}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center min-w-[130px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
-              >
-                {isSavingZeptomail ? "Saving..." : "Save Key"}
-              </button>
-
-              <button
-                type="button"
-                onClick={handleRemoveZeptomail}
-                disabled={isRemovingZeptomail}
-                className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
-              >
-                {isRemovingZeptomail ? "Disconnecting..." : "Disconnect"}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
+      <ApiKeySection
+        title="ZeptoMail Email API"
+        description="Used for sending transactional emails and outreach sequences."
+        iconColor="bg-slate-500/10 border border-slate-500/20 text-slate-400"
+        ringColor="slate"
+        isConfigured={zeptomailStatus?.hasZeptomailKey}
+        placeholderConfigured="••••••••••••••••••••••••••••"
+        placeholderEmpty="Paste your ZeptoMail API Key..."
+        testResult={zeptomailTestResult}
+        isSaving={isSavingZeptomail}
+        isTestingNew={isTestingZeptomail}
+        isTestingStored={isTestingZeptomailStored}
+        isRemoving={isRemovingZeptomail}
+        showKey={showZeptomailKey}
+        onSave={handleSaveZeptomail}
+        onTestNew={handleTestZeptomailNew}
+        onTestStored={handleTestZeptomailStored}
+        onRemove={handleRemoveZeptomail}
+        onToggleShow={() => setShowZeptomailKey((s) => !s)}
+        successMessage="Connection successful! ZeptoMail API key is valid."
+      />
 
       {/* ZeptoMail From Email */}
       <div className="bg-card rounded-2xl border border-card-border/60 shadow-sm overflow-hidden">
@@ -1183,7 +715,7 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={handleRemoveZeptomailFromEmail}
-                disabled={isRemovingZeptomailFromEmail}
+                disabled={isRemovingZeptomailFromEmail || !zeptomailFromEmailStatus?.hasZeptomailFromEmail}
                 className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
               >
                 {isRemovingZeptomailFromEmail ? "Resetting..." : "Reset to Default"}
@@ -1263,7 +795,7 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={handleRemoveZeptomailFromName}
-                disabled={isRemovingZeptomailFromName}
+                disabled={isRemovingZeptomailFromName || !zeptomailFromNameStatus?.hasZeptomailFromName}
                 className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
               >
                 {isRemovingZeptomailFromName ? "Resetting..." : "Reset to Default"}
@@ -1375,7 +907,7 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={handleRemoveGoogleCalendar}
-                disabled={isRemovingGoogleCalendar}
+                disabled={isRemovingGoogleCalendar || !googleCalendarStatus?.hasGoogleCalendarServiceAccount}
                 className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
               >
                 {isRemovingGoogleCalendar ? "Removing..." : "Remove"}
@@ -1455,7 +987,7 @@ export default function SettingsPage() {
               <button
                 type="button"
                 onClick={handleRemoveGoogleCalendarId}
-                disabled={isRemovingGoogleCalendarId}
+                disabled={isRemovingGoogleCalendarId || !googleCalendarIdStatus?.hasGoogleCalendarId}
                 className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
               >
                 {isRemovingGoogleCalendarId ? "Resetting..." : "Reset to Default"}

@@ -86,23 +86,9 @@ export function getGoogleAI(apiKey?: string | null): GoogleGenAI {
   return new GoogleGenAI({ apiKey, httpOptions: { timeout: 25000 } });
 }
 
-// ─── Model constants ──────────────────────────────────────────────────────────
-export const MODELS = {
-  // Gemini 3.5 Flash: proposals, reply classification, enrichment, scoring, personalization
-  complex: "gemini-3.5-flash" as const,
-  gemini: "gemini-3.5-flash" as const,
-  // Gemini Flash-Lite: lowest cost for high-volume tasks
-  geminiFlash: "gemini-3.1-flash-lite" as const,
-  // Embeddings: 768-dim via Gemini Embedding API (truncated from 3072)
-  embedding: "gemini-embedding-001" as const,
-} as const;
-
-// ─── Temperature presets ─────────────────────────────────────────────────────
-export const TEMP = {
-  deterministic: 0.0, // classification, scoring
-  balanced: 0.3, // personalization
-  creative: 0.6, // proposal writing
-} as const;
+// ─── Model constants (imported from models.ts for V8 runtime compatibility) ──
+import { MODELS, TEMP, THINKING } from "./models";
+export { MODELS, TEMP, THINKING } from "./models";
 
 const MODEL_PRICING_USD_PER_MILLION: Record<
   string,
@@ -712,13 +698,6 @@ function logLlmTelemetry({
     );
   }
 }
-
-export const THINKING = {
-  off: 0, // Flash: pure extraction, structured scoring
-  low: 512, // Pro: minimal synthesis, light conflict resolution
-  medium: 2048, // Pro: multi-source synthesis, complex extraction
-  high: 8192, // Pro: complex evaluation, deep step-by-step logic
-} as const;
 
 /**
  * Convenience wrapper for gemini-3-flash-preview.
