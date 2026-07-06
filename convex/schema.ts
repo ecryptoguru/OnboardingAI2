@@ -51,6 +51,7 @@ export default defineSchema({
         total_students: v.optional(v.number()),
         total_students_male: v.optional(v.number()),
         total_students_female: v.optional(v.number()),
+        total_students_source: v.optional(v.string()),
         day_scholars: v.optional(v.number()),
         day_scholars_male: v.optional(v.number()),
         day_scholars_female: v.optional(v.number()),

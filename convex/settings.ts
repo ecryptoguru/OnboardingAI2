@@ -276,13 +276,13 @@ export const testFirecrawlKey = action({
     await ensureAuth(ctx);
 
     try {
-      const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
+      const res = await fetch("https://api.firecrawl.dev/v2/scrape", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${args.apiKey}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ url: "https://example.com" }),
+        body: JSON.stringify({ url: "https://example.com", formats: ["markdown"], onlyMainContent: true }),
         signal: AbortSignal.timeout(15000),
       });
       if (res.ok || res.status === 402) {
@@ -306,13 +306,13 @@ export const testFirecrawlKeyStored = action({
       return { success: false, error: "No Firecrawl API key configured." };
     }
     try {
-      const res = await fetch("https://api.firecrawl.dev/v1/scrape", {
+      const res = await fetch("https://api.firecrawl.dev/v2/scrape", {
         method: "POST",
         headers: {
           Authorization: `Bearer ${key}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ url: "https://example.com" }),
+        body: JSON.stringify({ url: "https://example.com", formats: ["markdown"], onlyMainContent: true }),
         signal: AbortSignal.timeout(15000),
       });
       if (res.ok || res.status === 402) {
@@ -340,12 +340,14 @@ export const testZeptomailKey = action({
         },
         body: JSON.stringify({
           from: { address: "test@fretbox.in" },
-          to: [{ email_address: { address: "test@fretbox.in" } }],
+          to: [],
           subject: "Key Validation Test",
           textbody: "This is a validation test.",
         }),
         signal: AbortSignal.timeout(10000),
       });
+      // 400/422 = valid key, but request rejected (empty to list) — key is valid
+      // 401 = invalid key
       if (res.ok || res.status === 400 || res.status === 422) {
         return { success: true };
       }
@@ -374,12 +376,14 @@ export const testZeptomailKeyStored = action({
         },
         body: JSON.stringify({
           from: { address: "test@fretbox.in" },
-          to: [{ email_address: { address: "test@fretbox.in" } }],
+          to: [],
           subject: "Key Validation Test",
           textbody: "This is a validation test.",
         }),
         signal: AbortSignal.timeout(10000),
       });
+      // 400/422 = valid key, but request rejected (empty to list) — key is valid
+      // 401 = invalid key
       if (res.ok || res.status === 400 || res.status === 422) {
         return { success: true };
       }
