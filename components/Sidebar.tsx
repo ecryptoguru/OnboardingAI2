@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useAuthActions } from "@convex-dev/auth/react";
 import { useQuery } from "convex/react";
 import { api } from "../convex/_generated/api";
@@ -27,12 +27,13 @@ interface NavItem {
 
 export function Sidebar() {
   const pathname = usePathname();
-  const router = useRouter();
   const { signOut } = useAuthActions();
 
   const handleSignOut = async () => {
     await signOut();
-    router.push("/");
+    // Use a hard redirect to avoid Next.js router race conditions with the
+    // middleware redirect that fires when the auth state flips to unauthenticated.
+    window.location.href = "/sign-in";
   };
   const pendingCount = useQuery(api.emails.pendingCount) ?? 0;
   const unclassifiedReplies = useQuery(api.replies.unclassifiedCount) ?? 0;
