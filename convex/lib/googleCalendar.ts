@@ -4,9 +4,8 @@
  * Google Calendar API helper for Fretbox Outreach AI.
  * Uses a service account (JWT) to create calendar events with Google Meet links.
  *
- * Required env vars:
- *   GOOGLE_SERVICE_ACCOUNT_JSON — JSON string of the service account key file
- *   GOOGLE_CALENDAR_ID          — Calendar ID to create events on (default: primary)
+ * Configuration is stored exclusively in the Settings page (systemSettings DB
+ * table) and must be passed in via `serviceAccountJson` / `calendarId` options.
  */
 
 interface ServiceAccountKey {
@@ -58,9 +57,9 @@ function pemToArrayBuffer(pem: string): ArrayBuffer {
 }
 
 async function getAccessToken(serviceAccountJson?: string): Promise<string | null> {
-  const saJson = serviceAccountJson ?? process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  const saJson = serviceAccountJson;
   if (!saJson) {
-    console.warn("[GoogleCalendar] GOOGLE_SERVICE_ACCOUNT_JSON not set");
+    console.warn("[GoogleCalendar] Service account JSON not configured in Settings");
     return null;
   }
 
@@ -188,7 +187,7 @@ export async function createMeetingEvent(options: {
     return { success: false, error: "GOOGLE_CALENDAR_NOT_CONFIGURED" };
   }
 
-  const calendarId = options.calendarId ?? process.env.GOOGLE_CALENDAR_ID ?? "primary";
+  const calendarId = options.calendarId ?? "primary";
   const requestId = `fretbox-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 
   const body = {
@@ -292,8 +291,7 @@ export async function testCalendarConnection(options?: {
     return { success: false, error: "GOOGLE_CALENDAR_NOT_CONFIGURED" };
   }
 
-  const calendarId =
-    options?.calendarId ?? process.env.GOOGLE_CALENDAR_ID ?? "primary";
+  const calendarId = options?.calendarId ?? "primary";
 
   try {
     let res = await fetch(
@@ -368,7 +366,7 @@ export async function updateEvent(
     return { success: false, error: "GOOGLE_CALENDAR_NOT_CONFIGURED" };
   }
 
-  const calendarId = options?.calendarId ?? process.env.GOOGLE_CALENDAR_ID ?? "primary";
+  const calendarId = options?.calendarId ?? "primary";
 
   try {
     let res = await fetch(

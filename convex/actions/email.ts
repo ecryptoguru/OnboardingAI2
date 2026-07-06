@@ -48,15 +48,15 @@ export const sendEmail = action({
       };
     }
 
-    // Fetch ZeptoMail key, from-email, and sender name from settings DB first, fall back to env for backward compatibility
+    // Fetch ZeptoMail key, from-email, and sender name from settings DB (Settings page only)
     const [dbKey, dbFromEmail, dbFromName] = await Promise.all([
       ctx.runQuery(internal.settings.getInternalZeptomailKey),
       ctx.runQuery(internal.settings.getInternalZeptomailFromEmail),
       ctx.runQuery(internal.settings.getInternalZeptomailFromName),
     ]);
-    const apiKey = dbKey || process.env.ZEPTOMAIL_API_KEY;
-    const fromEmail = dbFromEmail || process.env.ZEPTOMAIL_FROM_EMAIL || "outreach@fretbox.in";
-    const fromName = dbFromName || process.env.ZEPTOMAIL_FROM_NAME || "Ashish Gupta (Fretbox)";
+    const apiKey = dbKey;
+    const fromEmail = dbFromEmail || "outreach@fretbox.in";
+    const fromName = dbFromName || "Ashish Gupta (Fretbox)";
 
     if (!apiKey) {
       console.error("[Email Action] ZEPTOMAIL_API_KEY is not configured");

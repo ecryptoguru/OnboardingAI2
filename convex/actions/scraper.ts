@@ -308,9 +308,7 @@ export const scrapeUniversity = action({
 
       // Fetch dynamic API key
       const apiKey = await ctx.runQuery(internal.settings.getInternalGeminiKey);
-      const rawSerperKey =
-        (await ctx.runQuery(internal.settings.getInternalSerperKey)) ||
-        process.env.SERPER_API_KEY;
+      const rawSerperKey = await ctx.runQuery(internal.settings.getInternalSerperKey);
       const serperKey = rawSerperKey ? rawSerperKey.trim() : null;
       const serperBudget = createSerperBudget({ maxQueries: 6 });
       const allowSerper = !!serperKey && !serperBudget.exhausted;

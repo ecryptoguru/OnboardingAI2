@@ -443,24 +443,18 @@ export const runDeepEnrichment = action({
 
       console.log(`[DeepEnrichment] Starting for ${uniName}...`);
 
-      let firecrawlKey = await ctx.runQuery(
+      const firecrawlKey = await ctx.runQuery(
         internal.settings.getInternalFirecrawlKey,
       );
-      if (!firecrawlKey) {
-        firecrawlKey = process.env.FIRECRAWL_API_KEY ?? null;
-      }
       if (!firecrawlKey) {
         throw new Error(
           "FIRECRAWL API KEY is not set. Please configure it in Settings.",
         );
       }
 
-      let rawSerperKey = await ctx.runQuery(
+      const rawSerperKey = await ctx.runQuery(
         internal.settings.getInternalSerperKey,
       );
-      if (!rawSerperKey) {
-        rawSerperKey = process.env.SERPER_API_KEY ?? null;
-      }
       const serperKey = rawSerperKey ? rawSerperKey.trim() : null;
       const serperBudget = createSerperBudget({ maxQueries: 2 });
 
@@ -1550,12 +1544,8 @@ export const debugDeepEnrichment = action({
 
     // Phase 1: Check keys
     const apiKey = await ctx.runQuery(internal.settings.getInternalGeminiKey);
-    const firecrawlKey =
-      (await ctx.runQuery(internal.settings.getInternalFirecrawlKey)) ||
-      process.env.FIRECRAWL_API_KEY;
-    const rawSerperKey =
-      (await ctx.runQuery(internal.settings.getInternalSerperKey)) ||
-      process.env.SERPER_API_KEY;
+    const firecrawlKey = await ctx.runQuery(internal.settings.getInternalFirecrawlKey);
+    const rawSerperKey = await ctx.runQuery(internal.settings.getInternalSerperKey);
     const serperKey = rawSerperKey ? rawSerperKey.trim() : null;
     report.keys = {
       gemini: !!apiKey,

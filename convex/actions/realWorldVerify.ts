@@ -177,15 +177,6 @@ export const runFullPipeline = action({
       if (stagesToRun.has("deep_enrichment")) {
         const endTimer = stageTimer("deep_enrichment");
         try {
-          // If FIRECRAWL_API_KEY is set as an env var but not in Settings,
-          // auto-seed it so deep enrichment can proceed.
-          if (process.env.FIRECRAWL_API_KEY) {
-            await ctx.runMutation(
-              internal.settings.setFirecrawlKeyInternal,
-              { apiKey: process.env.FIRECRAWL_API_KEY },
-            );
-          }
-
           const result = await ctx.runAction(
             api.actions.deepEnrichment.runDeepEnrichment,
             { universityId },

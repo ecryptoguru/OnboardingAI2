@@ -107,7 +107,7 @@ export const getInternalGeminiKey = internalQuery({
         return sanitizeApiKey(doc.value);
       }
     }
-    return process.env.GEMINI_API_KEY ?? process.env.GOOGLE_API_KEY ?? null;
+    return null;
   },
 });
 
@@ -426,8 +426,7 @@ export const getInternalSerperKey = internalQuery({
         return sanitizeApiKey(doc.value);
       }
     }
-    // Fallback to env var if not yet seeded into settings DB
-    return process.env.SERPER_API_KEY ?? null;
+    return null;
   },
 });
 
@@ -531,7 +530,7 @@ export const getInternalFirecrawlKey = internalQuery({
         return sanitizeApiKey(doc.value);
       }
     }
-    return process.env.FIRECRAWL_API_KEY ?? null;
+    return null;
   },
 });
 
@@ -630,7 +629,7 @@ export const getInternalZeptomailKey = internalQuery({
         return sanitizeApiKey(doc.value);
       }
     }
-    return process.env.ZEPTOMAIL_API_KEY ?? null;
+    return null;
   },
 });
 
@@ -708,7 +707,7 @@ export const getInternalGoogleCalendarJson = internalQuery({
         return sanitizeStringValue(doc.value);
       }
     }
-    return process.env.GOOGLE_SERVICE_ACCOUNT_JSON ?? null;
+    return null;
   },
 });
 
@@ -803,7 +802,7 @@ export const getInternalGoogleCalendarId = internalQuery({
         return sanitizeStringValue(doc.value) ?? "primary";
       }
     }
-    return process.env.GOOGLE_CALENDAR_ID ?? "primary";
+    return "primary";
   },
 });
 
@@ -937,7 +936,7 @@ export const getInternalZeptomailFromEmail = internalQuery({
         return sanitizeStringValue(doc.value) ?? "outreach@fretbox.in";
       }
     }
-    return process.env.ZEPTOMAIL_FROM_EMAIL ?? "outreach@fretbox.in";
+    return "outreach@fretbox.in";
   },
 });
 
@@ -1027,7 +1026,7 @@ export const getInternalZeptomailFromName = internalQuery({
         return (doc.value || "Ashish Gupta (Fretbox)").trim();
       }
     }
-    return (process.env.ZEPTOMAIL_FROM_NAME || "Ashish Gupta (Fretbox)").trim();
+    return "Ashish Gupta (Fretbox)";
   },
 });
 

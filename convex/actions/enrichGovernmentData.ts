@@ -254,7 +254,7 @@ export const enrichGovernmentData = action({
 
       const uniName = university.university_name;
       const apiKey = await ctx.runQuery(internal.settings.getInternalGeminiKey);
-      const rawSerperKey = await ctx.runQuery(internal.settings.getInternalSerperKey) || process.env.SERPER_API_KEY;
+      const rawSerperKey = await ctx.runQuery(internal.settings.getInternalSerperKey);
       const serperKey = rawSerperKey ? rawSerperKey.trim() : null;
 
       console.log(`[GovData] Searching government sources for ${uniName}...`);

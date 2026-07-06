@@ -161,9 +161,10 @@ export const syncUgcData = action({
     console.log(`Deduplicated UGC input: ${args.universities.length} → ${dedupedUniversities.length}`);
 
     for (const uni of dedupedUniversities) {
-      // Normalize type if not already done by caller
-      let normalizedType = uni.type || "Other";
-      if (normalizedType.includes("Deemed")) {
+      // Normalize type if provided by caller. Do NOT default to "Other" here —
+      // defaulting to "Other" would overwrite the existing type on every sync.
+      let normalizedType: string | undefined = uni.type;
+      if (normalizedType && normalizedType.includes("Deemed")) {
         normalizedType = "Deemed";
       }
       // NOTE: we intentionally do NOT mutate uni.type here to avoid a side
@@ -180,7 +181,8 @@ export const syncUgcData = action({
       }
 
       if (matched.length === 0) {
-        inserts.push({ ...uni, type: normalizedType });
+        // New inserts: fall back to "Other" if the UGC source provided no type
+        inserts.push({ ...uni, type: normalizedType || "Other" });
       } else {
         for (const record of matched) {
           const normalizeStr = (val: unknown) =>
