@@ -1,4 +1,4 @@
-# CODEBASE MAP
+# CODEBASE MAP v2
 
 This document serves as the central reference point for AI coding agents to navigate the `fretbox-outreach-v2` (OnboardingAI) repository.
 
