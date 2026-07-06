@@ -3,7 +3,7 @@
 import { action } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
-import { callGemini, TEMP } from "../lib/llm";
+import { callGemini, TEMP, MODELS } from "../lib/llm";
 import { sanitizeLlmInput, sanitizeLlmOutput } from "../lib/utils";
 import { OPENER_SYSTEM_PROMPT } from "../lib/prompts";
 import * as Sentry from "@sentry/node";
@@ -74,6 +74,7 @@ export const generateOpener = action({
         systemPrompt,
         userPrompt,
         temperature: TEMP.balanced,
+        fallbackModel: MODELS.geminiFlash,
         ctx,
         skipCache: true,
       });

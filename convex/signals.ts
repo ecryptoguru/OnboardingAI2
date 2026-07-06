@@ -17,7 +17,7 @@ export const listByUniversity = query({
       .withIndex("by_university", (q) =>
         q.eq("university_id", args.university_id),
       )
-      .collect();
+      .take(500);
   },
 });
 

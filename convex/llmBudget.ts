@@ -18,9 +18,10 @@ function getMaxBudgetUsd(): number {
 // ─── Budget Queries / Mutations ────────────────────────────────────────────
 
 export const getBudgetInternal = internalQuery({
-  args: { dateKey: v.optional(v.string()) },
+  args: { dateKey: v.optional(v.string()), maxBudgetUsd: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const dateKey = args.dateKey || getTodayKey();
+    const effectiveBudget = args.maxBudgetUsd ?? getMaxBudgetUsd();
     const doc = await ctx.db
       .query("llmBudget")
       .withIndex("by_date", (q) => q.eq("dateKey", dateKey))
@@ -29,8 +30,8 @@ export const getBudgetInternal = internalQuery({
       dateKey,
       totalCostUsd: doc?.totalCostUsd ?? 0,
       totalTokens: doc?.totalTokens ?? 0,
-      maxBudgetUsd: getMaxBudgetUsd(),
-      withinBudget: (doc?.totalCostUsd ?? 0) < getMaxBudgetUsd(),
+      maxBudgetUsd: effectiveBudget,
+      withinBudget: (doc?.totalCostUsd ?? 0) < effectiveBudget,
     };
   },
 });

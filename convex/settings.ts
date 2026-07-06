@@ -1,4 +1,4 @@
-import { mutation, query, action, internalQuery, internalMutation } from "./_generated/server";
+import { mutation, query, action, internalQuery, internalMutation, QueryCtx, MutationCtx, ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { GoogleGenAI } from "@google/genai";
@@ -8,26 +8,21 @@ const GEMINI_TEST_MODEL = "gemini-3.5-flash";
 
 // ─── Auth helper ───────────────────────────────────────────────────────────
 // Centralises the dev-bypass check used across every settings endpoint.
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-async function ensureAuth(ctx: any) {
-  const userId = await getAuthUserId(ctx);
+async function ensureAuth(ctx: QueryCtx | MutationCtx | ActionCtx) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const userId = await getAuthUserId(ctx as any);
   if (!userId) throw new Error("Unauthenticated");
 }
 
 // ─── Simple reversible obfuscation for stored API keys ─────────────────────
 // NOT encryption — just prevents casual plaintext exposure in DB dumps.
 // The secret MUST be set via SETTINGS_OBFUSCATION_SECRET env var.
-const OBF_SECRET = process.env.SETTINGS_OBFUSCATION_SECRET as
+const _OBF_SECRET = process.env.SETTINGS_OBFUSCATION_SECRET as
   | string
   | undefined;
-if (!OBF_SECRET) {
-  throw new Error(
-    "SETTINGS_OBFUSCATION_SECRET is required in all environments",
-  );
-}
-const _OBF_SECRET = OBF_SECRET;
 
 function obfuscate(plain: string): string {
+  if (!_OBF_SECRET) throw new Error("SETTINGS_OBFUSCATION_SECRET is required");
   let out = "";
   for (let i = 0; i < plain.length; i++) {
     out += String.fromCharCode(
@@ -38,6 +33,7 @@ function obfuscate(plain: string): string {
 }
 
 function deobfuscate(cipher: string): string {
+  if (!_OBF_SECRET) throw new Error("SETTINGS_OBFUSCATION_SECRET is required");
   const raw = atob(cipher);
   let out = "";
   for (let i = 0; i < raw.length; i++) {
@@ -67,6 +63,18 @@ function sanitizeApiKey(value: string | null | undefined): string | null {
     if (code >= 128 && code <= 255) continue;
     return null;
   }
+  return trimmed;
+}
+
+/**
+ * Lightweight sanitiser for non-API-key stored values (JSON, email, calendar
+ * ID, sender name). Only trims whitespace and rejects empty strings — does
+ * NOT reject newlines or other control chars that `sanitizeApiKey` would.
+ */
+function sanitizeStringValue(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
   return trimmed;
 }
 
@@ -318,51 +326,67 @@ export const testFirecrawlKeyStored = action({
   },
 });
 
-export const testSendgridKey = action({
+export const testZeptomailKey = action({
   args: { apiKey: v.string() },
   handler: async (ctx, args) => {
     await ensureAuth(ctx);
 
     try {
-      const res = await fetch("https://api.sendgrid.com/v3/user/profile", {
-        method: "GET",
+      const res = await fetch("https://api.zeptomail.com/v1.1/email", {
+        method: "POST",
         headers: {
-          Authorization: `Bearer ${args.apiKey}`,
+          Authorization: `Zoho-enczapikey ${args.apiKey}`,
+          "Content-Type": "application/json",
         },
+        body: JSON.stringify({
+          from: { address: "test@fretbox.in" },
+          to: [{ email_address: { address: "test@fretbox.in" } }],
+          subject: "Key Validation Test",
+          textbody: "This is a validation test.",
+        }),
         signal: AbortSignal.timeout(10000),
       });
-      if (res.ok) {
+      if (res.ok || res.status === 400 || res.status === 422) {
         return { success: true };
       }
       const err = await res.text().catch(() => "Invalid response");
-      return { success: false, error: `SendGrid API error (${res.status}): ${err}` };
+      return { success: false, error: `ZeptoMail API error (${res.status}): ${err}` };
     } catch (e: unknown) {
-      return { success: false, error: (e as Error).message || "Failed to test SendGrid key." };
+      return { success: false, error: (e as Error).message || "Failed to test ZeptoMail key." };
     }
   },
 });
 
-export const testSendgridKeyStored = action({
+export const testZeptomailKeyStored = action({
   args: {},
   handler: async (ctx) => {
     await ensureAuth(ctx);
-    const key = await ctx.runQuery(internal.settings.getInternalSendgridKey) as string | null;
+    const key = await ctx.runQuery(internal.settings.getInternalZeptomailKey) as string | null;
     if (!key) {
-      return { success: false, error: "No SendGrid API key configured." };
+      return { success: false, error: "No ZeptoMail API key configured." };
     }
     try {
-      const res = await fetch("https://api.sendgrid.com/v3/user/profile", {
-        method: "GET",
-        headers: { Authorization: `Bearer ${key}` },
+      const res = await fetch("https://api.zeptomail.com/v1.1/email", {
+        method: "POST",
+        headers: {
+          Authorization: `Zoho-enczapikey ${key}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          from: { address: "test@fretbox.in" },
+          to: [{ email_address: { address: "test@fretbox.in" } }],
+          subject: "Key Validation Test",
+          textbody: "This is a validation test.",
+        }),
         signal: AbortSignal.timeout(10000),
       });
-      if (res.ok) {
+      if (res.ok || res.status === 400 || res.status === 422) {
         return { success: true };
       }
       const err = await res.text().catch(() => "Invalid response");
-      return { success: false, error: `SendGrid API error (${res.status}): ${err}` };
+      return { success: false, error: `ZeptoMail API error (${res.status}): ${err}` };
     } catch (e: unknown) {
-      return { success: false, error: (e as Error).message || "Failed to test stored SendGrid key." };
+      return { success: false, error: (e as Error).message || "Failed to test stored ZeptoMail key." };
     }
   },
 });
@@ -572,28 +596,28 @@ export const removeFirecrawlKey = mutation({
   },
 });
 
-// --- SENDGRID API KEY ---
+// --- ZEPTOMAIL API KEY ---
 
-export const getSendgridKeyStatus = query({
+export const getZeptomailKeyStatus = query({
   handler: async (ctx) => {
     await ensureAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
-      .withIndex("by_key", (q) => q.eq("configKey", "sendgridApiKey"))
+      .withIndex("by_key", (q) => q.eq("configKey", "zeptomailApiKey"))
       .first();
 
     return {
-      hasSendgridKey: !!doc?.value,
+      hasZeptomailKey: !!doc?.value,
     };
   },
 });
 
-export const getInternalSendgridKey = internalQuery({
+export const getInternalZeptomailKey = internalQuery({
   handler: async (ctx) => {
     const doc = await ctx.db
       .query("systemSettings")
-      .withIndex("by_key", (q) => q.eq("configKey", "sendgridApiKey"))
+      .withIndex("by_key", (q) => q.eq("configKey", "zeptomailApiKey"))
       .first();
     if (doc?.value) {
       try {
@@ -602,22 +626,22 @@ export const getInternalSendgridKey = internalQuery({
         return sanitizeApiKey(doc.value);
       }
     }
-    return process.env.SENDGRID_API_KEY ?? null;
+    return process.env.ZEPTOMAIL_API_KEY ?? null;
   },
 });
 
-export const setSendgridKey = mutation({
+export const setZeptomailKey = mutation({
   args: { apiKey: v.string() },
   handler: async (ctx, args) => {
     await ensureAuth(ctx);
 
-    if (!args.apiKey.startsWith("SG.")) {
-      throw new Error("Invalid SendGrid API Key format");
+    if (args.apiKey.length < 20) {
+      throw new Error("Invalid ZeptoMail API Key format");
     }
 
     const doc = await ctx.db
       .query("systemSettings")
-      .withIndex("by_key", (q) => q.eq("configKey", "sendgridApiKey"))
+      .withIndex("by_key", (q) => q.eq("configKey", "zeptomailApiKey"))
       .first();
 
     const cipher = obfuscate(args.apiKey);
@@ -625,7 +649,7 @@ export const setSendgridKey = mutation({
       await ctx.db.patch(doc._id, { value: cipher });
     } else {
       await ctx.db.insert("systemSettings", {
-        configKey: "sendgridApiKey",
+        configKey: "zeptomailApiKey",
         value: cipher,
       });
     }
@@ -633,14 +657,14 @@ export const setSendgridKey = mutation({
   },
 });
 
-export const removeSendgridKey = mutation({
+export const removeZeptomailKey = mutation({
   args: {},
   handler: async (ctx) => {
     await ensureAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
-      .withIndex("by_key", (q) => q.eq("configKey", "sendgridApiKey"))
+      .withIndex("by_key", (q) => q.eq("configKey", "zeptomailApiKey"))
       .first();
 
     if (doc) {
@@ -675,9 +699,9 @@ export const getInternalGoogleCalendarJson = internalQuery({
       .first();
     if (doc?.value) {
       try {
-        return sanitizeApiKey(deobfuscate(doc.value)) ?? sanitizeApiKey(doc.value);
+        return sanitizeStringValue(deobfuscate(doc.value)) ?? sanitizeStringValue(doc.value);
       } catch {
-        return sanitizeApiKey(doc.value);
+        return sanitizeStringValue(doc.value);
       }
     }
     return process.env.GOOGLE_SERVICE_ACCOUNT_JSON ?? null;
@@ -770,9 +794,9 @@ export const getInternalGoogleCalendarId = internalQuery({
       .first();
     if (doc?.value) {
       try {
-        return sanitizeApiKey(deobfuscate(doc.value)) ?? sanitizeApiKey(doc.value) ?? "primary";
+        return sanitizeStringValue(deobfuscate(doc.value)) ?? sanitizeStringValue(doc.value) ?? "primary";
       } catch {
-        return sanitizeApiKey(doc.value) ?? "primary";
+        return sanitizeStringValue(doc.value) ?? "primary";
       }
     }
     return process.env.GOOGLE_CALENDAR_ID ?? "primary";
@@ -819,15 +843,65 @@ export const removeGoogleCalendarId = mutation({
   },
 });
 
-// ─── SENDGRID FROM EMAIL ─────────────────────────────────────────────────────
+// ─── GOOGLE CALENDAR TEST ──────────────────────────────────────────────────
 
-export const getSendgridFromEmailStatus = query({
+export const testGoogleCalendar = action({
+  args: {},
+  handler: async (ctx): Promise<{ success: boolean; error?: string; message?: string }> => {
+    await ensureAuth(ctx);
+
+    const serviceAccountJson = await ctx.runQuery(
+      internal.settings.getInternalGoogleCalendarJson,
+    );
+    const calendarId = await ctx.runQuery(
+      internal.settings.getInternalGoogleCalendarId,
+    );
+
+    if (!serviceAccountJson) {
+      return { success: false, error: "Google Calendar service account not configured." };
+    }
+
+    let sa: { client_email?: string; token_uri?: string; private_key?: string };
+    try {
+      sa = JSON.parse(serviceAccountJson);
+    } catch {
+      return { success: false, error: "Invalid service account JSON format." };
+    }
+    if (!sa.client_email || !sa.private_key) {
+      return { success: false, error: "Service account JSON missing client_email or private_key." };
+    }
+
+    try {
+      const { testCalendarConnection } = await import("./lib/googleCalendar");
+      const result = await testCalendarConnection({
+        serviceAccountJson,
+        calendarId: calendarId ?? undefined,
+      });
+      if (!result.success) {
+        return {
+          success: false,
+          error: result.error || "Failed to connect to Google Calendar.",
+        };
+      }
+      return {
+        success: true,
+        message: result.message || "Google Calendar connection successful.",
+      };
+    } catch (e: unknown) {
+      return { success: false, error: (e as Error).message || "Failed to test Google Calendar integration." };
+    }
+  },
+});
+
+// ─── ZEPTOMAIL FROM EMAIL ────────────────────────────────────────────────────
+
+export const getZeptomailFromEmailStatus = query({
   handler: async (ctx) => {
     await ensureAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
-      .withIndex("by_key", (q) => q.eq("configKey", "sendgridFromEmail"))
+      .withIndex("by_key", (q) => q.eq("configKey", "zeptomailFromEmail"))
       .first();
 
     let fromEmail: string | null = null;
@@ -840,30 +914,30 @@ export const getSendgridFromEmailStatus = query({
     }
 
     return {
-      hasSendgridFromEmail: !!doc?.value,
+      hasZeptomailFromEmail: !!doc?.value,
       fromEmail,
     };
   },
 });
 
-export const getInternalSendgridFromEmail = internalQuery({
+export const getInternalZeptomailFromEmail = internalQuery({
   handler: async (ctx) => {
     const doc = await ctx.db
       .query("systemSettings")
-      .withIndex("by_key", (q) => q.eq("configKey", "sendgridFromEmail"))
+      .withIndex("by_key", (q) => q.eq("configKey", "zeptomailFromEmail"))
       .first();
     if (doc?.value) {
       try {
-        return sanitizeApiKey(deobfuscate(doc.value)) ?? sanitizeApiKey(doc.value) ?? "outreach@fretbox.in";
+        return sanitizeStringValue(deobfuscate(doc.value)) ?? sanitizeStringValue(doc.value) ?? "outreach@fretbox.in";
       } catch {
-        return sanitizeApiKey(doc.value) ?? "outreach@fretbox.in";
+        return sanitizeStringValue(doc.value) ?? "outreach@fretbox.in";
       }
     }
-    return process.env.SENDGRID_FROM_EMAIL ?? "outreach@fretbox.in";
+    return process.env.ZEPTOMAIL_FROM_EMAIL ?? "outreach@fretbox.in";
   },
 });
 
-export const setSendgridFromEmail = mutation({
+export const setZeptomailFromEmail = mutation({
   args: { fromEmail: v.string() },
   handler: async (ctx, args) => {
     await ensureAuth(ctx);
@@ -876,7 +950,7 @@ export const setSendgridFromEmail = mutation({
 
     const doc = await ctx.db
       .query("systemSettings")
-      .withIndex("by_key", (q) => q.eq("configKey", "sendgridFromEmail"))
+      .withIndex("by_key", (q) => q.eq("configKey", "zeptomailFromEmail"))
       .first();
 
     const cipher = obfuscate(args.fromEmail);
@@ -884,7 +958,7 @@ export const setSendgridFromEmail = mutation({
       await ctx.db.patch(doc._id, { value: cipher });
     } else {
       await ctx.db.insert("systemSettings", {
-        configKey: "sendgridFromEmail",
+        configKey: "zeptomailFromEmail",
         value: cipher,
       });
     }
@@ -892,14 +966,14 @@ export const setSendgridFromEmail = mutation({
   },
 });
 
-export const removeSendgridFromEmail = mutation({
+export const removeZeptomailFromEmail = mutation({
   args: {},
   handler: async (ctx) => {
     await ensureAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
-      .withIndex("by_key", (q) => q.eq("configKey", "sendgridFromEmail"))
+      .withIndex("by_key", (q) => q.eq("configKey", "zeptomailFromEmail"))
       .first();
 
     if (doc) {
@@ -909,15 +983,15 @@ export const removeSendgridFromEmail = mutation({
   },
 });
 
-// ─── SENDGRID FROM NAME ────────────────────────────────────────────────────
+// ─── ZEPTOMAIL FROM NAME ─────────────────────────────────────────────────────
 
-export const getSendgridFromNameStatus = query({
+export const getZeptomailFromNameStatus = query({
   handler: async (ctx) => {
     await ensureAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
-      .withIndex("by_key", (q) => q.eq("configKey", "sendgridFromName"))
+      .withIndex("by_key", (q) => q.eq("configKey", "zeptomailFromName"))
       .first();
 
     let fromName: string | null = null;
@@ -930,17 +1004,17 @@ export const getSendgridFromNameStatus = query({
     }
 
     return {
-      hasSendgridFromName: !!doc?.value,
+      hasZeptomailFromName: !!doc?.value,
       fromName,
     };
   },
 });
 
-export const getInternalSendgridFromName = internalQuery({
+export const getInternalZeptomailFromName = internalQuery({
   handler: async (ctx) => {
     const doc = await ctx.db
       .query("systemSettings")
-      .withIndex("by_key", (q) => q.eq("configKey", "sendgridFromName"))
+      .withIndex("by_key", (q) => q.eq("configKey", "zeptomailFromName"))
       .first();
     if (doc?.value) {
       try {
@@ -949,11 +1023,11 @@ export const getInternalSendgridFromName = internalQuery({
         return (doc.value || "Ashish Gupta (Fretbox)").trim();
       }
     }
-    return (process.env.SENDGRID_FROM_NAME || "Ashish Gupta (Fretbox)").trim();
+    return (process.env.ZEPTOMAIL_FROM_NAME || "Ashish Gupta (Fretbox)").trim();
   },
 });
 
-export const setSendgridFromName = mutation({
+export const setZeptomailFromName = mutation({
   args: { fromName: v.string() },
   handler: async (ctx, args) => {
     await ensureAuth(ctx);
@@ -964,7 +1038,7 @@ export const setSendgridFromName = mutation({
 
     const doc = await ctx.db
       .query("systemSettings")
-      .withIndex("by_key", (q) => q.eq("configKey", "sendgridFromName"))
+      .withIndex("by_key", (q) => q.eq("configKey", "zeptomailFromName"))
       .first();
 
     const cipher = obfuscate(args.fromName);
@@ -972,7 +1046,7 @@ export const setSendgridFromName = mutation({
       await ctx.db.patch(doc._id, { value: cipher });
     } else {
       await ctx.db.insert("systemSettings", {
-        configKey: "sendgridFromName",
+        configKey: "zeptomailFromName",
         value: cipher,
       });
     }
@@ -980,14 +1054,14 @@ export const setSendgridFromName = mutation({
   },
 });
 
-export const removeSendgridFromName = mutation({
+export const removeZeptomailFromName = mutation({
   args: {},
   handler: async (ctx) => {
     await ensureAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
-      .withIndex("by_key", (q) => q.eq("configKey", "sendgridFromName"))
+      .withIndex("by_key", (q) => q.eq("configKey", "zeptomailFromName"))
       .first();
 
     if (doc) {

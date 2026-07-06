@@ -29,8 +29,8 @@ webhooks — all in TypeScript with zero infrastructure to manage.
 | Vector Search   | Convex Native Vector Search (768-dim)                       |
 | Web Scraping    | fetch() + HTML parse → Jina Reader fallback (free, no key)  |
 | File Storage    | Convex File Storage (PDFs, assets)                          |
-| Email Delivery  | SendGrid REST API (called from Convex Actions)              |
-| Inbound Email   | SendGrid Inbound Parse → Convex HTTP Action webhook         |
+| Email Delivery  | ZeptoMail REST API (called from Convex Actions)              |
+| Inbound Email   | ZeptoMail Inbound Parse → Convex HTTP Action webhook         |
 | PDF Generation  | @react-pdf/renderer (TypeScript native)                     |
 | Frontend        | Next.js 15 (App Router) + React 19                         |
 | Data Fetching   | Convex React hooks (useQuery, useMutation, useAction)       |
@@ -59,7 +59,7 @@ LinkedIn + News Enrichment (Convex Actions → Serper.dev)
      ↓
 Priority Scoring (Deterministic Convex Mutation + Gemini 3 Flash AI score)
      ↓
-Tiered Email Outreach (Convex Cron → Scheduled Mutations → SendGrid)
+Tiered Email Outreach (Convex Cron → Scheduled Mutations → ZeptoMail)
      ↓
 Reply Classification (Convex HTTP Action webhook → Claude Sonnet 4.6)
      ↓
@@ -97,7 +97,7 @@ with a single Convex project. Auth, schema, CRUD, and frontend shell.
 1.5  Next.js 15 Shell    App Router: /app/(dashboard)/layout.tsx with sidebar.
                          Pages: universities, enrichment, outreach, proposals.
 1.6  Env Vars            Set all secrets via `npx convex env set`:
-                         ANTHROPIC_API_KEY, GOOGLE_AI_API_KEY, SENDGRID,
+                         ANTHROPIC_API_KEY, GOOGLE_AI_API_KEY, ZEPTOMAIL,
                          SERPER_API_KEY, CALENDLY keys, SENTRY_DSN.
 1.7  Verify              Convex dashboard shows 8 tables. Auth works.
                          Frontend connects and shows empty university list.
@@ -143,11 +143,11 @@ with a single Convex project. Auth, schema, CRUD, and frontend shell.
 
 #    Task                Details
 4.1  Sequence Manager    createSequence mutation + processEmailStep action.
-4.2  Email Action        SendGrid REST fetch → POST /v3/mail/send.
+4.2  Email Action        ZeptoMail REST fetch → POST /v3/mail/send.
 4.3  Email Templates     TypeScript template literals (convex/lib/emailTemplates.ts).
 4.4  Personalization     Gemini 3 Flash → 2-sentence opener (implicit cache).
 4.5  Cadence Cron        crons.ts: every hour → query due sequences → schedule.
-4.6  Delivery Webhook    httpAction POST /webhooks/sendgrid → update emailsSent.
+4.6  Delivery Webhook    httpAction POST /webhooks/zeptomail → update emailsSent.
 4.7  Inbound Reply       httpAction POST /webhooks/email-reply → save replyLogs.
 4.8  Reply Classifier    Claude Sonnet 4.6 → classify into 7 categories
                          (explicit cache breakpoint on system prompt).

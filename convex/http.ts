@@ -31,6 +31,16 @@ function getThreadMessageIdCandidate(
   const match = blob.match(/fretbox-([a-zA-Z0-9_-]+)@/i);
   return match?.[1] ?? null;
 }
+/** Constant-time string comparison to prevent timing attacks. */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) {
+    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
 /** Verifies HMAC-SHA256 signature. Returns true if valid. */
 async function verifyHmac(
   secret: string,
@@ -47,10 +57,9 @@ async function verifyHmac(
       ["verify"],
     );
 
-    const sigHex = signature.replace(/^v1=/, "");
-    const sigBytes = new Uint8Array(
-      sigHex.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || [],
-    );
+    // ZeptoMail signatures are Base64-encoded (e.g., "dN0yVozgabP5NPlxMDfP1r5u65bVO9kTGEZMIQlqI2o=")
+    const sigBase64 = signature.replace(/^v1=/, "");
+    const sigBytes = Uint8Array.from(atob(sigBase64), (c) => c.charCodeAt(0));
 
     return await crypto.subtle.verify(
       "HMAC",
@@ -68,72 +77,115 @@ const http = httpRouter();
 // ─── Convex Auth routes (sign-in, sign-out, session) ──────────────────────────
 auth.addHttpRoutes(http);
 
-// ─── SendGrid delivery event webhook ─────────────────────────────────────────
+// ─── ZeptoMail delivery event webhook ─────────────────────────────────────────
 http.route({
-  path: "/webhooks/sendgrid",
+  path: "/webhooks/zeptomail",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
-    const secret = process.env.SENDGRID_WEBHOOK_SECRET;
+    const secret = process.env.ZEPTOMAIL_WEBHOOK_SECRET;
     const requireAuth = process.env.REQUIRE_WEBHOOK_AUTH === "true";
 
     if (requireAuth && !secret) {
-      console.error("[SendGrid] Missing SENDGRID_WEBHOOK_SECRET with REQUIRE_WEBHOOK_AUTH=true. Rejecting request.");
+      console.error("[ZeptoMail] Missing ZEPTOMAIL_WEBHOOK_SECRET with REQUIRE_WEBHOOK_AUTH=true. Rejecting request.");
       return new Response("Configuration Error", { status: 500 });
     }
 
     if (secret) {
       const rawBody = await req.text();
-      const sig = req.headers.get("x-sendgrid-signature-v1") ?? "";
+      // ZeptoMail uses producer-signature header: ts=...;s=...;s-algorithm=HmacSHA256
+      const sigHeader = req.headers.get("producer-signature") ?? "";
+      // Match ;s= or s= at start, not the s= inside ts=
+      const sigMatch = sigHeader.match(/(?:^|;)s=([^;]+)/);
+      const sig = sigMatch ? decodeURIComponent(sigMatch[1]) : "";
       if (!(await verifyHmac(secret, rawBody, sig))) {
-        console.warn("[SendGrid] Invalid signature. Rejecting webhook.");
+        console.warn("[ZeptoMail] Invalid signature. Rejecting webhook.");
         return new Response("Unauthorized", { status: 401 });
       }
       // Re-parse from text since body was consumed above
-      const events = JSON.parse(rawBody) as Array<{
-        event: string;
-        sg_message_id?: string;
-        timestamp?: number;
-      }>;
-      return handleSendGridEvents(ctx, events);
+      let payload: ZeptoMailWebhookPayload;
+      try {
+        payload = JSON.parse(rawBody) as ZeptoMailWebhookPayload;
+      } catch {
+        console.error("[ZeptoMail] Failed to parse webhook JSON body");
+        return new Response("Bad Request", { status: 400 });
+      }
+      return handleZeptomailEvents(ctx, payload);
     }
 
     // No secret configured — accept all (dev mode only)
-    console.warn("[SendGrid] ⚠️ Webhook secret not configured in dev. Bypassing signature verification.");
-    const events = (await req.json()) as Array<{
-      event: string;
-      sg_message_id?: string;
-      timestamp?: number;
-    }>;
-    return handleSendGridEvents(ctx, events);
+    console.warn("[ZeptoMail] ⚠️ Webhook secret not configured in dev. Bypassing signature verification.");
+    let payload: ZeptoMailWebhookPayload;
+    try {
+      payload = (await req.json()) as ZeptoMailWebhookPayload;
+    } catch {
+      console.error("[ZeptoMail] Failed to parse webhook JSON body");
+      return new Response("Bad Request", { status: 400 });
+    }
+    return handleZeptomailEvents(ctx, payload);
   }),
 });
 
-async function handleSendGridEvents(
+interface ZeptoMailWebhookPayload {
+  event_name?: string[];
+  event_message?: Array<{
+    email_info?: {
+      email_reference?: string;
+      client_reference?: string;
+    };
+    event_data?: Array<{
+      details?: Array<{
+        time?: string;
+        modified_time?: string;
+      }>;
+      object?: string;
+    }>;
+    request_id?: string;
+  }>;
+  mailagent_key?: string;
+  webhook_request_id?: string;
+}
+
+async function handleZeptomailEvents(
   ctx: ActionCtx,
-  events: Array<{ event: string; sg_message_id?: string; timestamp?: number }>,
+  payload: ZeptoMailWebhookPayload,
 ) {
-  for (const event of events) {
-    if (!event.sg_message_id) continue;
-    const messageId = event.sg_message_id.split(".")[0];
-    const status =
-      event.event === "open"
-        ? "opened"
-        : event.event === "click"
-          ? "clicked"
-          : event.event === "bounce"
-            ? "bounced"
-            : event.event === "delivered"
-              ? "delivered"
+  const eventNames = payload.event_name ?? [];
+  const messages = payload.event_message ?? [];
+
+  for (let i = 0; i < messages.length; i++) {
+    try {
+      const msg = messages[i];
+      const eventName = eventNames[i] ?? "";
+      const messageId = msg.email_info?.email_reference || msg.request_id;
+      const clientReference = msg.email_info?.client_reference;
+      if (!messageId && !clientReference) continue;
+
+      const status =
+        eventName === "email_open"
+          ? "opened"
+          : eventName === "email_link_click"
+            ? "clicked"
+            : eventName === "hardbounce" || eventName === "softbounce"
+              ? "bounced"
               : null;
-    if (status) {
-      await ctx.runMutation(internal.emails.updateStatusBySendgridIdInternal, {
-        sendgrid_message_id: messageId,
-        status: status as "opened" | "clicked" | "bounced" | "delivered",
-        opened_at:
-          event.event === "open" && event.timestamp
-            ? event.timestamp * 1000
-            : undefined,
-      });
+
+      if (status) {
+        const eventTimeStr = msg.event_data?.[0]?.details?.[0]?.time
+          || msg.event_data?.[0]?.details?.[0]?.modified_time;
+        const eventTime = eventTimeStr ? new Date(eventTimeStr).getTime() : undefined;
+
+        await ctx.runMutation(internal.emails.updateStatusByZeptomailIdInternal, {
+          zeptomail_message_id: messageId ?? "",
+          client_reference: clientReference,
+          status: status as "opened" | "clicked" | "bounced",
+          opened_at:
+            eventName === "email_open" && eventTime
+              ? eventTime
+              : undefined,
+        });
+      }
+    } catch (e) {
+      console.error(`[ZeptoMail] Failed to process event ${i}:`, e);
     }
   }
   return new Response(null, { status: 200 });
@@ -156,7 +208,7 @@ http.route({
     if (secret) {
       const authHeader = req.headers.get("authorization") ?? "";
       const provided = authHeader.replace(/^Bearer\s+/i, "").trim();
-      if (provided !== secret) {
+      if (!timingSafeEqual(provided, secret)) {
         console.warn("[Inbound Reply] Invalid webhook secret. Rejecting.");
         return new Response("Unauthorized", { status: 401 });
       }
@@ -277,7 +329,7 @@ http.route({
     }
 
     if (expectedToken) {
-      if (channelToken !== expectedToken) {
+      if (!timingSafeEqual(channelToken, expectedToken)) {
         console.warn("[GoogleCalendar] Invalid channel token. Rejecting.");
         return new Response("Unauthorized", { status: 401 });
       }
@@ -329,7 +381,7 @@ http.route({
     if (secret) {
       const authHeader = req.headers.get("authorization") ?? "";
       const provided = authHeader.replace(/^Bearer\s+/i, "").trim();
-      if (provided !== secret) {
+      if (!timingSafeEqual(provided, secret)) {
         return new Response("Unauthorized", { status: 401 });
       }
     } else {

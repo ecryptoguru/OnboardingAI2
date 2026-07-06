@@ -32,7 +32,9 @@ export const classifyReply = action({
       });
       if (!reply) throw new Error("Reply log not found");
 
-      const sanitizedReply = sanitizeLlmInput(reply.raw_reply);
+      const MAX_REPLY_CHARS = 2000;
+      const truncatedReply = reply.raw_reply.slice(0, MAX_REPLY_CHARS);
+      const sanitizedReply = sanitizeLlmInput(truncatedReply);
       const systemPrompt = REPLY_CLASSIFIER_SYSTEM_PROMPT(sanitizedReply);
       const userMessage = "Classify this email.";
 

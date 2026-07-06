@@ -9,7 +9,7 @@ import { Id } from "../_generated/dataModel";
  * Comprehensive real-world end-to-end pipeline verification.
  *
  * This action exercises the full Outreach AI pipeline for a single university
- * using real external APIs (Gemini, Serper, SendGrid webhooks).  It creates
+ * using real external APIs (Gemini, Serper, ZeptoMail webhooks).  It creates
  * real database records but does NOT send unsolicited emails — the HITL flow
  * ensures emails are drafted as "pending_approval" only.
  *

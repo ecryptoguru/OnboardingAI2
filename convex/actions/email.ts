@@ -5,7 +5,7 @@ import { internal, api } from "../_generated/api";
 import { v } from "convex/values";
 
 /**
- * Sends an email via the SendGrid REST API.
+ * Sends an email via the ZeptoMail (Zoho) REST API.
  * Uses fetch() directly to avoid heavy dependencies in Convex actions.
  */
 export const sendEmail = action({
@@ -18,6 +18,7 @@ export const sendEmail = action({
     messageIdHeader: v.optional(v.string()),
     inReplyTo: v.optional(v.string()),
     references: v.optional(v.string()),
+    clientReference: v.optional(v.string()),
   },
   handler: async (
     ctx,
@@ -47,54 +48,46 @@ export const sendEmail = action({
       };
     }
 
-    // Fetch SendGrid key, from-email, and sender name from settings DB first, fall back to env for backward compatibility
+    // Fetch ZeptoMail key, from-email, and sender name from settings DB first, fall back to env for backward compatibility
     const [dbKey, dbFromEmail, dbFromName] = await Promise.all([
-      ctx.runQuery(internal.settings.getInternalSendgridKey),
-      ctx.runQuery(internal.settings.getInternalSendgridFromEmail),
-      ctx.runQuery(internal.settings.getInternalSendgridFromName),
+      ctx.runQuery(internal.settings.getInternalZeptomailKey),
+      ctx.runQuery(internal.settings.getInternalZeptomailFromEmail),
+      ctx.runQuery(internal.settings.getInternalZeptomailFromName),
     ]);
-    const apiKey = dbKey || process.env.SENDGRID_API_KEY;
-    const fromEmail = dbFromEmail || process.env.SENDGRID_FROM_EMAIL || "outreach@fretbox.in";
-    const fromName = dbFromName || process.env.SENDGRID_FROM_NAME || "Ashish Gupta (Fretbox)";
+    const apiKey = dbKey || process.env.ZEPTOMAIL_API_KEY;
+    const fromEmail = dbFromEmail || process.env.ZEPTOMAIL_FROM_EMAIL || "outreach@fretbox.in";
+    const fromName = dbFromName || process.env.ZEPTOMAIL_FROM_NAME || "Ashish Gupta (Fretbox)";
 
     if (!apiKey) {
-      console.error("[Email Action] SENDGRID_API_KEY is not configured");
-      return { success: false, error: "SENDGRID_API_KEY_MISSING" };
+      console.error("[Email Action] ZEPTOMAIL_API_KEY is not configured");
+      return { success: false, error: "ZEPTOMAIL_API_KEY_MISSING" };
     }
 
-    const headers: Record<string, string> = {};
-    if (args.messageIdHeader) headers["Message-ID"] = args.messageIdHeader;
-    if (args.inReplyTo) headers["In-Reply-To"] = args.inReplyTo;
-    if (args.references) headers["References"] = args.references;
+    const mimeHeaders: Record<string, string> = {};
+    if (args.messageIdHeader) mimeHeaders["Message-ID"] = args.messageIdHeader;
+    if (args.inReplyTo) mimeHeaders["In-Reply-To"] = args.inReplyTo;
+    if (args.references) mimeHeaders["References"] = args.references;
 
-    const response = await fetch("https://api.sendgrid.com/v3/mail/send", {
+    const response = await fetch("https://api.zeptomail.com/v1.1/email", {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${apiKey}`,
+        Authorization: `Zoho-enczapikey ${apiKey}`,
         "Content-Type": "application/json",
       },
       signal: AbortSignal.timeout(15000),
       body: JSON.stringify({
-        personalizations: [
-          {
-            to: (Array.isArray(args.to) ? args.to : [args.to]).map((e) => ({
-              email: e,
-            })),
-            ...(args.cc && args.cc.length > 0
-              ? { cc: args.cc.map((e) => ({ email: e })) }
-              : {}),
-          },
-        ],
-        from: { email: fromEmail, name: fromName },
+        from: { address: fromEmail, name: fromName },
+        to: (Array.isArray(args.to) ? args.to : [args.to]).map((e) => ({
+          email_address: { address: e },
+        })),
+        ...(args.cc && args.cc.length > 0
+          ? { cc: args.cc.map((e) => ({ email_address: { address: e } })) }
+          : {}),
         subject: args.subject,
-        ...(Object.keys(headers).length > 0 ? { headers } : {}),
-        content: [
-          {
-            type: "text/plain",
-            value: args.text,
-          },
-          ...(args.html ? [{ type: "text/html", value: args.html }] : []),
-        ],
+        textbody: args.text,
+        ...(args.html ? { htmlbody: args.html } : {}),
+        ...(Object.keys(mimeHeaders).length > 0 ? { mime_headers: mimeHeaders } : {}),
+        ...(args.clientReference ? { client_reference: args.clientReference } : {}),
       }),
     });
 
@@ -102,22 +95,23 @@ export const sendEmail = action({
       const errorData = await response
         .json()
         .catch(() => ({ message: "Unknown error" }));
-      console.error("[Email Action] SendGrid error:", errorData);
+      console.error("[Email Action] ZeptoMail error:", errorData);
       return {
         success: false,
-        error: "SENDGRID_API_ERROR",
+        error: "ZEPTOMAIL_API_ERROR",
         details: errorData,
       };
     }
 
-    // SendGrid returns 202 Accepted on success
-    const messageId = response.headers.get("x-message-id") ?? undefined;
+    // ZeptoMail returns 200 OK with JSON { data: [...], message: "OK", request_id: "...", object: "email" }
+    const responseData = await response.json().catch(() => ({}));
+    const messageId = (responseData as { request_id?: string })?.request_id ?? undefined;
     return { success: true, messageId };
   },
 });
 
 /**
- * HITL: Approves a drafted email, sends it via SendGrid,
+ * HITL: Approves a drafted email, sends it via ZeptoMail,
  * updates status to "sent", and resumes the sequence.
  */
 export const approveAndSend = action({
@@ -137,7 +131,7 @@ export const approveAndSend = action({
     });
     if (!st || !st.email) throw new Error("Stakeholder missing email");
 
-    // 2. Send via SendGrid
+    // 2. Send via ZeptoMail
     const customMessageId = `<fretbox-${email._id}@reply.fretbox.in>`;
     const sendResult = await ctx.runAction(api.actions.email.sendEmail, {
       to: st.email,
@@ -145,6 +139,7 @@ export const approveAndSend = action({
       text: email.body,
       html: email.html_body ?? undefined,
       messageIdHeader: customMessageId,
+      clientReference: args.emailId,
     });
 
     if (!sendResult.success) {
@@ -152,16 +147,17 @@ export const approveAndSend = action({
         id: args.emailId,
         status: "failed",
       });
-      throw new Error(`SendGrid failed: ${sendResult.error}`);
+      throw new Error(`ZeptoMail failed: ${sendResult.error}`);
     }
 
     const now = Date.now();
-    const normalizedSendgridMessageId = sendResult.messageId?.split(".")[0];
+    // Store the request_id returned by ZeptoMail; webhooks will match on email_reference or client_reference
+    const zeptomailMessageId = sendResult.messageId;
     // 3. Update Email status
     await ctx.runMutation(internal.emails.updateStatusInternal, {
       id: args.emailId,
       status: "sent",
-      sendgrid_message_id: normalizedSendgridMessageId,
+      zeptomail_message_id: zeptomailMessageId,
       sent_at: now,
     });
 

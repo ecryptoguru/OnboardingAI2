@@ -1,15 +1,15 @@
-import { query, action } from "./_generated/server";
+import { internalQuery, internalAction } from "./_generated/server";
 import { v } from "convex/values";
 import { api } from "./_generated/api";
 
-export const getFirstUni = query({
+export const getFirstUni = internalQuery({
   args: {},
   handler: async (ctx) => {
     return await ctx.db.query("universities").first();
   },
 });
 
-export const testScore = action({
+export const testScore = internalAction({
   args: { universityId: v.id("universities") },
   handler: async (ctx, args): Promise<unknown> => {
     return await ctx.runAction(api.actions.scoring.scoreUniversity, {

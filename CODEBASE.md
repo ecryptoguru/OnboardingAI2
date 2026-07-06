@@ -16,7 +16,7 @@ This document serves as the central reference point for AI coding agents to navi
 - **AI Models:** Google Gemini 3.5 Flash (complex tasks), Gemini 3.1 Flash-Lite (high-volume), `gemini-embedding-001` (768-dim embeddings). Uses direct `@google/genai` SDK.
 - **LLM Guardrails:** Daily budget tracking (`llmBudget` table) + deterministic response cache (`llmCache` table) for cost control. Configured via `LLM_DAILY_BUDGET_USD` env var (default $50/day).
 - **External Services:**
-  - SendGrid (Email dispatch & delivery tracking)
+  - ZeptoMail (Email dispatch & delivery tracking)
   - Serper (Web search & discovery)
   - Firecrawl (Web scraping & site mapping)
   - Jina Reader / fetch (Web scraping fallback)
@@ -45,7 +45,7 @@ Next.js 15 App Router frontend.
   - `dashboard/outreach/demo/page.tsx`: Outreach demo/visualization page
   - `dashboard/approvals/page.tsx`: Pending email approvals queue
   - `dashboard/proposals/page.tsx`: Generated proposals, PDF viewer, Google Calendar integration. Each proposal card shows meeting status (Confirmed / Pending / Not Scheduled) with an "Open Meet Link" when available. Includes a "Confirm Meeting & Create Meet Link" / "Reschedule Meeting" action that opens a datetime + duration picker modal. When a meeting is confirmed, the system calls `api.actions.proposals.confirmMeeting` to create the calendar event and attach the Meet link.
-  - `dashboard/settings/page.tsx`: System configuration — API keys (Gemini, Serper, Firecrawl, SendGrid, Google Calendar), toggles, enrichment controls
+  - `dashboard/settings/page.tsx`: System configuration — API keys (Gemini, Serper, Firecrawl, ZeptoMail, Google Calendar), toggles, enrichment controls
   - `dashboard/settings/components.tsx`: Reusable settings UI components (PasswordInput, TestResultAlert, StatusBadge)
 - `/api/sync-ugc/route.ts`: Next.js proxy route for UGC.gov.in university data (rate-limited)
 - `globals.css`: Global styles, Tailwind directives, glassmorphism CSS variables
@@ -66,7 +66,7 @@ The entire backend ecosystem (Queries, Mutations, Actions, HTTP routes, Crons).
   - `emails.ts`: Email log CRUD, delivery status tracking, approval workflows
   - `replies.ts`: Reply log management, classification review
   - `priorityScores.ts`: Lead scoring storage (deterministic + AI + final composite)
-  - `settings.ts`: System settings key-value store. **All API keys are DB-backed with obfuscation** (`geminiApiKey`, `serperApiKey`, `firecrawlApiKey`, `sendgridApiKey`, `googleCalendarJson`, `googleCalendarId`, `sendgridFromEmail`, `sendgridFromName`). Provides status queries, set/remove mutations, test actions, and internal getters with env fallbacks. Display names use `.trim()` only (not `sanitizeApiKey`).
+  - `settings.ts`: System settings key-value store. **All API keys are DB-backed with obfuscation** (`geminiApiKey`, `serperApiKey`, `firecrawlApiKey`, `zeptomailApiKey`, `googleCalendarJson`, `googleCalendarId`, `zeptomailFromEmail`, `zeptomailFromName`). Provides status queries, set/remove mutations, test actions, and internal getters with env fallbacks. Display names use `.trim()` only (not `sanitizeApiKey`).
   - `rateLimits.ts`: Persistent rate-limiting for external APIs
   - `admin.ts`: Admin operations (e.g., `resetUniversityEnrichment`)
   - `dbReset.ts`: Database reset utilities
@@ -78,7 +78,7 @@ The entire backend ecosystem (Queries, Mutations, Actions, HTTP routes, Crons).
   - `schema.ts`: Full database schema with auth tables, indexes, search indexes, vector index (768-dim). Also defines `llmBudget` (daily spend tracking) and `llmCache` (deterministic response cache, 48h TTL).
   - `crons.ts`: Scheduled jobs — outreach sequence processing every **15 minutes** (was hourly), weekly proposal cleanup. Batch cap = 100 sequences with 250ms stagger.
   - `dispatcher.ts`: Staggered job scheduling for website validation/discovery
-  - `http.ts`: Convex HTTP webhooks (SendGrid delivery, inbound replies, Google Calendar push, auth routes)
+  - `http.ts`: Convex HTTP webhooks (ZeptoMail delivery, inbound replies, Google Calendar push, auth routes)
   - `auth.ts` / `auth.config.ts`: Convex Auth configuration (Password provider)
 
 - `/actions/` (23 files)
@@ -94,10 +94,10 @@ The entire backend ecosystem (Queries, Mutations, Actions, HTTP routes, Crons).
   - `outreach.ts`: Multi-stage email sequence dispatch & cadence logic. `processDueSequences` batches up to **100** sequences with **250ms** stagger (was 50/500ms). Emails are drafted as `pending_approval` (HITL), not sent immediately.
   - `personalize.ts`: AI email copy generation with prompt injection sanitization (`sanitizeLlmInput`) and output cleaning (`sanitizeLlmOutput`). Uses `skipCache: true` because prompts contain university-specific signals.
   - `scoring.ts`: Lead potential scoring (hostelites, NAAC, agility, digital signals, stakeholders, etc.). Uses `skipCache: true` because prompts contain university-specific data.
-  - `proposals.ts`: AI-generated proposals (rich HTML emailed directly, no PDF). Proposal email footer uses the configured `sendgridFromName`. Uses `skipCache: true` because prompts contain university-specific signals and stakeholder data. Also exports `confirmMeeting` action, which creates a Google Calendar event with a Google Meet link for a proposal, persists `calendar_event_id` / `meet_link` / `calendar_event_status`, and returns actionable success/error info.
+  - `proposals.ts`: AI-generated proposals (rich HTML emailed directly, no PDF). Proposal email footer uses the configured `zeptomailFromName`. Uses `skipCache: true` because prompts contain university-specific signals and stakeholder data. Also exports `confirmMeeting` action, which creates a Google Calendar event with a Google Meet link for a proposal, persists `calendar_event_id` / `meet_link` / `calendar_event_status`, and returns actionable success/error info.
   - `replyClassifier.ts`: Inbound reply classification (meeting_request, positive_interest, opt_out, etc.). **HITL gate**: low-confidence (< 0.85) high-stakes classifications (`meeting_request`, `positive_interest`) block auto-reply and require human review. Duplicate-unsent-proposal prevention before creating draft proposals.
   - `autoReply.ts`: Automated response sending for positive replies & meeting requests
-  - `email.ts`: SendGrid email dispatch with retry logic
+  - `email.ts`: ZeptoMail email dispatch with retry logic
   - `ingest.ts`: CSV/UGC data ingestion helpers
   - `ugcSeed.ts`: UGC dataset seeding
   - `ugcSync.ts`: UGC synchronization action — in-memory strict matching, state-indexed candidate lookup, input deduplication, and batched writes via `bulkSyncUgcInternal` to avoid mutation timeouts.
@@ -244,20 +244,20 @@ All external API keys are stored in the `systemSettings` table with **XOR obfusc
 - `geminiApiKey` — `getInternalGeminiKey` reads DB first, falls back to `GOOGLE_API_KEY` / `GEMINI_API_KEY`
 - `serperApiKey` — `getInternalSerperKey` reads DB first, falls back to `SERPER_API_KEY`
 - `firecrawlApiKey` — `getInternalFirecrawlKey` reads DB first, falls back to `FIRECRAWL_API_KEY`
-- `sendgridApiKey` — `getInternalSendgridKey` reads DB first, falls back to `SENDGRID_API_KEY`
-- `sendgridFromEmail` — `getInternalSendgridFromEmail` reads DB first, falls back to `SENDGRID_FROM_EMAIL` / `outreach@fretbox.in`
-- `sendgridFromName` — `getInternalSendgridFromName` reads DB first, falls back to `SENDGRID_FROM_NAME` / `"Ashish Gupta (Fretbox)"`. Used in SendGrid `from.name` and proposal email HTML footer.
+- `zeptomailApiKey` — `getInternalZeptomailKey` reads DB first, falls back to `ZEPTOMAIL_API_KEY`
+- `zeptomailFromEmail` — `getInternalZeptomailFromEmail` reads DB first, falls back to `ZEPTOMAIL_FROM_EMAIL` / `outreach@fretbox.in`
+- `zeptomailFromName` — `getInternalZeptomailFromName` reads DB first, falls back to `ZEPTOMAIL_FROM_NAME` / `"Ashish Gupta (Fretbox)"`. Used in ZeptoMail `from.name` and proposal email HTML footer.
 
-Each API key has: status query (`get*KeyStatus`), set mutation (`set*Key`), test action (`test*Key`), remove mutation (`remove*Key`), and internal setter (`set*KeyInternal`) for seeding. Keys are sanitized on read with `sanitizeApiKey()` to strip control characters. Display names (`sendgridFromName`) use `.trim()` only.
+Each API key has: status query (`get*KeyStatus`), set mutation (`set*Key`), test action (`test*Key`), remove mutation (`remove*Key`), and internal setter (`set*KeyInternal`) for seeding. Keys are sanitized on read with `sanitizeApiKey()` to strip control characters. Display names (`zeptomailFromName`) use `.trim()` only.
 
-**Stored-key testing** — `testGeminiKeyStored`, `testSerperKeyStored`, `testFirecrawlKeyStored`, `testSendgridKeyStored` (actions) let users validate already-saved keys without re-entering them. These call `internal.settings.getInternal*Key` via `ctx.runQuery` with explicit type casts to avoid circular dependency type errors.
+**Stored-key testing** — `testGeminiKeyStored`, `testSerperKeyStored`, `testFirecrawlKeyStored`, `testZeptomailKeyStored` (actions) let users validate already-saved keys without re-entering them. These call `internal.settings.getInternal*Key` via `ctx.runQuery` with explicit type casts to avoid circular dependency type errors.
 
 **Settings.ts model constant** — `GEMINI_TEST_MODEL = "gemini-3.5-flash"` is hardcoded directly in `settings.ts` (not imported from `./lib/llm`) because `llm.ts` has `"use node"` and importing it into a V8-isolate file causes esbuild to bundle Node built-ins into the browser bundle.
 
 ### 6. Webhook Hardening (HTTP Layer)
 
 `convex/http.ts` handles inbound webhooks securely:
-- **SendGrid delivery events:** HMAC-SHA256 signature verification, normalized message ID mapping to `emailsSent` status updates via internal mutations.
+- **ZeptoMail delivery events:** HMAC-SHA256 signature verification, normalized message ID mapping to `emailsSent` status updates via internal mutations.
 - **Inbound email replies:** Shared-secret auth, multi-layer context resolution (thread Message-ID -> email lookup -> sender email -> stakeholder lookup), then schedules `replyClassifier`.
 - **Google Calendar push notifications:** Channel token verification for sync notifications.
 - **Auth routes:** Convex Auth HTTP routes (sign-in, sign-out, session).
@@ -289,13 +289,13 @@ Flat design with glassmorphism accents. Fonts: Poppins (headings) + Open Sans (b
 1. **Exponential Backoff:** All external API hits in actions must use `withRetry` (`convex/lib/utils.ts`).
 2. **Centralized Prompts:** Do not inline prompts inside actions; keep them in `convex/lib/prompts.ts`.
 3. **Internal Mutations:** Webhook handlers in `convex/http.ts` must use internal mutations (not direct DB writes) to keep logic centralized and auditable.
-4. **SendGrid ID Persistence:** Always store normalized `sendgrid_message_id` in `emailsSent` for delivery event correlation.
+4. **ZeptoMail ID Persistence:** Always store normalized `zeptomail_message_id` in `emailsSent` for delivery event correlation.
 5. **Sentry Logging:** Ensure AI failures have structured payload logs.
 6. **Environment Variables:** Only `CONVEX_*`, `NEXT_PUBLIC_*`, and `SETTINGS_OBFUSCATION_SECRET` should live in `.env`. All API service keys belong in the DB via Settings page.
 7. **Rate Limiting:** Use `rateLimits` table + `withConcurrencyLimit` for external API call throttling.
 8. **Serper Budget:** Use `createSerperBudget` / `runWithSerperBudget` from `convex/lib/serperBudget.ts` to enforce per-university query caps and detect quota exhaustion.
 9. **Timeout Safety:** All Gemini SDK calls use `httpOptions: { timeout: 25000 }`. All `fetch()` calls use `AbortSignal.timeout(...)`. Do **not** wrap `ctx.runAction(...)` in `raceWithTimeout`.
-10. **API Key Validation:** Sanitize keys with `sanitizeApiKey()` before use to strip control characters that break HTTP headers. **Do NOT** use `sanitizeApiKey()` on human-readable display names (e.g., `sendgridFromName`) — use `.trim()` instead.
+10. **API Key Validation:** Sanitize keys with `sanitizeApiKey()` before use to strip control characters that break HTTP headers. **Do NOT** use `sanitizeApiKey()` on human-readable display names (e.g., `zeptomailFromName`) — use `.trim()` instead.
 11. **LLM Output Sanitization:** Always pipe LLM-generated text through `sanitizeLlmOutput()` before persistence or email injection. It strips leftover injection artifacts and placeholder markers (`[Name]`, `[University]`, `[Role]`).
 12. **Cache Policy:** Deterministic calls (same prompt, same model, same temperature) benefit from `llmCache`. Any call with university-specific, stakeholder-specific, or reply-specific data **must** pass `skipCache: true` to prevent cross-entity cache pollution.
 13. **Budget Soft Cap:** The `llmBudget` guard is a best-effort daily limit, not an atomic hard cap. Concurrent actions may slightly overspend under burst load. Set `LLM_DAILY_BUDGET_USD` conservatively.

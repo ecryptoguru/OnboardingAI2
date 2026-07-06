@@ -149,9 +149,9 @@ export const sendAutoReply = action({
     }
 
     // 7. Record the auto-reply email so tests and UI can verify it exists
-    // (status reflects whether SendGrid actually delivered it)
+    // (status reflects whether ZeptoMail actually delivered it)
     console.log(`[AutoReply] Recording step-99 email for seq=${activeSeq?._id ?? "none"}`);
-    const normalizedMessageId = sendResult.messageId?.split(".")[0];
+    const normalizedMessageId = sendResult.messageId;
     await ctx.runMutation(internal.emails.insertInternal, {
       sequence_id: activeSeq?._id as unknown as Id<"outreachSequences">,
       university_id: args.universityId,
@@ -160,7 +160,7 @@ export const sendAutoReply = action({
       body: emailData.body,
       html_body: emailData.html,
       status: sendResult.success ? "sent" : "failed",
-      sendgrid_message_id: normalizedMessageId,
+      zeptomail_message_id: normalizedMessageId,
       step_number: 99, // Special step for auto-replies
       sent_at: Date.now(),
     });

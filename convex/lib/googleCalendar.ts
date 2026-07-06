@@ -20,6 +20,14 @@ interface ServiceAccountKey {
   token_uri: string;
 }
 
+interface CachedToken {
+  token: string;
+  expiresAt: number;
+}
+
+let cachedToken: CachedToken | null = null;
+let cachedTokenKey: string | null = null;
+
 interface GoogleCalendarEvent {
   id: string;
   summary: string;
@@ -62,6 +70,17 @@ async function getAccessToken(serviceAccountJson?: string): Promise<string | nul
   } catch {
     console.warn("[GoogleCalendar] Invalid GOOGLE_SERVICE_ACCOUNT_JSON JSON");
     return null;
+  }
+
+  // Return cached token if still valid (with 60s safety margin)
+  // Key by service account email to avoid stale token after config change
+  const tokenKey = sa.client_email;
+  if (
+    cachedToken &&
+    cachedTokenKey === tokenKey &&
+    cachedToken.expiresAt > Date.now() + 60_000
+  ) {
+    return cachedToken.token;
   }
 
   const now = Math.floor(Date.now() / 1000);
@@ -111,7 +130,7 @@ async function getAccessToken(serviceAccountJson?: string): Promise<string | nul
       {
         method: "POST",
         headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body: `grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer&assertion=${encodeURIComponent(jwt)}`,
+        body: `grant_type=${encodeURIComponent("urn:ietf:params:oauth:grant-type:jwt-bearer")}&assertion=${encodeURIComponent(jwt)}`,
         signal: AbortSignal.timeout(10000),
       },
     );
@@ -122,12 +141,27 @@ async function getAccessToken(serviceAccountJson?: string): Promise<string | nul
       return null;
     }
 
-    const tokenData = (await tokenRes.json()) as { access_token?: string };
-    return tokenData.access_token || null;
+    const tokenData = (await tokenRes.json()) as { access_token?: string; expires_in?: number };
+    const token = tokenData.access_token || null;
+    if (token) {
+      const expiresIn = tokenData.expires_in ?? 3600;
+      cachedToken = { token, expiresAt: Date.now() + expiresIn * 1000 };
+      cachedTokenKey = sa.client_email;
+    }
+    return token;
   } catch (e) {
     console.warn("[GoogleCalendar] JWT signing failed:", e);
     return null;
   }
+}
+
+/**
+ * Clears the cached access token. Called when an API call returns 401,
+ * indicating the token may have been revoked.
+ */
+function invalidateTokenCache(): void {
+  cachedToken = null;
+  cachedTokenKey = null;
 }
 
 /**
@@ -187,8 +221,8 @@ export async function createMeetingEvent(options: {
   };
 
   try {
-    const res = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?conferenceDataVersion=1`,
+    let res = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?conferenceDataVersion=1&sendUpdates=all`,
       {
         method: "POST",
         headers: {
@@ -199,6 +233,26 @@ export async function createMeetingEvent(options: {
         signal: AbortSignal.timeout(15000),
       },
     );
+
+    // If 401, token may be revoked — invalidate cache and retry once
+    if (res.status === 401) {
+      invalidateTokenCache();
+      const freshToken = await getAccessToken(options.serviceAccountJson);
+      if (freshToken) {
+        res = await fetch(
+          `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events?conferenceDataVersion=1&sendUpdates=all`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${freshToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(15000),
+          },
+        );
+      }
+    }
 
     if (!res.ok) {
       const errText = await res.text();
@@ -225,6 +279,83 @@ export async function createMeetingEvent(options: {
 }
 
 /**
+ * Validates the Google Calendar service account by acquiring an access token
+ * and making a lightweight GET call to the calendar metadata endpoint.
+ * Returns success with the calendar summary if credentials are valid.
+ */
+export async function testCalendarConnection(options?: {
+  serviceAccountJson?: string;
+  calendarId?: string;
+}): Promise<{ success: boolean; error?: string; message?: string }> {
+  const accessToken = await getAccessToken(options?.serviceAccountJson);
+  if (!accessToken) {
+    return { success: false, error: "GOOGLE_CALENDAR_NOT_CONFIGURED" };
+  }
+
+  const calendarId =
+    options?.calendarId ?? process.env.GOOGLE_CALENDAR_ID ?? "primary";
+
+  try {
+    let res = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}`,
+      {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+        signal: AbortSignal.timeout(10000),
+      },
+    );
+
+    // If 401, token may be revoked — invalidate cache and retry once
+    if (res.status === 401) {
+      invalidateTokenCache();
+      const freshToken = await getAccessToken(options?.serviceAccountJson);
+      if (freshToken) {
+        res = await fetch(
+          `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}`,
+          {
+            method: "GET",
+            headers: {
+              Authorization: `Bearer ${freshToken}`,
+            },
+            signal: AbortSignal.timeout(10000),
+          },
+        );
+      }
+    }
+
+    if (!res.ok) {
+      const errText = await res.text();
+      console.warn("[GoogleCalendar] Connection test failed:", res.status, errText);
+      if (res.status === 404) {
+        return {
+          success: false,
+          error: `Calendar "${calendarId}" not found. Verify the calendar ID and that the service account has access.`,
+        };
+      }
+      if (res.status === 403) {
+        return {
+          success: false,
+          error: `Service account lacks permission to access calendar "${calendarId}". Share the calendar with the service account email.`,
+        };
+      }
+      return { success: false, error: `CALENDAR_API_ERROR_${res.status}` };
+    }
+
+    const data = (await res.json()) as { summary?: string; id?: string };
+    const summary = data.summary || data.id || calendarId;
+    return {
+      success: true,
+      message: `Connected to calendar "${summary}" successfully.`,
+    };
+  } catch (e) {
+    console.warn("[GoogleCalendar] Connection test exception:", e);
+    return { success: false, error: String(e) };
+  }
+}
+
+/**
  * Updates an existing Google Calendar event (e.g., to cancel).
  */
 export async function updateEvent(
@@ -240,8 +371,8 @@ export async function updateEvent(
   const calendarId = options?.calendarId ?? process.env.GOOGLE_CALENDAR_ID ?? "primary";
 
   try {
-    const res = await fetch(
-      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}`,
+    let res = await fetch(
+      `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?conferenceDataVersion=1&sendUpdates=all`,
       {
         method: "PATCH",
         headers: {
@@ -252,6 +383,26 @@ export async function updateEvent(
         signal: AbortSignal.timeout(15000),
       },
     );
+
+    // If 401, token may be revoked — invalidate cache and retry once
+    if (res.status === 401) {
+      invalidateTokenCache();
+      const freshToken = await getAccessToken(options?.serviceAccountJson);
+      if (freshToken) {
+        res = await fetch(
+          `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}/events/${encodeURIComponent(eventId)}?conferenceDataVersion=1&sendUpdates=all`,
+          {
+            method: "PATCH",
+            headers: {
+              Authorization: `Bearer ${freshToken}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(patch),
+            signal: AbortSignal.timeout(15000),
+          },
+        );
+      }
+    }
 
     if (!res.ok) {
       const errText = await res.text();

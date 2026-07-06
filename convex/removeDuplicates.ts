@@ -1,6 +1,7 @@
 import { action } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Doc } from "./_generated/dataModel";
+import { validateAdmin } from "./lib/auth_utils";
 
 /**
  * Exact-match duplicate removal for universities.
@@ -20,6 +21,7 @@ export const removeFuzzyDuplicates = action({
     mergedCount: number;
     groupsFound: number;
   }> => {
+    await validateAdmin(ctx);
     const universities: Doc<"universities">[] = await ctx.runQuery(
       internal.universities.listAllInternal,
       {}

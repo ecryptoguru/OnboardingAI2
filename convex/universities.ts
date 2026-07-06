@@ -9,6 +9,8 @@ import { paginationOptsValidator } from "convex/server";
 import { validateAuth } from "./lib/auth_utils";
 import { namesMatch } from "./lib/universityUtils";
 
+const MAX_ANALYTICS_ROWS = 5000;
+
 function isDuplicateOfExisting(
   row: { university_name: string; state?: string | null },
   existing: { university_name: string; state?: string | null }[],
@@ -62,28 +64,43 @@ export const listPaginated = query({
     await validateAuth(ctx);
 
     if (args.type && args.type !== "All") {
-      let q = ctx.db
-        .query("universities")
-        .withIndex("by_type", (q) => q.eq("type", args.type));
+      const type = args.type;
       if (args.status) {
-        q = q.filter((q) => q.eq(q.field("website_status"), args.status));
+        const status = args.status;
+        let q = ctx.db
+          .query("universities")
+          .withIndex("by_type_status", (q) => q.eq("type", type).eq("website_status", status));
+        if (args.stage) {
+          q = q.filter((q) => q.eq(q.field("outreach_stage"), args.stage));
+        }
+        return q.paginate(args.paginationOpts);
       }
       if (args.stage) {
-        q = q.filter((q) => q.eq(q.field("outreach_stage"), args.stage));
+        const stage = args.stage;
+        return await ctx.db
+          .query("universities")
+          .withIndex("by_type_stage", (q) => q.eq("type", type).eq("outreach_stage", stage))
+          .paginate(args.paginationOpts);
       }
-      return q.paginate(args.paginationOpts);
+      return await ctx.db
+        .query("universities")
+        .withIndex("by_type", (q) => q.eq("type", type))
+        .paginate(args.paginationOpts);
     }
 
     if (args.status) {
-      let q = ctx.db
-        .query("universities")
-        .withIndex("by_website_status", (q) =>
-          q.eq("website_status", args.status!),
-        );
+      const status = args.status;
       if (args.stage) {
-        q = q.filter((q) => q.eq(q.field("outreach_stage"), args.stage));
+        const stage = args.stage;
+        return await ctx.db
+          .query("universities")
+          .withIndex("by_status_stage", (q) => q.eq("website_status", status).eq("outreach_stage", stage))
+          .paginate(args.paginationOpts);
       }
-      return q.paginate(args.paginationOpts);
+      return await ctx.db
+        .query("universities")
+        .withIndex("by_website_status", (q) => q.eq("website_status", status))
+        .paginate(args.paginationOpts);
     }
 
     if (args.stage) {
@@ -115,28 +132,43 @@ export const list = query({
     const limit = args.limit ?? 500;
 
     if (args.type && args.type !== "All") {
-      let q = ctx.db
-        .query("universities")
-        .withIndex("by_type", (q) => q.eq("type", args.type));
+      const type = args.type;
       if (args.status) {
-        q = q.filter((q) => q.eq(q.field("website_status"), args.status));
+        const status = args.status;
+        let q = ctx.db
+          .query("universities")
+          .withIndex("by_type_status", (q) => q.eq("type", type).eq("website_status", status));
+        if (args.stage) {
+          q = q.filter((q) => q.eq(q.field("outreach_stage"), args.stage));
+        }
+        return q.take(limit);
       }
       if (args.stage) {
-        q = q.filter((q) => q.eq(q.field("outreach_stage"), args.stage));
+        const stage = args.stage;
+        return await ctx.db
+          .query("universities")
+          .withIndex("by_type_stage", (q) => q.eq("type", type).eq("outreach_stage", stage))
+          .take(limit);
       }
-      return q.take(limit);
+      return await ctx.db
+        .query("universities")
+        .withIndex("by_type", (q) => q.eq("type", type))
+        .take(limit);
     }
 
     if (args.status) {
-      let q = ctx.db
-        .query("universities")
-        .withIndex("by_website_status", (q) =>
-          q.eq("website_status", args.status!),
-        );
+      const status = args.status;
       if (args.stage) {
-        q = q.filter((q) => q.eq(q.field("outreach_stage"), args.stage));
+        const stage = args.stage;
+        return await ctx.db
+          .query("universities")
+          .withIndex("by_status_stage", (q) => q.eq("website_status", status).eq("outreach_stage", stage))
+          .take(limit);
       }
-      return q.take(limit);
+      return await ctx.db
+        .query("universities")
+        .withIndex("by_website_status", (q) => q.eq("website_status", status))
+        .take(limit);
     }
 
     if (args.stage) {
@@ -165,27 +197,27 @@ export const getStats = query({
       ctx.db
         .query("universities")
         .withIndex("by_type", (q) => q.eq("type", "Central"))
-        .collect()
+        .take(MAX_ANALYTICS_ROWS)
         .then((r) => r.length),
       ctx.db
         .query("universities")
         .withIndex("by_type", (q) => q.eq("type", "State"))
-        .collect()
+        .take(MAX_ANALYTICS_ROWS)
         .then((r) => r.length),
       ctx.db
         .query("universities")
         .withIndex("by_type", (q) => q.eq("type", "Private"))
-        .collect()
+        .take(MAX_ANALYTICS_ROWS)
         .then((r) => r.length),
       ctx.db
         .query("universities")
         .withIndex("by_type", (q) => q.eq("type", "Deemed"))
-        .collect()
+        .take(MAX_ANALYTICS_ROWS)
         .then((r) => r.length),
       ctx.db
         .query("universities")
         .withIndex("by_type", (q) => q.eq("type", "Other"))
-        .collect()
+        .take(MAX_ANALYTICS_ROWS)
         .then((r) => r.length),
     ]);
 
@@ -204,17 +236,17 @@ export const getStats = query({
       notInterested,
       skipped,
     ] = await Promise.all([
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "new")).collect().then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "enriching")).collect().then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "enriched")).collect().then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "sequencing")).collect().then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "outreach_active")).collect().then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "replied")).collect().then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "meeting_booked")).collect().then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "proposal_sent")).collect().then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "closed")).collect().then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "not_interested")).collect().then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "skipped")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "new")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "enriching")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "enriched")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "sequencing")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "outreach_active")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "replied")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "meeting_booked")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "proposal_sent")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "closed")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "not_interested")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "skipped")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
     ]);
 
     const all = newCount + enriching + enriched + sequencing + outreachActive + replied + meetingBooked + proposalSent + closed + notInterested + skipped;
@@ -547,8 +579,7 @@ export const skipUniversity = mutation({
     // Pause any active sequence for this university
     const sequences = await ctx.db
       .query("outreachSequences")
-      .withIndex("by_university", (q) => q.eq("university_id", args.id))
-      .filter((q) => q.eq(q.field("status"), "active"))
+      .withIndex("by_university_status", (q) => q.eq("university_id", args.id).eq("status", "active"))
       .collect();
 
     for (const seq of sequences) {
@@ -1072,7 +1103,7 @@ export const migrateDeemed = mutation({
     await validateAuth(ctx);
     const deemedUnis = await ctx.db
       .query("universities")
-      .filter((q) => q.eq(q.field("type"), "Deemed to be Universities"))
+      .withIndex("by_type", (q) => q.eq("type", "Deemed to be Universities"))
       .collect();
 
     let updatedCount = 0;

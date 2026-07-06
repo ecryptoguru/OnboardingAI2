@@ -78,7 +78,7 @@ export default function Home() {
           </div>
           <div className="flex items-center gap-2">
             <div className="w-8 h-8 rounded bg-muted" />
-            <span className="font-bold tracking-widest text-xs uppercase">CLAUDE 3</span>
+            <span className="font-bold tracking-widest text-xs uppercase">GEMINI</span>
           </div>
         </div>
       </div>

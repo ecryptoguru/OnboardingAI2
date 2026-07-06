@@ -45,38 +45,38 @@ export default function SettingsPage() {
     error?: string;
   } | null>(null);
 
-  const sendgridStatus = useQuery(api.settings.getSendgridKeyStatus);
-  const setSendgridKeyFn = useMutation(api.settings.setSendgridKey);
-  const removeSendgridKeyFn = useMutation(api.settings.removeSendgridKey);
+  const zeptomailStatus = useQuery(api.settings.getZeptomailKeyStatus);
+  const setZeptomailKeyFn = useMutation(api.settings.setZeptomailKey);
+  const removeZeptomailKeyFn = useMutation(api.settings.removeZeptomailKey);
 
-  const [sendgridApiKey, setSendgridApiKey] = useState("");
-  const [isSavingSendgrid, setIsSavingSendgrid] = useState(false);
-  const [isRemovingSendgrid, setIsRemovingSendgrid] = useState(false);
-  const [sendgridTestResult, setSendgridTestResult] = useState<{
+  const [zeptomailApiKey, setZeptomailApiKey] = useState("");
+  const [isSavingZeptomail, setIsSavingZeptomail] = useState(false);
+  const [isRemovingZeptomail, setIsRemovingZeptomail] = useState(false);
+  const [zeptomailTestResult, setZeptomailTestResult] = useState<{
     success?: boolean;
     error?: string;
   } | null>(null);
 
-  const sendgridFromEmailStatus = useQuery(api.settings.getSendgridFromEmailStatus);
-  const setSendgridFromEmailFn = useMutation(api.settings.setSendgridFromEmail);
-  const removeSendgridFromEmailFn = useMutation(api.settings.removeSendgridFromEmail);
+  const zeptomailFromEmailStatus = useQuery(api.settings.getZeptomailFromEmailStatus);
+  const setZeptomailFromEmailFn = useMutation(api.settings.setZeptomailFromEmail);
+  const removeZeptomailFromEmailFn = useMutation(api.settings.removeZeptomailFromEmail);
 
-  const [sendgridFromEmail, setSendgridFromEmail] = useState("");
-  const [isSavingSendgridFromEmail, setIsSavingSendgridFromEmail] = useState(false);
-  const [isRemovingSendgridFromEmail, setIsRemovingSendgridFromEmail] = useState(false);
-  const [sendgridFromEmailTestResult, setSendgridFromEmailTestResult] = useState<{
+  const [zeptomailFromEmail, setZeptomailFromEmail] = useState("");
+  const [isSavingZeptomailFromEmail, setIsSavingZeptomailFromEmail] = useState(false);
+  const [isRemovingZeptomailFromEmail, setIsRemovingZeptomailFromEmail] = useState(false);
+  const [zeptomailFromEmailTestResult, setZeptomailFromEmailTestResult] = useState<{
     success?: boolean;
     error?: string;
   } | null>(null);
 
-  const sendgridFromNameStatus = useQuery(api.settings.getSendgridFromNameStatus);
-  const setSendgridFromNameFn = useMutation(api.settings.setSendgridFromName);
-  const removeSendgridFromNameFn = useMutation(api.settings.removeSendgridFromName);
+  const zeptomailFromNameStatus = useQuery(api.settings.getZeptomailFromNameStatus);
+  const setZeptomailFromNameFn = useMutation(api.settings.setZeptomailFromName);
+  const removeZeptomailFromNameFn = useMutation(api.settings.removeZeptomailFromName);
 
-  const [sendgridFromName, setSendgridFromName] = useState("");
-  const [isSavingSendgridFromName, setIsSavingSendgridFromName] = useState(false);
-  const [isRemovingSendgridFromName, setIsRemovingSendgridFromName] = useState(false);
-  const [sendgridFromNameTestResult, setSendgridFromNameTestResult] = useState<{
+  const [zeptomailFromName, setZeptomailFromName] = useState("");
+  const [isSavingZeptomailFromName, setIsSavingZeptomailFromName] = useState(false);
+  const [isRemovingZeptomailFromName, setIsRemovingZeptomailFromName] = useState(false);
+  const [zeptomailFromNameTestResult, setZeptomailFromNameTestResult] = useState<{
     success?: boolean;
     error?: string;
   } | null>(null);
@@ -84,7 +84,7 @@ export default function SettingsPage() {
   const [showGeminiKey, setShowGeminiKey] = useState(false);
   const [showSerperKey, setShowSerperKey] = useState(false);
   const [showFirecrawlKey, setShowFirecrawlKey] = useState(false);
-  const [showSendgridKey, setShowSendgridKey] = useState(false);
+  const [showZeptomailKey, setShowZeptomailKey] = useState(false);
   const [showGoogleCalendarJson, setShowGoogleCalendarJson] = useState(false);
 
   const wipeEverything = useMutation(api.wipeAllData.wipeEverything);
@@ -95,31 +95,34 @@ export default function SettingsPage() {
 
   const testSerperKeyFn = useAction(api.settings.testSerperKey);
   const testFirecrawlKeyFn = useAction(api.settings.testFirecrawlKey);
-  const testSendgridKeyFn = useAction(api.settings.testSendgridKey);
+  const testZeptomailKeyFn = useAction(api.settings.testZeptomailKey);
 
   const testGeminiKeyStoredFn = useAction(api.settings.testGeminiKeyStored);
   const testSerperKeyStoredFn = useAction(api.settings.testSerperKeyStored);
   const testFirecrawlKeyStoredFn = useAction(api.settings.testFirecrawlKeyStored);
-  const testSendgridKeyStoredFn = useAction(api.settings.testSendgridKeyStored);
+  const testZeptomailKeyStoredFn = useAction(api.settings.testZeptomailKeyStored);
 
   const [isTestingSerper, setIsTestingSerper] = useState(false);
   const [isTestingFirecrawl, setIsTestingFirecrawl] = useState(false);
-  const [isTestingSendgrid, setIsTestingSendgrid] = useState(false);
+  const [isTestingZeptomail, setIsTestingZeptomail] = useState(false);
   const [isTestingGeminiStored, setIsTestingGeminiStored] = useState(false);
   const [isTestingSerperStored, setIsTestingSerperStored] = useState(false);
   const [isTestingFirecrawlStored, setIsTestingFirecrawlStored] = useState(false);
-  const [isTestingSendgridStored, setIsTestingSendgridStored] = useState(false);
+  const [isTestingZeptomailStored, setIsTestingZeptomailStored] = useState(false);
 
   const googleCalendarStatus = useQuery(api.settings.getGoogleCalendarStatus);
   const setGoogleCalendarJsonFn = useMutation(api.settings.setGoogleCalendarJson);
   const removeGoogleCalendarJsonFn = useMutation(api.settings.removeGoogleCalendarJson);
+  const testGoogleCalendarFn = useAction(api.settings.testGoogleCalendar);
 
   const [googleCalendarJson, setGoogleCalendarJson] = useState("");
   const [isSavingGoogleCalendar, setIsSavingGoogleCalendar] = useState(false);
   const [isRemovingGoogleCalendar, setIsRemovingGoogleCalendar] = useState(false);
+  const [isTestingGoogleCalendar, setIsTestingGoogleCalendar] = useState(false);
   const [googleCalendarTestResult, setGoogleCalendarTestResult] = useState<{
     success?: boolean;
     error?: string;
+    message?: string;
   } | null>(null);
 
   const googleCalendarIdStatus = useQuery(api.settings.getGoogleCalendarIdStatus);
@@ -136,16 +139,16 @@ export default function SettingsPage() {
 
   // Sync text input states with query results so users can see current values
   useEffect(() => {
-    if (sendgridFromEmailStatus?.fromEmail && !sendgridFromEmail) {
-      setSendgridFromEmail(sendgridFromEmailStatus.fromEmail);
+    if (zeptomailFromEmailStatus?.fromEmail && !zeptomailFromEmail) {
+      setZeptomailFromEmail(zeptomailFromEmailStatus.fromEmail);
     }
-  }, [sendgridFromEmailStatus?.fromEmail, sendgridFromEmail]);
+  }, [zeptomailFromEmailStatus?.fromEmail, zeptomailFromEmail]);
 
   useEffect(() => {
-    if (sendgridFromNameStatus?.fromName && !sendgridFromName) {
-      setSendgridFromName(sendgridFromNameStatus.fromName);
+    if (zeptomailFromNameStatus?.fromName && !zeptomailFromName) {
+      setZeptomailFromName(zeptomailFromNameStatus.fromName);
     }
-  }, [sendgridFromNameStatus?.fromName, sendgridFromName]);
+  }, [zeptomailFromNameStatus?.fromName, zeptomailFromName]);
 
   useEffect(() => {
     if (googleCalendarIdStatus?.calendarId && !googleCalendarId) {
@@ -235,23 +238,23 @@ export default function SettingsPage() {
     }
   };
 
-  const handleTestSendgrid = async () => {
-    if (!sendgridApiKey) {
-      setSendgridTestResult({ success: false, error: "Please enter a key to test." });
+  const handleTestZeptomail = async () => {
+    if (!zeptomailApiKey) {
+      setZeptomailTestResult({ success: false, error: "Please enter a key to test." });
       return;
     }
-    setIsTestingSendgrid(true);
-    setSendgridTestResult(null);
+    setIsTestingZeptomail(true);
+    setZeptomailTestResult(null);
     try {
-      const res = await testSendgridKeyFn({ apiKey: sendgridApiKey });
-      setSendgridTestResult(res);
+      const res = await testZeptomailKeyFn({ apiKey: zeptomailApiKey });
+      setZeptomailTestResult(res);
     } catch (err: unknown) {
-      setSendgridTestResult({
+      setZeptomailTestResult({
         success: false,
         error: (err as Error).message || "Test failed.",
       });
     } finally {
-      setIsTestingSendgrid(false);
+      setIsTestingZeptomail(false);
     }
   };
 
@@ -303,19 +306,19 @@ export default function SettingsPage() {
     }
   };
 
-  const handleTestSendgridStored = async () => {
-    setIsTestingSendgridStored(true);
-    setSendgridTestResult(null);
+  const handleTestZeptomailStored = async () => {
+    setIsTestingZeptomailStored(true);
+    setZeptomailTestResult(null);
     try {
-      const res = await testSendgridKeyStoredFn({});
-      setSendgridTestResult(res);
+      const res = await testZeptomailKeyStoredFn({});
+      setZeptomailTestResult(res);
     } catch (err: unknown) {
-      setSendgridTestResult({
+      setZeptomailTestResult({
         success: false,
         error: (err as Error).message || "Test failed.",
       });
     } finally {
-      setIsTestingSendgridStored(false);
+      setIsTestingZeptomailStored(false);
     }
   };
 
@@ -386,46 +389,46 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSaveSendgrid = async (e: React.FormEvent) => {
+  const handleSaveZeptomail = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!sendgridApiKey) return;
+    if (!zeptomailApiKey) return;
 
-    setIsSavingSendgrid(true);
-    setSendgridTestResult(null);
+    setIsSavingZeptomail(true);
+    setZeptomailTestResult(null);
     try {
-      await setSendgridKeyFn({ apiKey: sendgridApiKey });
-      setSendgridApiKey("");
-      setSendgridTestResult({ success: true });
+      await setZeptomailKeyFn({ apiKey: zeptomailApiKey });
+      setZeptomailApiKey("");
+      setZeptomailTestResult({ success: true });
     } catch (err: unknown) {
-      setSendgridTestResult({
+      setZeptomailTestResult({
         success: false,
         error: (err as Error).message || "Failed to save key.",
       });
     } finally {
-      setIsSavingSendgrid(false);
+      setIsSavingZeptomail(false);
     }
   };
 
-  const handleRemoveSendgrid = async () => {
-    if (!confirm("Are you sure you want to disconnect the SendGrid API?"))
+  const handleRemoveZeptomail = async () => {
+    if (!confirm("Are you sure you want to disconnect the ZeptoMail API?"))
       return;
 
-    setIsRemovingSendgrid(true);
-    setSendgridTestResult(null);
+    setIsRemovingZeptomail(true);
+    setZeptomailTestResult(null);
     try {
-      await removeSendgridKeyFn();
-      setSendgridApiKey("");
-      setSendgridTestResult({
+      await removeZeptomailKeyFn();
+      setZeptomailApiKey("");
+      setZeptomailTestResult({
         success: true,
         error: "API Key removed successfully.",
       });
     } catch (err: unknown) {
-      setSendgridTestResult({
+      setZeptomailTestResult({
         success: false,
         error: (err as Error).message || "Failed to remove key.",
       });
     } finally {
-      setIsRemovingSendgrid(false);
+      setIsRemovingZeptomail(false);
     }
   };
 
@@ -471,89 +474,89 @@ export default function SettingsPage() {
     }
   };
 
-  const handleSaveSendgridFromEmail = async (e: React.FormEvent) => {
+  const handleSaveZeptomailFromEmail = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!sendgridFromEmail) return;
+    if (!zeptomailFromEmail) return;
 
-    setIsSavingSendgridFromEmail(true);
-    setSendgridFromEmailTestResult(null);
+    setIsSavingZeptomailFromEmail(true);
+    setZeptomailFromEmailTestResult(null);
     try {
-      await setSendgridFromEmailFn({ fromEmail: sendgridFromEmail });
-      setSendgridFromEmail("");
-      setSendgridFromEmailTestResult({ success: true });
+      await setZeptomailFromEmailFn({ fromEmail: zeptomailFromEmail });
+      setZeptomailFromEmail("");
+      setZeptomailFromEmailTestResult({ success: true });
     } catch (err: unknown) {
-      setSendgridFromEmailTestResult({
+      setZeptomailFromEmailTestResult({
         success: false,
         error: (err as Error).message || "Failed to save from email.",
       });
     } finally {
-      setIsSavingSendgridFromEmail(false);
+      setIsSavingZeptomailFromEmail(false);
     }
   };
 
-  const handleRemoveSendgridFromEmail = async () => {
-    if (!confirm("Are you sure you want to reset the SendGrid From Email to default?"))
+  const handleRemoveZeptomailFromEmail = async () => {
+    if (!confirm("Are you sure you want to reset the ZeptoMail From Email to default?"))
       return;
 
-    setIsRemovingSendgridFromEmail(true);
-    setSendgridFromEmailTestResult(null);
+    setIsRemovingZeptomailFromEmail(true);
+    setZeptomailFromEmailTestResult(null);
     try {
-      await removeSendgridFromEmailFn();
-      setSendgridFromEmail("");
-      setSendgridFromEmailTestResult({
+      await removeZeptomailFromEmailFn();
+      setZeptomailFromEmail("");
+      setZeptomailFromEmailTestResult({
         success: true,
         error: "From Email reset to default successfully.",
       });
     } catch (err: unknown) {
-      setSendgridFromEmailTestResult({
+      setZeptomailFromEmailTestResult({
         success: false,
         error: (err as Error).message || "Failed to reset from email.",
       });
     } finally {
-      setIsRemovingSendgridFromEmail(false);
+      setIsRemovingZeptomailFromEmail(false);
     }
   };
 
-  const handleSaveSendgridFromName = async (e: React.FormEvent) => {
+  const handleSaveZeptomailFromName = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!sendgridFromName) return;
+    if (!zeptomailFromName) return;
 
-    setIsSavingSendgridFromName(true);
-    setSendgridFromNameTestResult(null);
+    setIsSavingZeptomailFromName(true);
+    setZeptomailFromNameTestResult(null);
     try {
-      await setSendgridFromNameFn({ fromName: sendgridFromName });
-      setSendgridFromName("");
-      setSendgridFromNameTestResult({ success: true });
+      await setZeptomailFromNameFn({ fromName: zeptomailFromName });
+      setZeptomailFromName("");
+      setZeptomailFromNameTestResult({ success: true });
     } catch (err: unknown) {
-      setSendgridFromNameTestResult({
+      setZeptomailFromNameTestResult({
         success: false,
         error: (err as Error).message || "Failed to save sender name.",
       });
     } finally {
-      setIsSavingSendgridFromName(false);
+      setIsSavingZeptomailFromName(false);
     }
   };
 
-  const handleRemoveSendgridFromName = async () => {
-    if (!confirm("Are you sure you want to reset the SendGrid Sender Name to default?"))
+  const handleRemoveZeptomailFromName = async () => {
+    if (!confirm("Are you sure you want to reset the ZeptoMail Sender Name to default?"))
       return;
 
-    setIsRemovingSendgridFromName(true);
-    setSendgridFromNameTestResult(null);
+    setIsRemovingZeptomailFromName(true);
+    setZeptomailFromNameTestResult(null);
     try {
-      await removeSendgridFromNameFn();
-      setSendgridFromName("");
-      setSendgridFromNameTestResult({
+      await removeZeptomailFromNameFn();
+      setZeptomailFromName("");
+      setZeptomailFromNameTestResult({
         success: true,
         error: "Sender Name reset to default successfully.",
       });
     } catch (err: unknown) {
-      setSendgridFromNameTestResult({
+      setZeptomailFromNameTestResult({
         success: false,
         error: (err as Error).message || "Failed to reset sender name.",
       });
     } finally {
-      setIsRemovingSendgridFromName(false);
+      setIsRemovingZeptomailFromName(false);
     }
   };
 
@@ -574,6 +577,22 @@ export default function SettingsPage() {
       });
     } finally {
       setIsSavingGoogleCalendar(false);
+    }
+  };
+
+  const handleTestGoogleCalendar = async () => {
+    setIsTestingGoogleCalendar(true);
+    setGoogleCalendarTestResult(null);
+    try {
+      const result = await testGoogleCalendarFn({});
+      setGoogleCalendarTestResult(result);
+    } catch (err: unknown) {
+      setGoogleCalendarTestResult({
+        success: false,
+        error: (err as Error).message || "Failed to test Google Calendar integration.",
+      });
+    } finally {
+      setIsTestingGoogleCalendar(false);
     }
   };
 
@@ -984,7 +1003,7 @@ export default function SettingsPage() {
         </div>
       </div>
 
-      {/* SendGrid Configuration */}
+      {/* ZeptoMail Configuration */}
       <div className="bg-card rounded-2xl border border-card-border/60 shadow-sm overflow-hidden">
         <div className="p-8 space-y-7">
           <div className="flex items-start justify-between gap-4">
@@ -994,7 +1013,7 @@ export default function SettingsPage() {
               </div>
               <div>
                 <h2 className="text-lg font-semibold text-foreground tracking-tight">
-                  SendGrid Email API
+                  ZeptoMail Email API
                 </h2>
                 <p className="text-sm text-muted-foreground mt-0.5">
                   Used for sending transactional emails and outreach sequences.
@@ -1008,31 +1027,31 @@ export default function SettingsPage() {
               Current Integration Status
             </span>
             <StatusBadge
-              isConfigured={sendgridStatus?.hasSendgridKey}
+              isConfigured={zeptomailStatus?.hasZeptomailKey}
               configuredLabel="Key Actively Configured"
               unconfiguredLabel="Not Configured"
             />
           </div>
 
-          <form onSubmit={handleSaveSendgrid} className="space-y-5">
+          <form onSubmit={handleSaveZeptomail} className="space-y-5">
             <div className="space-y-2.5">
               <label
-                htmlFor="sendgridApiKey"
+                htmlFor="zeptomailApiKey"
                 className="text-sm font-semibold text-foreground"
               >
                 API Key
               </label>
                 <PasswordInput
-                  id="sendgridApiKey"
-                  value={sendgridApiKey}
-                  onChange={setSendgridApiKey}
+                  id="zeptomailApiKey"
+                  value={zeptomailApiKey}
+                  onChange={setZeptomailApiKey}
                   placeholder={
-                    sendgridStatus?.hasSendgridKey
+                    zeptomailStatus?.hasZeptomailKey
                       ? "••••••••••••••••••••••••••••"
-                      : "Paste your SendGrid API Key..."
+                      : "Paste your ZeptoMail API Key..."
                   }
-                  show={showSendgridKey}
-                  onToggleShow={() => setShowSendgridKey((s) => !s)}
+                  show={showZeptomailKey}
+                  onToggleShow={() => setShowZeptomailKey((s) => !s)}
                   ringColor="slate"
                 />
                 <p className="text-[13px] text-muted-foreground">
@@ -1042,18 +1061,18 @@ export default function SettingsPage() {
             </div>
 
             <TestResultAlert
-              result={sendgridTestResult}
-              successMessage="Connection successful! SendGrid API key is valid."
+              result={zeptomailTestResult}
+              successMessage="Connection successful! ZeptoMail API key is valid."
             />
 
             <div className="flex flex-wrap items-center gap-3 pt-5 border-t border-card-border">
               <button
                 type="button"
-                onClick={handleTestSendgrid}
-                disabled={!sendgridApiKey || isTestingSendgrid || isSavingSendgrid}
+                onClick={handleTestZeptomail}
+                disabled={!zeptomailApiKey || isTestingZeptomail || isSavingZeptomail}
                 className="px-5 py-2.5 bg-muted hover:bg-muted/80 text-foreground text-sm font-semibold rounded-lg transition-all border border-card-border focus:outline-none focus:ring-2 focus:ring-muted-foreground focus:ring-offset-2 flex items-center justify-center min-w-[150px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
               >
-                {isTestingSendgrid ? (
+                {isTestingZeptomail ? (
                   <ArrowPathIcon className="w-4 h-4 animate-spin" />
                 ) : (
                   "Test New Key"
@@ -1062,11 +1081,11 @@ export default function SettingsPage() {
 
               <button
                 type="button"
-                onClick={handleTestSendgridStored}
-                disabled={isTestingSendgridStored || isSavingSendgrid || isTestingSendgrid}
+                onClick={handleTestZeptomailStored}
+                disabled={isTestingZeptomailStored || isSavingZeptomail || isTestingZeptomail}
                 className="px-5 py-2.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-600 text-sm font-semibold rounded-lg transition-all border border-emerald-500/20 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 flex items-center justify-center min-w-[150px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
               >
-                {isTestingSendgridStored ? (
+                {isTestingZeptomailStored ? (
                   <ArrowPathIcon className="w-4 h-4 animate-spin" />
                 ) : (
                   "Test Current"
@@ -1075,26 +1094,26 @@ export default function SettingsPage() {
 
               <button
                 type="submit"
-                disabled={!sendgridApiKey || isSavingSendgrid || isTestingSendgrid || isTestingSendgridStored}
+                disabled={!zeptomailApiKey || isSavingZeptomail || isTestingZeptomail || isTestingZeptomailStored}
                 className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center min-w-[130px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
               >
-                {isSavingSendgrid ? "Saving..." : "Save Key"}
+                {isSavingZeptomail ? "Saving..." : "Save Key"}
               </button>
 
               <button
                 type="button"
-                onClick={handleRemoveSendgrid}
-                disabled={isRemovingSendgrid}
+                onClick={handleRemoveZeptomail}
+                disabled={isRemovingZeptomail}
                 className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
               >
-                {isRemovingSendgrid ? "Disconnecting..." : "Disconnect"}
+                {isRemovingZeptomail ? "Disconnecting..." : "Disconnect"}
               </button>
             </div>
           </form>
         </div>
       </div>
 
-      {/* SendGrid From Email */}
+      {/* ZeptoMail From Email */}
       <div className="bg-card rounded-2xl border border-card-border/60 shadow-sm overflow-hidden">
         <div className="p-8 space-y-7">
           <div className="flex items-start justify-between gap-4">
@@ -1104,10 +1123,10 @@ export default function SettingsPage() {
               </div>
               <div>
                 <h2 className="text-lg font-semibold text-foreground tracking-tight">
-                  SendGrid From Email
+                  ZeptoMail From Email
                 </h2>
                 <p className="text-sm text-muted-foreground mt-0.5">
-                  Sender email address used for all outbound emails via SendGrid.
+                  Sender email address used for all outbound emails via ZeptoMail.
                 </p>
               </div>
             </div>
@@ -1118,63 +1137,63 @@ export default function SettingsPage() {
               Current From Email
             </span>
             <StatusBadge
-              isConfigured={sendgridFromEmailStatus?.hasSendgridFromEmail}
+              isConfigured={zeptomailFromEmailStatus?.hasZeptomailFromEmail}
               configuredLabel="Custom From Email"
-              configuredValue={sendgridFromEmailStatus?.fromEmail}
+              configuredValue={zeptomailFromEmailStatus?.fromEmail}
               unconfiguredLabel="Using Default (outreach@fretbox.in)"
               useRed={false}
             />
           </div>
 
-          <form onSubmit={handleSaveSendgridFromEmail} className="space-y-5">
+          <form onSubmit={handleSaveZeptomailFromEmail} className="space-y-5">
             <div className="space-y-2.5">
               <label
-                htmlFor="sendgridFromEmail"
+                htmlFor="zeptomailFromEmail"
                 className="text-sm font-semibold text-foreground"
               >
                 From Email Address
               </label>
               <input
-                id="sendgridFromEmail"
+                id="zeptomailFromEmail"
                 type="email"
-                value={sendgridFromEmail}
-                onChange={(e) => setSendgridFromEmail(e.target.value)}
+                value={zeptomailFromEmail}
+                onChange={(e) => setZeptomailFromEmail(e.target.value)}
                 placeholder="outreach@fretbox.in"
                 className="flex h-11 w-full rounded-lg border border-card-border bg-background px-4 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-slate-500/50 focus:border-slate-500 transition-all shadow-sm"
               />
               <p className="text-[13px] text-muted-foreground">
-                This email must be verified in your SendGrid account. Leave blank to keep the current address.
+                This email must be verified in your ZeptoMail account. Leave blank to keep the current address.
               </p>
             </div>
 
             <TestResultAlert
-              result={sendgridFromEmailTestResult}
+              result={zeptomailFromEmailTestResult}
               successMessage="From Email saved successfully."
             />
 
             <div className="flex items-center gap-3 pt-5 border-t border-card-border">
               <button
                 type="submit"
-                disabled={!sendgridFromEmail || isSavingSendgridFromEmail}
+                disabled={!zeptomailFromEmail || isSavingZeptomailFromEmail}
                 className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center min-w-[130px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
               >
-                {isSavingSendgridFromEmail ? "Saving..." : "Save Email"}
+                {isSavingZeptomailFromEmail ? "Saving..." : "Save Email"}
               </button>
 
               <button
                 type="button"
-                onClick={handleRemoveSendgridFromEmail}
-                disabled={isRemovingSendgridFromEmail}
+                onClick={handleRemoveZeptomailFromEmail}
+                disabled={isRemovingZeptomailFromEmail}
                 className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
               >
-                {isRemovingSendgridFromEmail ? "Resetting..." : "Reset to Default"}
+                {isRemovingZeptomailFromEmail ? "Resetting..." : "Reset to Default"}
               </button>
             </div>
           </form>
         </div>
       </div>
 
-      {/* SendGrid Sender Name */}
+      {/* ZeptoMail Sender Name */}
       <div className="bg-card rounded-2xl border border-card-border/60 shadow-sm overflow-hidden">
         <div className="p-8 space-y-7">
           <div className="flex items-start justify-between gap-4">
@@ -1184,7 +1203,7 @@ export default function SettingsPage() {
               </div>
               <div>
                 <h2 className="text-lg font-semibold text-foreground tracking-tight">
-                  SendGrid Sender Name
+                  ZeptoMail Sender Name
                 </h2>
                 <p className="text-sm text-muted-foreground mt-0.5">
                   Display name shown as the sender for all outbound emails.
@@ -1198,27 +1217,27 @@ export default function SettingsPage() {
               Current Sender Name
             </span>
             <StatusBadge
-              isConfigured={sendgridFromNameStatus?.hasSendgridFromName}
+              isConfigured={zeptomailFromNameStatus?.hasZeptomailFromName}
               configuredLabel="Custom Sender Name"
-              configuredValue={sendgridFromNameStatus?.fromName}
+              configuredValue={zeptomailFromNameStatus?.fromName}
               unconfiguredLabel="Using Default (Ashish Gupta)"
               useRed={false}
             />
           </div>
 
-          <form onSubmit={handleSaveSendgridFromName} className="space-y-5">
+          <form onSubmit={handleSaveZeptomailFromName} className="space-y-5">
             <div className="space-y-2.5">
               <label
-                htmlFor="sendgridFromName"
+                htmlFor="zeptomailFromName"
                 className="text-sm font-semibold text-foreground"
               >
                 Sender Display Name
               </label>
               <input
-                id="sendgridFromName"
+                id="zeptomailFromName"
                 type="text"
-                value={sendgridFromName}
-                onChange={(e) => setSendgridFromName(e.target.value)}
+                value={zeptomailFromName}
+                onChange={(e) => setZeptomailFromName(e.target.value)}
                 placeholder="Ashish Gupta (Fretbox)"
                 className="flex h-11 w-full rounded-lg border border-card-border bg-background px-4 py-2 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-slate-500/50 focus:border-slate-500 transition-all shadow-sm"
               />
@@ -1228,26 +1247,26 @@ export default function SettingsPage() {
             </div>
 
             <TestResultAlert
-              result={sendgridFromNameTestResult}
+              result={zeptomailFromNameTestResult}
               successMessage="Sender Name saved successfully."
             />
 
             <div className="flex items-center gap-3 pt-5 border-t border-card-border">
               <button
                 type="submit"
-                disabled={!sendgridFromName || isSavingSendgridFromName}
+                disabled={!zeptomailFromName || isSavingZeptomailFromName}
                 className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center min-w-[130px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
               >
-                {isSavingSendgridFromName ? "Saving..." : "Save Name"}
+                {isSavingZeptomailFromName ? "Saving..." : "Save Name"}
               </button>
 
               <button
                 type="button"
-                onClick={handleRemoveSendgridFromName}
-                disabled={isRemovingSendgridFromName}
+                onClick={handleRemoveZeptomailFromName}
+                disabled={isRemovingZeptomailFromName}
                 className="px-5 py-2.5 bg-red-600/10 hover:bg-red-600/20 text-red-500 text-sm font-semibold rounded-lg transition-all border border-red-500/20 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2 ml-auto disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow"
               >
-                {isRemovingSendgridFromName ? "Resetting..." : "Reset to Default"}
+                {isRemovingZeptomailFromName ? "Resetting..." : "Reset to Default"}
               </button>
             </div>
           </form>
@@ -1335,6 +1354,22 @@ export default function SettingsPage() {
                 className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 flex items-center justify-center min-w-[130px] disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow active:scale-[0.98]"
               >
                 {isSavingGoogleCalendar ? "Saving..." : "Save JSON"}
+              </button>
+
+              <button
+                type="button"
+                onClick={handleTestGoogleCalendar}
+                disabled={isTestingGoogleCalendar || !googleCalendarStatus?.hasGoogleCalendarServiceAccount}
+                className="px-5 py-2.5 bg-emerald-600/10 hover:bg-emerald-600/20 text-emerald-500 text-sm font-semibold rounded-lg transition-all border border-emerald-500/20 focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm hover:shadow flex items-center justify-center gap-2"
+              >
+                {isTestingGoogleCalendar ? (
+                  <>
+                    <ArrowPathIcon className="w-4 h-4 animate-spin" />
+                    Testing...
+                  </>
+                ) : (
+                  "Test Connection"
+                )}
               </button>
 
               <button

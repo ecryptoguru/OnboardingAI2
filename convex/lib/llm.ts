@@ -1,19 +1,15 @@
 "use node";
 
 import { GoogleGenAI } from "@google/genai";
+import { createHash } from "crypto";
 import { withRetry } from "./utils";
 import { internal } from "../_generated/api";
 import { ActionCtx } from "../_generated/server";
 
 // ─── Prompt hash for deterministic cache lookup ──────────────────────────────
 function hashPrompt(inputs: string[]): string {
-  let hash = 0;
   const text = inputs.join("\n");
-  for (let i = 0; i < text.length; i++) {
-    const chr = text.charCodeAt(i);
-    hash = ((hash << 5) - hash + chr) | 0;
-  }
-  return Math.abs(hash).toString(36) + "_" + text.length.toString(36);
+  return createHash("sha256").update(text).digest("hex");
 }
 
 async function checkDailyBudget(ctx: ActionCtx): Promise<void> {
@@ -21,7 +17,11 @@ async function checkDailyBudget(ctx: ActionCtx): Promise<void> {
   // value before any has been incremented, so the actual spend can slightly
   // exceed the cap under burst load. This is acceptable for cost guardrails;
   // tighten the cap or add queueing if stricter control is needed.
-  const budget = await ctx.runQuery(internal.llmBudget.getBudgetInternal, {});
+  const envBudget = process.env.LLM_DAILY_BUDGET_USD;
+  const maxBudgetUsd = envBudget ? parseFloat(envBudget) : undefined;
+  const budget = await ctx.runQuery(internal.llmBudget.getBudgetInternal, {
+    maxBudgetUsd,
+  });
   if (!budget.withinBudget) {
     throw new Error(
       `Daily LLM budget exceeded: $${budget.totalCostUsd.toFixed(2)} / $${budget.maxBudgetUsd.toFixed(2)}. ` +
@@ -326,6 +326,7 @@ export async function callGemini({
   responseAsJson = false,
   responseSchema,
   model = MODELS.gemini,
+  fallbackModel,
   thinkingBudget,
   maxOutputTokens = 8192,
   apiKey,
@@ -341,6 +342,7 @@ export async function callGemini({
   responseAsJson?: boolean;
   responseSchema?: unknown;
   model?: string;
+  fallbackModel?: string;
   thinkingBudget?: number;
   maxOutputTokens?: number;
   apiKey?: string | null;
@@ -357,6 +359,7 @@ export async function callGemini({
     responseAsJson,
     responseSchema,
     model,
+    fallbackModel,
     thinkingBudget,
     maxOutputTokens,
     apiKey,
@@ -376,6 +379,7 @@ export async function callGeminiWithUsage({
   responseAsJson = false,
   responseSchema,
   model = MODELS.gemini,
+  fallbackModel,
   thinkingBudget,
   maxOutputTokens = 8192,
   apiKey,
@@ -391,6 +395,7 @@ export async function callGeminiWithUsage({
   responseAsJson?: boolean;
   responseSchema?: unknown;
   model?: string;
+  fallbackModel?: string;
   thinkingBudget?: number;
   maxOutputTokens?: number;
   apiKey?: string | null;
@@ -435,59 +440,82 @@ export async function callGeminiWithUsage({
   const aiClient = getGoogleAI(apiKey);
   const startMs = Date.now();
 
-  const { text, usage } = await withRetry(
-    async () => {
-      const response = await aiClient.models.generateContent({
-        model,
-        contents: userPrompt,
-        config: {
-          systemInstruction: systemPrompt,
-          temperature,
-          maxOutputTokens,
-          responseMimeType: responseAsJson ? "application/json" : "text/plain",
-          responseSchema,
-          httpOptions: { timeout: 25000 },
-          ...(resolvedBudget > 0
-            ? {
-                thinkingConfig: {
-                  thinkingBudget: resolvedBudget,
-                  includeThoughts: false,
-                },
-              }
-            : {}),
-        },
-      });
+  async function callModel(modelName: string, thinkBudget: number): Promise<{ text: string; usage: LlmUsageEntry }> {
+    return withRetry(
+      async () => {
+        const response = await aiClient.models.generateContent({
+          model: modelName,
+          contents: userPrompt,
+          config: {
+            systemInstruction: systemPrompt,
+            temperature,
+            maxOutputTokens,
+            responseMimeType: responseAsJson ? "application/json" : "text/plain",
+            responseSchema,
+            httpOptions: { timeout: 25000 },
+            ...(thinkBudget > 0
+              ? {
+                  thinkingConfig: {
+                    thinkingBudget: thinkBudget,
+                    includeThoughts: false,
+                  },
+                }
+              : {}),
+          },
+        });
 
-      const candidate = response.candidates?.[0];
-      const finishReason = candidate?.finishReason;
-      if (finishReason && finishReason !== "STOP" && finishReason !== "MAX_TOKENS") {
-        const blockReason = response.promptFeedback?.blockReason;
-        throw new Error(
-          `Gemini generation halted: finishReason=${finishReason}${blockReason ? `, blockReason=${blockReason}` : ""}`,
-        );
-      }
+        const candidate = response.candidates?.[0];
+        const finishReason = candidate?.finishReason;
+        if (finishReason && finishReason !== "STOP" && finishReason !== "MAX_TOKENS") {
+          const blockReason = response.promptFeedback?.blockReason;
+          throw new Error(
+            `Gemini generation halted: finishReason=${finishReason}${blockReason ? `, blockReason=${blockReason}` : ""}`,
+          );
+        }
 
-      const txt = response.text;
-      if (!txt)
-        throw new Error("Unexpected empty response from Gemini via Google SDK");
-      return {
-        text: txt,
-        usage: createLlmUsageEntry({
-          label,
-          model,
-          response,
-          fallbackInputTokens: estimateTokensFromText(
-            `${systemPrompt}\n${userPrompt}`,
-          ),
-          fallbackOutputTokens: estimateTokensFromText(txt),
-        }),
-      };
-    },
-    { retryOn: isTransientLlmError }
-  );
+        const txt = response.text;
+        if (!txt)
+          throw new Error("Unexpected empty response from Gemini via Google SDK");
+        return {
+          text: txt,
+          usage: createLlmUsageEntry({
+            label,
+            model: modelName,
+            response,
+            fallbackInputTokens: estimateTokensFromText(
+              `${systemPrompt}\n${userPrompt}`,
+            ),
+            fallbackOutputTokens: estimateTokensFromText(txt),
+          }),
+        };
+      },
+      { retryOn: isTransientLlmError }
+    );
+  }
+
+  let result: { text: string; usage: LlmUsageEntry };
+  let usedModel = model;
+  try {
+    result = await callModel(model, resolvedBudget);
+  } catch (primaryErr) {
+    if (fallbackModel && fallbackModel !== model) {
+      console.warn(
+        `[LLM] Primary model ${model} failed after retries, falling back to ${fallbackModel}:`,
+        primaryErr instanceof Error ? primaryErr.message : String(primaryErr),
+      );
+      const isFallbackPro = /\bpro\b/i.test(fallbackModel);
+      const fallbackThinkBudget = isFallbackPro ? Math.max(512, resolvedBudget) : 0;
+      result = await callModel(fallbackModel, fallbackThinkBudget);
+      usedModel = fallbackModel;
+    } else {
+      throw primaryErr;
+    }
+  }
+
+  const { text, usage } = result;
 
   logLlmTelemetry({
-    model,
+    model: usedModel,
     usage,
     latencyMs: Date.now() - startMs,
   });
@@ -678,6 +706,11 @@ function logLlmTelemetry({
   console.log(
     `[LLM] model=${model} inTokens=${usage.inputTokens} outTokens=${usage.outputTokens} totalTokens=${usage.totalTokens} totalCostUsd=${usage.totalCostUsd.toFixed(6)} tokenSource=${usage.tokenSource} latencyMs=${latencyMs}`,
   );
+  if (latencyMs > 20000) {
+    console.warn(
+      `[LLM] WARNING: High latency ${latencyMs}ms for model=${model} — approaching action timeout. Consider reducing input size or using a faster model.`,
+    );
+  }
 }
 
 export const THINKING = {
@@ -725,10 +758,13 @@ export async function embed(
     const result = await withRetry(
       async () => {
         const res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:embedContent?key=${apiKey}`,
+          `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:embedContent`,
           {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": `Bearer ${apiKey}`,
+            },
             body: JSON.stringify({
               model: `models/${MODEL}`,
               content: {

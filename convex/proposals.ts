@@ -11,7 +11,7 @@ export const listAll = query({
   args: {},
   handler: async (ctx) => {
     await validateAuth(ctx);
-    const proposals = await ctx.db.query("proposals").order("desc").collect();
+    const proposals = await ctx.db.query("proposals").order("desc").take(500);
     return await Promise.all(
       proposals.map(async (p) => {
         const uni = await ctx.db.get(p.university_id);
@@ -176,7 +176,7 @@ export const cleanupOldProposalsInternal = internalMutation({
     const threshold = Date.now() - args.days * 24 * 60 * 60 * 1000;
     const oldProposals = await ctx.db
       .query("proposals")
-      .filter((q) => q.lt(q.field("created_at"), threshold))
+      .withIndex("by_created_at", (q) => q.lt("created_at", threshold))
       .collect();
 
     let deletedCount = 0;

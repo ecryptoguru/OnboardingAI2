@@ -11,8 +11,8 @@
    - **Gemini API Key** — Powers AI enrichment and email personalization.
    - **Serper API Key** — Discovers and validates university websites.
    - **Firecrawl API Key** — Powers deep site crawling and contact/content extraction.
-   - **SendGrid API Key** — Sends emails and tracks delivery.
-   - **SendGrid From Email** — A verified sender address for all outreach.
+   - **ZeptoMail API Key** — Sends emails and tracks delivery.
+   - **ZeptoMail From Email** — A verified sender address for all outreach.
    - *(Optional)* **Google Calendar Service Account** — Enables calendar events and Meet links from proposals.
 3. **Seed Universities** — Go to **Universities** and click **Sync UGC** to import the latest government-recognized Indian university dataset.
 4. **Enrich** — Select 5–10 universities on the **Enrichment** page and click **Run Deep Enrichment**.
@@ -173,18 +173,18 @@ All AI-drafted emails land here for human review before they are sent. This is a
 
 | Action | Result |
 |--------|--------|
-| **Approve & Send** | Dispatches immediately via SendGrid |
+| **Approve & Send** | Dispatches immediately via ZeptoMail |
 | **Edit** | Modify subject or body, then approve |
 | **Reject** | Deletes the draft permanently |
 
-Approved sends are linked to SendGrid message identifiers so status updates (delivered, bounced, etc.) can be reconciled reliably.
+Approved sends are linked to ZeptoMail message identifiers so status updates (delivered, bounced, etc.) can be reconciled reliably.
 
 ### Bulk Approve
 If you have multiple pending drafts, click **Approve All** to send them all at once.
 
 > **Tip:** A quick human edit — like mentioning a recent university award — can significantly improve open rates.
 >
-> **Edge case:** If SendGrid returns a bounce after approval, the email status updates to **Failed** and appears in Analytics.
+> **Edge case:** If ZeptoMail returns a bounce after approval, the email status updates to **Failed** and appears in Analytics.
 
 ---
 
@@ -285,8 +285,8 @@ Add, test, and remove keys for the following services. Each shows a **status ind
 | **Google Gemini** | AI reasoning, reply classification, proposal generation |
 | **Serper** | Google Search, news, and image discovery during enrichment |
 | **Firecrawl** | Deep web crawling, sitemap discovery, contact extraction |
-| **SendGrid** | Sending transactional emails and outreach sequences |
-| **SendGrid From Email** | Verified sender address for all outbound emails (default: `outreach@fretbox.in`) |
+| **ZeptoMail** | Sending transactional emails and outreach sequences |
+| **ZeptoMail From Email** | Verified sender address for all outbound emails (default: `outreach@fretbox.in`) |
 
 > **Edge case:** If a key shows as valid but features still fail, check that the corresponding service account has active credits or permissions.
 

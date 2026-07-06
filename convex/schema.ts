@@ -91,6 +91,9 @@ export default defineSchema({
     .index("by_outreach_stage", ["outreach_stage"])
     .index("by_created_at", ["created_at"])
     .index("by_type", ["type"])
+    .index("by_type_status", ["type", "website_status"])
+    .index("by_type_stage", ["type", "outreach_stage"])
+    .index("by_status_stage", ["website_status", "outreach_stage"])
     .searchIndex("search_name", { searchField: "university_name" }),
 
   // ─── Stakeholders ─────────────────────────────────────────────────────────
@@ -197,6 +200,8 @@ export default defineSchema({
     updated_at: v.number(),
   })
     .index("by_university", ["university_id"])
+    .index("by_university_status", ["university_id", "status"])
+    .index("by_university_stakeholder", ["university_id", "stakeholder_id"])
     .index("by_status_next_send", ["status", "next_send_at"]),
 
   // ─── Emails Sent ──────────────────────────────────────────────────────────
@@ -209,6 +214,7 @@ export default defineSchema({
     body: v.string(),
     html_body: v.optional(v.string()), // HTML version of body for rich email clients
     sendgrid_message_id: v.optional(v.string()),
+    zeptomail_message_id: v.optional(v.string()),
     status: v.union(
       v.literal("pending_approval"),
       v.literal("queued"),
@@ -228,7 +234,8 @@ export default defineSchema({
     .index("by_stakeholder", ["stakeholder_id"])
     .index("by_status", ["status"])
     .index("by_step_number", ["step_number"])
-    .index("by_sendgrid_id", ["sendgrid_message_id"]),
+    .index("by_sendgrid_id", ["sendgrid_message_id"])
+    .index("by_zeptomail_id", ["zeptomail_message_id"]),
 
   // ─── Reply Logs ───────────────────────────────────────────────────────────
   replyLogs: defineTable({
@@ -276,7 +283,7 @@ export default defineSchema({
     ),
     created_at: v.number(),
     updated_at: v.number(),
-  }).index("by_university", ["university_id"]),
+  }).index("by_university", ["university_id"]).index("by_created_at", ["created_at"]),
 
   // ─── Rate Limits ──────────────────────────────────────────────────────────
   rateLimits: defineTable({

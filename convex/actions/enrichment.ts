@@ -3,6 +3,7 @@
 import { action } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
+import { createHash } from "crypto";
 import { Doc, Id } from "../_generated/dataModel";
 import {
   embed,
@@ -103,15 +104,11 @@ function extractCandidateNameFromLinkedinTitle(
 }
 
 /**
- * Simple non-cryptographic hash for comparing text content.
+ * SHA-256 hash for comparing text content.
  * Used to detect unchanged news synthesis and skip redundant embed() calls.
  */
 function hashString(text: string): string {
-  let h = 0;
-  for (let i = 0; i < text.length; i++) {
-    h = ((h << 5) - h + text.charCodeAt(i)) | 0;
-  }
-  return String(h);
+  return createHash("sha256").update(text).digest("hex");
 }
 
 /**

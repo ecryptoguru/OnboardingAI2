@@ -39,6 +39,7 @@ function getThreadMessageIdCandidate(
 
 /**
  * Mirror of verifyHmac from convex/http.ts
+ * ZeptoMail uses Base64-encoded signatures (not hex).
  */
 async function verifyHmac(
   secret: string,
@@ -55,10 +56,8 @@ async function verifyHmac(
       ["verify"],
     );
 
-    const sigHex = signature.replace(/^v1=/, "");
-    const sigBytes = new Uint8Array(
-      sigHex.match(/.{1,2}/g)?.map((byte) => parseInt(byte, 16)) || [],
-    );
+    const sigBase64 = signature.replace(/^v1=/, "");
+    const sigBytes = Uint8Array.from(atob(sigBase64), (c) => c.charCodeAt(0));
 
     return await crypto.subtle.verify(
       "HMAC",
@@ -134,11 +133,11 @@ describe("Webhook Security - Thread ID Resolution", () => {
 });
 
 describe("Webhook Security - HMAC Verification", () => {
-  it("should verify valid HMAC-SHA256 signature", async () => {
+  it("should verify valid HMAC-SHA256 Base64 signature", async () => {
     const secret = "super-secret";
     const payload = '{"event":"delivered"}';
 
-    // Create valid signature
+    // Create valid Base64 signature (ZeptoMail format)
     const encoder = new TextEncoder();
     const key = await crypto.subtle.importKey(
       "raw",
@@ -149,21 +148,51 @@ describe("Webhook Security - HMAC Verification", () => {
     );
     const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
     const sigBytes = new Uint8Array(sig);
-    let sigHex = "";
+    let binary = "";
     for (let i = 0; i < sigBytes.length; i++) {
-      sigHex += sigBytes[i].toString(16).padStart(2, "0");
+      binary += String.fromCharCode(sigBytes[i]);
     }
+    const sigBase64 = btoa(binary);
 
-    const result = await verifyHmac(secret, payload, `v1=${sigHex}`);
+    const result = await verifyHmac(secret, payload, sigBase64);
     assert.strictEqual(result, true);
   });
 
-  it("should reject invalid signature", async () => {
+  it("should verify valid signature with v1= prefix", async () => {
+    const secret = "super-secret";
+    const payload = '{"event":"delivered"}';
+
+    const encoder = new TextEncoder();
+    const key = await crypto.subtle.importKey(
+      "raw",
+      encoder.encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"],
+    );
+    const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
+    const sigBytes = new Uint8Array(sig);
+    let binary = "";
+    for (let i = 0; i < sigBytes.length; i++) {
+      binary += String.fromCharCode(sigBytes[i]);
+    }
+    const sigBase64 = btoa(binary);
+
+    const result = await verifyHmac(secret, payload, `v1=${sigBase64}`);
+    assert.strictEqual(result, true);
+  });
+
+  it("should reject invalid Base64 signature", async () => {
     const result = await verifyHmac(
       "secret",
       '{"event":"delivered"}',
-      "v1=deadbeef",
+      "dGhpcyBpcyBub3QgYSB2YWxpZCBzaWduYXR1cmU=",
     );
+    assert.strictEqual(result, false);
+  });
+
+  it("should reject garbage signature", async () => {
+    const result = await verifyHmac("secret", '{"event":"delivered"}', "not-base64!!");
     assert.strictEqual(result, false);
   });
 
@@ -181,12 +210,13 @@ describe("Webhook Security - HMAC Verification", () => {
     );
     const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(payload));
     const sigBytes = new Uint8Array(sig);
-    let sigHex = "";
+    let binary = "";
     for (let i = 0; i < sigBytes.length; i++) {
-      sigHex += sigBytes[i].toString(16).padStart(2, "0");
+      binary += String.fromCharCode(sigBytes[i]);
     }
+    const sigBase64 = btoa(binary);
 
-    const result = await verifyHmac("wrong-secret", payload, `v1=${sigHex}`);
+    const result = await verifyHmac("wrong-secret", payload, sigBase64);
     assert.strictEqual(result, false);
   });
 });

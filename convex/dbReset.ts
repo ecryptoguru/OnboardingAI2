@@ -1,8 +1,10 @@
 import { mutation } from "./_generated/server";
+import { validateAdmin } from "./lib/auth_utils";
 
 export const resetEnrichmentData = mutation({
   args: {},
   handler: async (ctx) => {
+    await validateAdmin(ctx);
     // 1. Delete all Stakeholders
     const stakeholders = await ctx.db.query("stakeholders").collect();
     await Promise.all(stakeholders.map((s) => ctx.db.delete(s._id)));

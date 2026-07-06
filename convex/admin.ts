@@ -1,11 +1,11 @@
 import { mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { validateAuth } from "./lib/auth_utils";
+import { validateAdmin } from "./lib/auth_utils";
 
 export const resetUniversityEnrichment = mutation({
   args: { nameKeyword: v.string() },
   handler: async (ctx, args) => {
-    await validateAuth(ctx);
+    await validateAdmin(ctx);
     // 1. Find university by name search (use search index, not full table scan)
     const matches = await ctx.db
       .query("universities")

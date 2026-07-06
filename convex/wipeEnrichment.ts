@@ -1,9 +1,11 @@
 import { mutation, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
+import { validateAdmin } from "./lib/auth_utils";
 
 export const wipeAll = mutation({
   args: {},
   handler: async (ctx) => {
+    await validateAdmin(ctx);
     // 1. Wipe Demographics on Universities
     const unis = await ctx.db.query("universities").collect();
     for (const uni of unis) {
@@ -45,6 +47,7 @@ export const wipeAll = mutation({
 export const purgeBadDemographics = mutation({
   args: {},
   handler: async (ctx) => {
+    await validateAdmin(ctx);
     const unis = await ctx.db.query("universities").collect();
     let fixed = 0;
     for (const uni of unis) {
@@ -83,6 +86,7 @@ export const purgeBadDemographics = mutation({
 export const resetSpecificUniversity = mutation({
   args: { nameKeyword: v.string() },
   handler: async (ctx, args) => {
+    await validateAdmin(ctx);
     const all = await ctx.db.query("universities").collect();
     const uni = all.find(u => u.university_name.toLowerCase().includes(args.nameKeyword.toLowerCase()));
     

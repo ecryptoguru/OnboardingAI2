@@ -3,11 +3,12 @@
 import { action } from "../_generated/server";
 import { internal, api } from "../_generated/api";
 import { v } from "convex/values";
+import type { Id } from "../_generated/dataModel";
 import { callGemini, TEMP, MODELS } from "../lib/llm";
 import { validateJsonOutput, sanitizeLlmInput, sanitizeLlmOutput } from "../lib/utils";
 import { recommendModules, suggestPricingTier } from "../lib/moduleRecommender";
 import { PROPOSAL_SYSTEM_PROMPT, PROPOSAL_SCHEMA } from "../lib/prompts";
-import { createMeetingEvent } from "../lib/googleCalendar";
+import { createMeetingEvent, updateEvent } from "../lib/googleCalendar";
 import * as Sentry from "@sentry/node";
 
 interface ProposalContent extends Record<string, unknown> {
@@ -80,6 +81,7 @@ export const generateProposal = action({
         userPrompt: "Generate the proposal JSON now.",
         temperature: TEMP.balanced, // 0.3 — structured JSON output needs consistency, not randomness
         model: MODELS.complex,
+        fallbackModel: MODELS.geminiFlash,
         responseAsJson: true,
         responseSchema: PROPOSAL_SCHEMA,
         ctx,
@@ -232,6 +234,63 @@ export const confirmMeeting = action({
 });
 
 /**
+ * Cancels a confirmed meeting by updating the Google Calendar event status to "cancelled".
+ * Notifies attendees via sendUpdates=all.
+ */
+export const cancelMeeting = action({
+  args: {
+    proposalId: v.id("proposals"),
+  },
+  handler: async (ctx, args) => {
+    try {
+      const proposal = await ctx.runQuery(internal.proposals.getInternal, {
+        id: args.proposalId,
+      });
+      if (!proposal) {
+        return { success: false, error: "Proposal not found" };
+      }
+      if (!proposal.calendar_event_id) {
+        return { success: false, error: "No calendar event associated with this proposal" };
+      }
+      if (proposal.calendar_event_status === "cancelled") {
+        return { success: false, error: "Meeting is already cancelled" };
+      }
+
+      const [serviceAccountJson, calendarId] = await Promise.all([
+        ctx.runQuery(internal.settings.getInternalGoogleCalendarJson),
+        ctx.runQuery(internal.settings.getInternalGoogleCalendarId),
+      ]);
+
+      const result = await updateEvent(
+        proposal.calendar_event_id,
+        { status: "cancelled" },
+        {
+          serviceAccountJson: serviceAccountJson ?? undefined,
+          calendarId: calendarId ?? undefined,
+        },
+      );
+
+      if (!result.success) {
+        return { success: false, error: result.error || "Failed to cancel calendar event" };
+      }
+
+      await ctx.runMutation(internal.proposals.updateInternal, {
+        id: args.proposalId,
+        calendar_event_status: "cancelled",
+      });
+
+      return { success: true };
+    } catch (e) {
+      console.error("[cancelMeeting] Fatal error:", e);
+      Sentry.captureException(e, {
+        extra: { proposalId: args.proposalId },
+      });
+      return { success: false, error: String(e) };
+    }
+  },
+});
+
+/**
  * Emails the proposal content as rich HTML directly to stakeholder(s) + optional CC list.
  */
 export const emailProposal = action({
@@ -261,7 +320,7 @@ export const emailProposal = action({
     }
 
     const dbFromName = await ctx.runQuery(
-      internal.settings.getInternalSendgridFromName,
+      internal.settings.getInternalZeptomailFromName,
     );
     const fromName = dbFromName || "Ashish Gupta (Fretbox)";
 
@@ -434,6 +493,35 @@ export const emailProposal = action({
       .filter(Boolean)
       .join("\n\n");
 
+    // Resolve stakeholder ID before sending so we can create a tracking record
+    // and pass its ID as clientReference for webhook delivery correlation.
+    const emailStakeholderId =
+      proposal.stakeholder_id ??
+      (
+        await ctx.runQuery(internal.stakeholders.getPrimaryInternal, {
+          university_id: proposal.university_id,
+        })
+      )?._id;
+
+    let trackingEmailId: Id<"emailsSent"> | undefined;
+    if (emailStakeholderId) {
+      trackingEmailId = await ctx.runMutation(internal.emails.insertInternal, {
+        sequence_id: undefined,
+        university_id: proposal.university_id,
+        stakeholder_id: emailStakeholderId,
+        subject: `Fretbox Partnership Proposal — ${uni.university_name}`,
+        body: plainText,
+        html_body: html,
+        status: "queued",
+        step_number: 100,
+        drafted_at: Date.now(),
+      });
+    } else {
+      console.warn(
+        `[emailProposal] No stakeholder_id for proposal ${args.proposalId}; skipping email tracking record.`,
+      );
+    }
+
     const sendResult: {
       success: boolean;
       messageId?: string;
@@ -444,6 +532,7 @@ export const emailProposal = action({
       subject: `Fretbox Partnership Proposal — ${uni.university_name}`,
       text: plainText,
       html,
+      clientReference: trackingEmailId,
     });
 
     if (sendResult.success) {
@@ -458,34 +547,20 @@ export const emailProposal = action({
         stage: "proposal_sent",
       });
 
-      // Persist proposal email in emailsSent for delivery/open/click tracking
-      const normalizedMessageId = sendResult.messageId?.split(".")[0];
-      const emailStakeholderId =
-        proposal.stakeholder_id ??
-        (
-          await ctx.runQuery(internal.stakeholders.getPrimaryInternal, {
-            university_id: proposal.university_id,
-          })
-        )?._id;
-
-      if (emailStakeholderId) {
-        await ctx.runMutation(internal.emails.insertInternal, {
-          sequence_id: undefined,
-          university_id: proposal.university_id,
-          stakeholder_id: emailStakeholderId,
-          subject: `Fretbox Partnership Proposal — ${uni.university_name}`,
-          body: plainText,
-          html_body: html,
+      // Update tracking record with zeptomail_message_id and sent status
+      if (trackingEmailId) {
+        await ctx.runMutation(internal.emails.updateStatusInternal, {
+          id: trackingEmailId,
           status: "sent",
-          sendgrid_message_id: normalizedMessageId,
-          step_number: 100,
+          zeptomail_message_id: sendResult.messageId,
           sent_at: Date.now(),
         });
-      } else {
-        console.warn(
-          `[emailProposal] No stakeholder_id for proposal ${args.proposalId}; skipping email tracking record.`,
-        );
       }
+    } else if (trackingEmailId) {
+      await ctx.runMutation(internal.emails.updateStatusInternal, {
+        id: trackingEmailId,
+        status: "failed",
+      });
     }
 
     return sendResult;

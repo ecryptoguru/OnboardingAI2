@@ -6,6 +6,9 @@ import {
 } from "./_generated/server";
 import { v } from "convex/values";
 import { validateAuth } from "./lib/auth_utils";
+import { Id } from "./_generated/dataModel";
+
+const MAX_ANALYTICS_ROWS = 5000;
 
 export const listBySequence = query({
   args: { sequence_id: v.id("outreachSequences") },
@@ -14,7 +17,7 @@ export const listBySequence = query({
     return await ctx.db
       .query("emailsSent")
       .withIndex("by_sequence", (q) => q.eq("sequence_id", args.sequence_id))
-      .collect();
+      .take(MAX_ANALYTICS_ROWS);
   },
 });
 
@@ -27,27 +30,27 @@ export const getStats = query({
       ctx.db
         .query("emailsSent")
         .withIndex("by_status", (q) => q.eq("status", "queued"))
-        .collect()
+        .take(MAX_ANALYTICS_ROWS)
         .then((r) => r.length),
       ctx.db
         .query("emailsSent")
         .withIndex("by_status", (q) => q.eq("status", "failed"))
-        .collect()
+        .take(MAX_ANALYTICS_ROWS)
         .then((r) => r.length),
       ctx.db
         .query("emailsSent")
         .withIndex("by_status", (q) => q.eq("status", "opened"))
-        .collect()
+        .take(MAX_ANALYTICS_ROWS)
         .then((r) => r.length),
       ctx.db
         .query("emailsSent")
         .withIndex("by_status", (q) => q.eq("status", "clicked"))
-        .collect()
+        .take(MAX_ANALYTICS_ROWS)
         .then((r) => r.length),
       ctx.db
         .query("emailsSent")
         .withIndex("by_status", (q) => q.eq("status", "bounced"))
-        .collect()
+        .take(MAX_ANALYTICS_ROWS)
         .then((r) => r.length),
     ]);
 
@@ -58,12 +61,12 @@ export const getStats = query({
       ctx.db
         .query("emailsSent")
         .withIndex("by_status", (q) => q.eq("status", "sent"))
-        .collect()
+        .take(MAX_ANALYTICS_ROWS)
         .then((r) => r.length),
       ctx.db
         .query("emailsSent")
         .withIndex("by_status", (q) => q.eq("status", "delivered"))
-        .collect()
+        .take(MAX_ANALYTICS_ROWS)
         .then((r) => r.length),
     ]);
 
@@ -83,7 +86,7 @@ export const listByUniversity = query({
         q.eq("university_id", args.university_id),
       )
       .order("desc")
-      .collect();
+      .take(MAX_ANALYTICS_ROWS);
     return await Promise.all(
       emails.map(async (e) => {
         const st = await ctx.db.get(e.stakeholder_id);
@@ -132,14 +135,14 @@ export const getDetailedStats = query({
   },
 });
 
-export const getBySendgridId = query({
-  args: { sendgrid_message_id: v.string() },
+export const getByZeptomailId = query({
+  args: { zeptomail_message_id: v.string() },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
     return await ctx.db
       .query("emailsSent")
-      .withIndex("by_sendgrid_id", (q) =>
-        q.eq("sendgrid_message_id", args.sendgrid_message_id),
+      .withIndex("by_zeptomail_id", (q) =>
+        q.eq("zeptomail_message_id", args.zeptomail_message_id),
       )
       .first();
   },
@@ -176,7 +179,7 @@ export const updateStatus = mutation({
       v.literal("bounced"),
       v.literal("failed"),
     ),
-    sendgrid_message_id: v.optional(v.string()),
+    zeptomail_message_id: v.optional(v.string()),
     sent_at: v.optional(v.number()),
     opened_at: v.optional(v.number()),
   },
@@ -187,9 +190,9 @@ export const updateStatus = mutation({
   },
 });
 
-export const updateStatusBySendgridId = mutation({
+export const updateStatusByZeptomailId = mutation({
   args: {
-    sendgrid_message_id: v.string(),
+    zeptomail_message_id: v.string(),
     status: v.union(
       v.literal("delivered"),
       v.literal("opened"),
@@ -203,8 +206,8 @@ export const updateStatusBySendgridId = mutation({
     await validateAuth(ctx);
     const email = await ctx.db
       .query("emailsSent")
-      .withIndex("by_sendgrid_id", (q) =>
-        q.eq("sendgrid_message_id", args.sendgrid_message_id),
+      .withIndex("by_zeptomail_id", (q) =>
+        q.eq("zeptomail_message_id", args.zeptomail_message_id),
       )
       .first();
     if (!email) return;
@@ -215,9 +218,10 @@ export const updateStatusBySendgridId = mutation({
   },
 });
 
-export const updateStatusBySendgridIdInternal = internalMutation({
+export const updateStatusByZeptomailIdInternal = internalMutation({
   args: {
-    sendgrid_message_id: v.string(),
+    zeptomail_message_id: v.string(),
+    client_reference: v.optional(v.string()),
     status: v.union(
       v.literal("delivered"),
       v.literal("opened"),
@@ -228,12 +232,39 @@ export const updateStatusBySendgridIdInternal = internalMutation({
     opened_at: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const email = await ctx.db
-      .query("emailsSent")
-      .withIndex("by_sendgrid_id", (q) =>
-        q.eq("sendgrid_message_id", args.sendgrid_message_id),
-      )
-      .first();
+    let email = null;
+
+    // 1. Try matching by zeptomail_message_id (stores request_id from API response)
+    if (args.zeptomail_message_id) {
+      email = await ctx.db
+        .query("emailsSent")
+        .withIndex("by_zeptomail_id", (q) =>
+          q.eq("zeptomail_message_id", args.zeptomail_message_id),
+        )
+        .first();
+    }
+
+    // 2. Try converting email_reference to request_id format
+    //    email_reference: "xxx.m1.UUID@domain" → request_id: "xxx.t1.UUID"
+    if (!email && args.zeptomail_message_id) {
+      const requestIdFromEmailRef = args.zeptomail_message_id
+        .replace(/\.m1\./, ".t1.")
+        .replace(/@[^@]+$/, "");
+      if (requestIdFromEmailRef !== args.zeptomail_message_id) {
+        email = await ctx.db
+          .query("emailsSent")
+          .withIndex("by_zeptomail_id", (q) =>
+            q.eq("zeptomail_message_id", requestIdFromEmailRef),
+          )
+          .first();
+      }
+    }
+
+    // 3. Try matching by client_reference (Convex document ID)
+    if (!email && args.client_reference) {
+      email = await ctx.db.get(args.client_reference as Id<"emailsSent">);
+    }
+
     if (!email) return;
     await ctx.db.patch(email._id, {
       status: args.status,
@@ -260,7 +291,9 @@ export const insertInternal = internalMutation({
       v.literal("bounced"),
       v.literal("failed"),
     ),
+    // Deprecated: ZeptoMail migration complete. Use zeptomail_message_id for new emails.
     sendgrid_message_id: v.optional(v.string()),
+    zeptomail_message_id: v.optional(v.string()),
     step_number: v.number(),
     drafted_at: v.optional(v.number()),
     sent_at: v.optional(v.number()),
@@ -276,7 +309,7 @@ export const listBySequenceInternal = internalQuery({
     return await ctx.db
       .query("emailsSent")
       .withIndex("by_sequence", (q) => q.eq("sequence_id", args.sequence_id))
-      .collect();
+      .take(MAX_ANALYTICS_ROWS);
   },
 });
 
@@ -300,7 +333,7 @@ export const updateStatusInternal = internalMutation({
       v.literal("bounced"),
       v.literal("failed"),
     ),
-    sendgrid_message_id: v.optional(v.string()),
+    zeptomail_message_id: v.optional(v.string()),
     sent_at: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
@@ -318,7 +351,7 @@ export const pendingCount = query({
     const pendingEmails = await ctx.db
       .query("emailsSent")
       .withIndex("by_status", (q) => q.eq("status", "pending_approval"))
-      .collect();
+      .take(MAX_ANALYTICS_ROWS);
     return pendingEmails.length;
   },
 });
@@ -330,9 +363,7 @@ export const listPending = query({
     const pendingEmails = await ctx.db
       .query("emailsSent")
       .withIndex("by_status", (q) => q.eq("status", "pending_approval"))
-      .collect();
-
-    // Join with university and stakeholder
+      .take(MAX_ANALYTICS_ROWS);
     return await Promise.all(
       pendingEmails.map(async (email) => {
         const uni = await ctx.db.get(email.university_id);

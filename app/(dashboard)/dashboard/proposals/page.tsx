@@ -308,6 +308,7 @@ function ProposalCard({
   const removeProposal = useMutation(api.proposals.remove);
   const generateProposal = useAction(api.actions.proposals.generateProposal);
   const confirmMeeting = useAction(api.actions.proposals.confirmMeeting);
+  const cancelMeetingAction = useAction(api.actions.proposals.cancelMeeting);
 
   const [regenerating, setRegenerating] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -315,6 +316,7 @@ function ProposalCard({
   const [showEditModal, setShowEditModal] = useState(false);
   const [showMeetingModal, setShowMeetingModal] = useState(false);
   const [confirmingMeeting, setConfirmingMeeting] = useState(false);
+  const [cancellingMeeting, setCancellingMeeting] = useState(false);
 
   const { withKeyCheck, keyModal: cardKeyModal } = useRequireGeminiKey();
 
@@ -403,6 +405,24 @@ function ProposalCard({
       show(`Meeting confirmation failed: ${e}`, "error");
     } finally {
       setConfirmingMeeting(false);
+    }
+  };
+
+  const handleCancelMeeting = async () => {
+    setCancellingMeeting(true);
+    try {
+      const result = (await cancelMeetingAction({
+        proposalId: proposal._id,
+      })) as { success?: boolean; error?: string };
+      if (!result.success) {
+        show(result.error || "Failed to cancel meeting", "error");
+        return;
+      }
+      show("Meeting cancelled successfully.", "success");
+    } catch (e) {
+      show(`Meeting cancellation failed: ${e}`, "error");
+    } finally {
+      setCancellingMeeting(false);
     }
   };
 
@@ -587,18 +607,31 @@ function ProposalCard({
               </div>
             )}
             {!confirmDelete && !isDraft && (
-              <button
-                type="button"
-                onClick={() => setShowMeetingModal(true)}
-                disabled={confirmingMeeting}
-                className="w-full py-2 rounded-xl text-xs font-semibold border border-card-border/70 bg-card hover:bg-muted/70 transition-colors text-foreground disabled:opacity-60"
-              >
-                {confirmingMeeting
-                  ? "Confirming Meeting..."
-                  : meetingConfirmed
-                    ? "Reschedule Meeting"
-                    : "Confirm Meeting & Create Meet Link"}
-              </button>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowMeetingModal(true)}
+                  disabled={confirmingMeeting || cancellingMeeting}
+                  className="flex-1 py-2 rounded-xl text-xs font-semibold border border-card-border/70 bg-card hover:bg-muted/70 transition-colors text-foreground disabled:opacity-60"
+                >
+                  {confirmingMeeting
+                    ? "Confirming Meeting..."
+                    : meetingConfirmed
+                      ? "Reschedule Meeting"
+                      : "Confirm Meeting & Create Meet Link"}
+                </button>
+                {meetingConfirmed && (
+                  <button
+                    type="button"
+                    onClick={handleCancelMeeting}
+                    disabled={cancellingMeeting || confirmingMeeting}
+                    className="px-3 py-2 rounded-xl text-xs font-semibold border border-red-500/20 bg-red-600/10 hover:bg-red-600/20 text-red-400 transition-colors disabled:opacity-60"
+                    title="Cancel meeting"
+                  >
+                    {cancellingMeeting ? "Cancelling..." : "Cancel"}
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>

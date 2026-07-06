@@ -20,7 +20,7 @@ export const listByUniversity = query({
       .withIndex("by_university", (q) =>
         q.eq("university_id", args.university_id),
       )
-      .collect();
+      .take(500);
   },
 });
 
@@ -37,8 +37,8 @@ export const listByUniversityInternal = internalQuery({
 });
 
 // Returns active sequences that are due (next_send_at <= now).
-// Capped at 50 to avoid "too many system operations" timeout.
-// The cron runs every minute, so backlog clears across multiple runs.
+// Capped at 100 to match MAX_BATCH in processDueSequences action.
+// The cron runs every 15 minutes, so backlog clears across multiple runs.
 export const getDueInternal = internalQuery({
   args: {},
   handler: async (ctx) => {
@@ -48,7 +48,7 @@ export const getDueInternal = internalQuery({
       .withIndex("by_status_next_send", (q) =>
         q.eq("status", "active").lte("next_send_at", now),
       )
-      .take(50);
+      .take(100);
   },
 });
 
@@ -193,7 +193,7 @@ async function doEnroll(
       .withIndex("by_university", (q) =>
         q.eq("university_id", args.university_id),
       )
-      .collect();
+      .take(500);
 
     stakeholder =
       allStakeholders.find(
@@ -213,10 +213,9 @@ async function doEnroll(
   // 2. Check if sequence already exists
   const existing = await ctx.db
     .query("outreachSequences")
-    .withIndex("by_university", (q) =>
-      q.eq("university_id", args.university_id),
+    .withIndex("by_university_stakeholder", (q) =>
+      q.eq("university_id", args.university_id).eq("stakeholder_id", stakeholder._id),
     )
-    .filter((q) => q.eq(q.field("stakeholder_id"), stakeholder._id))
     .first();
 
   if (existing) {
