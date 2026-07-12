@@ -1,8 +1,8 @@
 "use node";
 
-import { action } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { v } from "convex/values";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { Id } from "../_generated/dataModel";
 
 /**
@@ -16,7 +16,7 @@ import { Id } from "../_generated/dataModel";
  * Usage (from Convex dashboard or via HTTP action):
  *   { universityName: "Anna University", state: "Tamil Nadu", stages: [...] }
  */
-export const runFullPipeline = action({
+export const runFullPipeline = internalAction({
   args: {
     universityName: v.string(),
     state: v.optional(v.string()),
@@ -134,7 +134,7 @@ export const runFullPipeline = action({
           });
           if (uni && !uni.website) {
             const website = await ctx.runAction(
-              api.actions.discovery.discoverWebsite,
+              internal.actions.discovery.discoverWebsite,
               { universityId, universityName: args.universityName },
             );
             endTimer({ status: website ? "success" : "failed", website });
@@ -150,7 +150,7 @@ export const runFullPipeline = action({
       if (stagesToRun.has("scraper")) {
         const endTimer = stageTimer("scraper");
         try {
-          const result = await ctx.runAction(api.actions.scraper.scrapeUniversity, {
+          const result = await ctx.runAction(internal.actions.scraper.scrapeUniversity, {
             universityId,
           });
           endTimer(result ?? { success: true });
@@ -164,7 +164,7 @@ export const runFullPipeline = action({
         const endTimer = stageTimer("enrichment");
         try {
           const result = await ctx.runAction(
-            api.actions.enrichment.discoverSocialAndMedia,
+            internal.actions.enrichment.discoverSocialAndMedia,
             { universityId },
           );
           endTimer(result);
@@ -178,7 +178,7 @@ export const runFullPipeline = action({
         const endTimer = stageTimer("deep_enrichment");
         try {
           const result = await ctx.runAction(
-            api.actions.deepEnrichment.runDeepEnrichment,
+            internal.actions.deepEnrichment.runDeepEnrichment,
             { universityId },
           );
           endTimer(result);
@@ -192,7 +192,7 @@ export const runFullPipeline = action({
         const endTimer = stageTimer("scoring");
         try {
           const result = await ctx.runAction(
-            api.actions.scoring.scoreUniversity,
+            internal.actions.scoring.scoreUniversity,
             { universityId },
           );
           endTimer(result);
@@ -268,7 +268,7 @@ export const runFullPipeline = action({
 
           // Directly process step 1 to draft the email (deterministic test path)
           const stepResult = await ctx.runAction(
-            api.actions.outreach.processSequenceStep,
+            internal.actions.outreach.processSequenceStep,
             { sequenceId: enrolledId },
           );
           report.stages.outreach.stepResult = stepResult;
@@ -301,7 +301,7 @@ export const runFullPipeline = action({
           });
 
           const classification = await ctx.runAction(
-            api.actions.replyClassifier.classifyReply,
+            internal.actions.replyClassifier.classifyReplyInternal,
             {
               replyId,
               triggerAutoReply: false,
@@ -340,7 +340,7 @@ export const runFullPipeline = action({
           );
 
           const result = await ctx.runAction(
-            api.actions.proposals.generateProposal,
+            internal.actions.proposals.generateProposalInternal,
             {
               universityId,
               proposalId,

@@ -1,10 +1,10 @@
 "use node";
 
-import { action } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import type { Doc } from "../_generated/dataModel";
 
-export const listUniversities = action({
+export const listUniversities = internalAction({
   args: {},
   handler: async (
     ctx,

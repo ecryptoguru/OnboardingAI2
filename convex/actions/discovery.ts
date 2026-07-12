@@ -1,8 +1,8 @@
 "use node";
 
-import { action } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { v } from "convex/values";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import {
   findFirstValidWebsiteCandidate,
   looksLikeOwnedDomain,
@@ -92,7 +92,7 @@ function guessOfficialWebsiteCandidates(
   return Array.from(guessed);
 }
 
-export const validateWebsite = action({
+export const validateWebsite = internalAction({
   args: {
     universityId: v.id("universities"),
     website: v.string(),
@@ -231,7 +231,7 @@ export const validateWebsite = action({
   },
 });
 
-export const discoverWebsite = action({
+export const discoverWebsite = internalAction({
   args: { universityId: v.id("universities"), universityName: v.string() },
   handler: async (ctx, args) => {
     const rawApiKey = await ctx.runQuery(
@@ -446,7 +446,7 @@ export const discoverWebsite = action({
     const selectedCandidate = await findFirstValidWebsiteCandidate(
       candidates,
       async (candidate) =>
-        await ctx.runAction(api.actions.discovery.validateWebsite, {
+        await ctx.runAction(internal.actions.discovery.validateWebsite, {
           universityId: args.universityId,
           website: candidate.link,
           universityName: args.universityName,

@@ -1,7 +1,17 @@
-# Welcome to your Convex functions directory!
+# Convex functions directory
 
-Write your Convex functions here.
-See https://docs.convex.dev/functions for more.
+This directory contains the `fretbox-outreach-v2` Convex backend: queries, mutations, actions, HTTP routes, crons, and shared libraries.
+
+See https://docs.convex.dev/functions for general Convex function docs.
+
+## Important conventions
+
+- **Public actions** exposed to the frontend must call `await validateAuth(ctx)` at the start.
+- **Internal actions** (called by crons, webhooks, or other server code) use `internalAction` and are invoked via `internal.actions.*` or `internal.<module>.*`.
+- **Do not call `api.actions.*` from internal code.**
+- **API keys** are stored in `systemSettings` and XOR-obfuscated with `SETTINGS_OBFUSCATION_SECRET`.
+- **HTTP test endpoints** in `convex/http.ts` are disabled by default; enable them with `DISABLE_TEST_ENDPOINTS=false` and `TEST_WEBHOOK_SECRET`.
+- Run `npx convex codegen` after schema or action changes to regenerate TypeScript bindings.
 
 A query function that takes two arguments looks like:
 

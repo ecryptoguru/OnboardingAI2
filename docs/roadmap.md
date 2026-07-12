@@ -22,12 +22,11 @@ webhooks — all in TypeScript with zero infrastructure to manage.
 | Backend         | Convex (TypeScript) — Queries, Mutations, Actions           |
 | Database        | Convex DB (Document-Relational, reactive)                   |
 | Task Queue      | Convex Scheduled Functions + Cron Jobs                      |
-| AI Agents       | @convex-dev/agent (memory, threads, streaming)              |
-| High-Tier LLM   | Claude Sonnet 4.6 (Anthropic API direct)                    |
-| Fast-Tier LLM   | Gemini 3 Flash (Google AI API) — scoring, email, vision     |
-| Vector Embeddings | text-embedding-004 (Google AI) — 768-dim, same key as Gemini |
+| High-Tier LLM   | Gemini 3.5 Flash (Google AI API) — reasoning, proposals, reply classification |
+| Fast-Tier LLM   | Gemini 3.1 Flash-Lite (Google AI API) — scoring, email, vision     |
+| Vector Embeddings | gemini-embedding-001 (Google AI) — 768-dim, same key as Gemini |
 | Vector Search   | Convex Native Vector Search (768-dim)                       |
-| Web Scraping    | fetch() + HTML parse → Jina Reader fallback (free, no key)  |
+| Web Scraping    | Firecrawl + Jina Reader + fetch() HTML parse fallback       |
 | File Storage    | Convex File Storage (PDFs, assets)                          |
 | Email Delivery  | ZeptoMail REST API (called from Convex Actions)              |
 | Inbound Email   | ZeptoMail Inbound Parse → Convex HTTP Action webhook         |
@@ -41,10 +40,16 @@ webhooks — all in TypeScript with zero infrastructure to manage.
 ## AI Keys (2 total)
 
 ```bash
-ANTHROPIC_API_KEY   → Claude Sonnet 4.6 (proposals, reply classification)
-GOOGLE_AI_API_KEY   → Gemini 3 Flash (scoring, personalization, vision)
-                    → text-embedding-004 (vector embeddings) ← SAME KEY
+GOOGLE_AI_API_KEY   → Gemini 3.5 Flash (reasoning, proposals, reply classification)
+                    → Gemini 3.1 Flash-Lite (scoring, personalization, vision)
+                    → gemini-embedding-001 (vector embeddings) ← SAME KEY
 ```
+
+**Optional service keys** are stored in Convex `systemSettings` (XOR-obfuscated with `SETTINGS_OBFUSCATION_SECRET`):
+- `SERPER_API_KEY` — web search / discovery
+- `FIRECRAWL_API_KEY` — deep crawling / sitemap
+- `ZEPTOMAIL_API_KEY` — email delivery
+- `Google Calendar Service Account JSON` + `Calendar ID` — calendar / Meet integration
 
 ## System Pipeline
 
@@ -61,17 +66,31 @@ Priority Scoring (Deterministic Convex Mutation + Gemini 3 Flash AI score)
      ↓
 Tiered Email Outreach (Convex Cron → Scheduled Mutations → ZeptoMail)
      ↓
-Reply Classification (Convex HTTP Action webhook → Claude Sonnet 4.6)
+Reply Classification (Convex HTTP Action webhook → Gemini 3.5 Flash)
      ↓
 Action Dispatch (Convex Mutation → schedule follow-ups or proposals)
      ↓
-Meeting Booked (Calendly → Convex HTTP Action webhook)
+Meeting Booked (Google Calendar + Meet link from proposal confirmation)
      ↓
-AI Proposal Generated (Claude Sonnet 4.6 + Vector Search → @react-pdf → Convex Storage)
+AI Proposal Generated (Gemini 3.5 Flash + Vector Search → rich HTML → @react-pdf → Convex Storage)
 ```
 
 **Key Benefit:** Every step above is observable in real-time on the frontend
 via Convex's reactive `useQuery` hooks — no polling, no manual state management.
+
+═══════════════════════════════════════════════════════════════
+PART 1.5: POST-REFACTOR HARDENING (COMPLETED)
+═══════════════════════════════════════════════════════════════
+
+The following security and maintainability improvements have been implemented after the initial build:
+
+1. **Action Internalization** — Pipeline actions (`orchestrator`, `scraper`, `enrichment`, `deepEnrichment`, `discovery`, `scoring`, `outreach`, `ingest`, `ugcSync`, `liveTest`, `realWorldVerify`, etc.) are now `internalAction` and are called via `internal.actions.*` from crons, webhooks, and other internal actions. Public wrappers require `validateAuth(ctx)`.
+2. **HTTP Test Endpoint Lockdown** — Test endpoints in `convex/http.ts` are disabled by default. They require `DISABLE_TEST_ENDPOINTS=false` and a `TEST_WEBHOOK_SECRET` bearer token.
+3. **API Key Sanitization** — `sanitizeApiKey()` enforces printable ASCII (33–126) before keys are stored in `systemSettings`.
+4. **Proposal Status Expansion** — `proposals` table supports `draft`, `ready`, `sent`, `meeting_confirmed`, and `cancelled`.
+5. **Meeting Idempotency** — `confirmMeeting` is idempotent for the same time slot; `cancelMeeting` cancels the Google Calendar event and updates the proposal.
+6. **Funnel Accuracy** — `getFunnelStats` uses `collect()` queries to produce accurate counts across all stages, including `Not Interested` and `Skipped`.
+7. **Circular Type Fix** — `email.ts` (`doSendEmail`) and `proposals.ts` (`doGenerateProposal`) use helper functions to avoid circular `any` inference.
 
 ═══════════════════════════════════════════════════════════════
 PART 2: 6-PHASE BUILD ROADMAP
@@ -189,7 +208,7 @@ Key points:
 - UUIDs replaced by Convex native document IDs (v.id("tableName"))
 - TIMESTAMPTZ replaced by v.number() (Unix ms timestamps)
 - JSONB fields replaced by v.object({...}) with typed sub-schemas
-- Vector embeddings: 768 dimensions (text-embedding-004, NOT 1536)
+- Vector embeddings: 768 dimensions (gemini-embedding-001, NOT 1536)
 - No migrations needed — Convex handles DDL automatically
 
 ═══════════════════════════════════════════════════════════════
@@ -208,10 +227,10 @@ The following are permanently removed in v2:
 - ❌ Docker Compose — replaced by npx convex dev
 - ❌ Fly.io (backend) — replaced by Convex Cloud
 - ❌ Clerk — replaced by Convex Native Auth
-- ❌ Browserbase — replaced by fetch() + Jina Reader (free)
-- ❌ Firecrawl — replaced by Jina Reader (free, no key)
-- ❌ OpenRouter — Claude accessed directly via Anthropic API
-- ❌ OpenAI — replaced by Anthropic (Claude) + Google AI (Gemini + embeddings)
+- ❌ Browserbase — replaced by Firecrawl + Jina Reader + fetch() HTML parse
+- ❌ OpenRouter — removed; direct Google AI Gemini API used
+- ❌ OpenAI — removed; replaced by Google AI (Gemini + embeddings)
+- ❌ Anthropic Claude — removed; proposals, reply classification, and scoring now use Gemini 3.5 Flash / Flash-Lite
 
 ═══════════════════════════════════════════════════════════════
 Document End — Fretbox Outreach AI Roadmap v2.0 (Convex Edition)

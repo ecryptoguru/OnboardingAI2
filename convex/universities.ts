@@ -9,8 +9,6 @@ import { paginationOptsValidator } from "convex/server";
 import { validateAuth } from "./lib/auth_utils";
 import { namesMatch } from "./lib/universityUtils";
 
-const MAX_ANALYTICS_ROWS = 5000;
-
 function isDuplicateOfExisting(
   row: { university_name: string; state?: string | null },
   existing: { university_name: string; state?: string | null }[],
@@ -197,27 +195,27 @@ export const getStats = query({
       ctx.db
         .query("universities")
         .withIndex("by_type", (q) => q.eq("type", "Central"))
-        .take(MAX_ANALYTICS_ROWS)
+        .collect()
         .then((r) => r.length),
       ctx.db
         .query("universities")
         .withIndex("by_type", (q) => q.eq("type", "State"))
-        .take(MAX_ANALYTICS_ROWS)
+        .collect()
         .then((r) => r.length),
       ctx.db
         .query("universities")
         .withIndex("by_type", (q) => q.eq("type", "Private"))
-        .take(MAX_ANALYTICS_ROWS)
+        .collect()
         .then((r) => r.length),
       ctx.db
         .query("universities")
         .withIndex("by_type", (q) => q.eq("type", "Deemed"))
-        .take(MAX_ANALYTICS_ROWS)
+        .collect()
         .then((r) => r.length),
       ctx.db
         .query("universities")
         .withIndex("by_type", (q) => q.eq("type", "Other"))
-        .take(MAX_ANALYTICS_ROWS)
+        .collect()
         .then((r) => r.length),
     ]);
 
@@ -236,17 +234,17 @@ export const getStats = query({
       notInterested,
       skipped,
     ] = await Promise.all([
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "new")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "enriching")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "enriched")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "sequencing")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "outreach_active")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "replied")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "meeting_booked")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "proposal_sent")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "closed")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "not_interested")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
-      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "skipped")).take(MAX_ANALYTICS_ROWS).then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "new")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "enriching")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "enriched")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "sequencing")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "outreach_active")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "replied")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "meeting_booked")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "proposal_sent")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "closed")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "not_interested")).collect().then((r) => r.length),
+      ctx.db.query("universities").withIndex("by_outreach_stage", (q) => q.eq("outreach_stage", "skipped")).collect().then((r) => r.length),
     ]);
 
     const all = newCount + enriching + enriched + sequencing + outreachActive + replied + meetingBooked + proposalSent + closed + notInterested + skipped;
@@ -272,6 +270,8 @@ export const getFunnelStats = query({
     const [
       newCount,
       enriching,
+      enrichedCount,
+      sequencing,
       skipped,
       outreachActive,
       replied,
@@ -291,6 +291,20 @@ export const getFunnelStats = query({
         .query("universities")
         .withIndex("by_outreach_stage", (q) =>
           q.eq("outreach_stage", "enriching"),
+        )
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("universities")
+        .withIndex("by_outreach_stage", (q) =>
+          q.eq("outreach_stage", "enriched"),
+        )
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("universities")
+        .withIndex("by_outreach_stage", (q) =>
+          q.eq("outreach_stage", "sequencing"),
         )
         .collect()
         .then((r) => r.length),
@@ -353,9 +367,12 @@ export const getFunnelStats = query({
         .then((r) => r.length),
     ]);
 
-    // Total is sum of all tracked stages (excluding 'enriching' which is transient)
+    // Total is the exact sum of all tracked outreach stages.
     const total =
       newCount +
+      enriching +
+      enrichedCount +
+      sequencing +
       skipped +
       outreachActive +
       replied +
@@ -363,11 +380,10 @@ export const getFunnelStats = query({
       proposalSent +
       closed +
       notInterested;
-    const enriched = total - newCount - enriching - skipped;
 
     return {
       total,
-      enriched,
+      enriched: enrichedCount,
       outreachActive,
       replied,
       meetingBooked,

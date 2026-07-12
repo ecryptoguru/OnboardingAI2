@@ -3,12 +3,14 @@
 import { action } from "../_generated/server";
 import { v } from "convex/values";
 import { api } from "../_generated/api";
+import { validateAuth } from "../lib/auth_utils";
 import Papa from "papaparse";
 import * as Sentry from "@sentry/node";
 
 export const parseCsv = action({
   args: { storageId: v.id("_storage") },
   handler: async (ctx, args): Promise<{ count: number; skipped: number }> => {
+    await validateAuth(ctx);
     try {
       const fileUrl = await ctx.storage.getUrl(args.storageId);
       if (!fileUrl) throw new Error("File not found");

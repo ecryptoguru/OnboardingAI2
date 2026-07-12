@@ -1,8 +1,9 @@
 "use node";
 
-import { action } from "../_generated/server";
-import { api, internal } from "../_generated/api";
+import { action, internalAction } from "../_generated/server";
+import { internal } from "../_generated/api";
 import { v } from "convex/values";
+import { validateAuth } from "../lib/auth_utils";
 import {
   isSuspiciousWebsite,
   looksLikeOwnedDomain,
@@ -10,7 +11,7 @@ import {
 import { LlmUsageEntry, LlmUsageSummary, summarizeLlmUsage } from "../lib/llm";
 import * as Sentry from "@sentry/node";
 
-export const runEnrichmentChain = action({
+export const runEnrichmentChainInternal = internalAction({
   args: { universityId: v.id("universities") },
   handler: async (
     ctx,
@@ -81,7 +82,7 @@ export const runEnrichmentChain = action({
         );
         try {
           const discRes: string | null = await ctx.runAction(
-            api.actions.discovery.discoverWebsite,
+            internal.actions.discovery.discoverWebsite,
             {
               universityId: args.universityId,
               universityName: university.university_name,
@@ -92,7 +93,7 @@ export const runEnrichmentChain = action({
             // Validate and normalize the discovered URL before downstream scraping.
             try {
               const validationOk = await ctx.runAction(
-                api.actions.discovery.validateWebsite,
+                internal.actions.discovery.validateWebsite,
                 {
                   universityId: args.universityId,
                   website: discRes,
@@ -147,13 +148,13 @@ export const runEnrichmentChain = action({
             `[Orchestrator] Phase 1: Running scraper, anti-ragging, social discovery in parallel`,
           );
           const [scrapeRes, antiRagRes, socialRes] = await Promise.allSettled([
-            ctx.runAction(api.actions.scraper.scrapeUniversity, {
+            ctx.runAction(internal.actions.scraper.scrapeUniversity, {
               universityId: args.universityId,
             }),
-            ctx.runAction(api.actions.scrapeAntiRagging.scrapeAntiRagging, {
+            ctx.runAction(internal.actions.scrapeAntiRagging.scrapeAntiRagging, {
               universityId: args.universityId,
             }),
-            ctx.runAction(api.actions.enrichment.discoverSocialAndMedia, {
+            ctx.runAction(internal.actions.enrichment.discoverSocialAndMedia, {
               universityId: args.universityId,
             }),
           ]);
@@ -177,7 +178,7 @@ export const runEnrichmentChain = action({
             `[Orchestrator] Website still missing after discovery. Skipping website-dependent scraping phases.`,
           );
           const socialRes = await ctx.runAction(
-            api.actions.enrichment.discoverSocialAndMedia,
+            internal.actions.enrichment.discoverSocialAndMedia,
             {
               universityId: args.universityId,
             },
@@ -199,7 +200,7 @@ export const runEnrichmentChain = action({
         if (websiteReady) {
           console.log(`[Orchestrator] Phase 2: Running contact inference`);
           const inferRes = await ctx.runAction(
-            api.actions.inferContacts.inferContacts,
+            internal.actions.inferContacts.inferContacts,
             { universityId: args.universityId },
           );
           results.inferContacts =
@@ -217,7 +218,7 @@ export const runEnrichmentChain = action({
           `[Orchestrator] Phase 3: Running government data enrichment`,
         );
         const govRes = await ctx.runAction(
-          api.actions.enrichGovernmentData.enrichGovernmentData,
+          internal.actions.enrichGovernmentData.enrichGovernmentData,
           { universityId: args.universityId },
         );
         results.governmentData =
@@ -232,7 +233,7 @@ export const runEnrichmentChain = action({
         if (websiteReady) {
           console.log(`[Orchestrator] Phase 4: Running deep enrichment`);
           const deepRes: unknown = await ctx.runAction(
-            api.actions.deepEnrichment.runDeepEnrichment,
+            internal.actions.deepEnrichment.runDeepEnrichment,
             { universityId: args.universityId },
           );
           results.deepEnrichment =
@@ -251,7 +252,7 @@ export const runEnrichmentChain = action({
           `[Orchestrator] Phase 5: Refreshing social/profile enrichment`,
         );
         const socialRefreshRes = await ctx.runAction(
-          api.actions.enrichment.discoverSocialAndMedia,
+          internal.actions.enrichment.discoverSocialAndMedia,
           { universityId: args.universityId },
         );
         results.socialMediaPostDeep =
@@ -276,7 +277,7 @@ export const runEnrichmentChain = action({
         }
         console.log(`[Orchestrator] Phase 6: Running scoring`);
         const scoreRes = await ctx.runAction(
-          api.actions.scoring.scoreUniversity,
+          internal.actions.scoring.scoreUniversity,
           { universityId: args.universityId },
         );
         results.scoring = (scoreRes as { success?: boolean })?.success === true;
@@ -316,5 +317,24 @@ export const runEnrichmentChain = action({
         },
       };
     }
+  },
+});
+
+export const runEnrichmentChain = action({
+  args: { universityId: v.id("universities") },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{
+    success: boolean;
+    steps?: Record<string, boolean>;
+    llmUsage?: LlmUsageSummary;
+    error?: string;
+  }> => {
+    await validateAuth(ctx);
+    return await ctx.runAction(
+      internal.actions.orchestrator.runEnrichmentChainInternal,
+      args,
+    );
   },
 });

@@ -1,8 +1,9 @@
 "use node";
 
-import { action } from "../_generated/server";
-import { internal, api } from "../_generated/api";
+import { action, internalAction } from "../_generated/server";
+import { internal } from "../_generated/api";
 import { v } from "convex/values";
+import { validateAuth } from "../lib/auth_utils";
 import { callFlash, TEMP } from "../lib/llm";
 import {
   REPLY_CLASSIFIER_SYSTEM_PROMPT,
@@ -16,7 +17,7 @@ import * as Sentry from "@sentry/node";
  * Uses Gemini 3.1 Flash-Lite at temperature=0 for deterministic classification.
  * Flash-Lite is ~6x cheaper than 3.5 Flash for this 7-class classification task.
  */
-export const classifyReply = action({
+export const classifyReplyInternal = internalAction({
   args: {
     replyId: v.id("replyLogs"),
     triggerAutoReply: v.optional(v.boolean()),
@@ -57,6 +58,10 @@ export const classifyReply = action({
       console.log(`[ReplyClassifier] Flash-Lite latency: ${latencyMs}ms`);
 
       const classificationData = JSON.parse(response);
+      const rawConfidence =
+        typeof classificationData.confidence === "number"
+          ? classificationData.confidence
+          : undefined;
 
       const validCategories = [
         "meeting_request",
@@ -69,8 +74,9 @@ export const classifyReply = action({
       ];
 
       let result = classificationData.category;
-      // Compute confidence: direct valid match = high confidence, fallback = low
-      let confidence = 0.9;
+      // Compute confidence: use model-reported confidence if present, else high default, fallback = low
+      let confidence =
+        rawConfidence !== undefined ? Math.max(0, Math.min(1, rawConfidence)) : 0.9;
 
       if (!result || !validCategories.includes(result)) {
         console.warn(
@@ -94,7 +100,7 @@ export const classifyReply = action({
       const shouldTriggerAutoReply = args.triggerAutoReply !== false && !(isHighStakes && hasLowConfidence);
 
       if (shouldTriggerAutoReply) {
-        await ctx.scheduler.runAfter(0, api.actions.autoReply.sendAutoReply, {
+        await ctx.scheduler.runAfter(0, internal.actions.autoReply.sendAutoReply, {
           universityId: reply.university_id,
           stakeholderId: reply.stakeholder_id,
           classification: result,
@@ -186,5 +192,22 @@ export const classifyReply = action({
       });
       return { success: false, error: String(e) };
     }
+  },
+});
+
+export const classifyReply = action({
+  args: {
+    replyId: v.id("replyLogs"),
+    triggerAutoReply: v.optional(v.boolean()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ success: boolean; classification?: string; error?: string }> => {
+    await validateAuth(ctx);
+    return await ctx.runAction(
+      internal.actions.replyClassifier.classifyReplyInternal,
+      args,
+    );
   },
 });

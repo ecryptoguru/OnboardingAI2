@@ -1,4 +1,4 @@
-import { mutation, query, internalMutation } from "./_generated/server";
+import { mutation, query, internalQuery, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { validateAuth } from "./lib/auth_utils";
 import type { GenericMutationCtx } from "convex/server";
@@ -9,6 +9,16 @@ export const getByUniversity = query({
   args: { university_id: v.id("universities") },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
+    return await ctx.db
+      .query("priorityScores")
+      .withIndex("by_university", (q) => q.eq("university_id", args.university_id))
+      .first();
+  },
+});
+
+export const getByUniversityInternal = internalQuery({
+  args: { university_id: v.id("universities") },
+  handler: async (ctx, args) => {
     return await ctx.db
       .query("priorityScores")
       .withIndex("by_university", (q) => q.eq("university_id", args.university_id))

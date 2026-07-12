@@ -1,6 +1,6 @@
 "use node";
 
-import { action } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { Id } from "../_generated/dataModel";
 import { embed } from "../lib/llm";
@@ -14,7 +14,7 @@ const BATCH_SIZE = 20; // Process 20 signals at a time to stay within Convex act
  *
  * Run via: npx convex run actions/migrateEmbeddings:runMigration
  */
-export const runMigration = action({
+export const runMigration = internalAction({
   args: {},
   handler: async (ctx): Promise<{ migrated: number; failed: number; total: number }> => {
     console.log("[EmbeddingMigration] Starting migration to gemini-embedding-001...");

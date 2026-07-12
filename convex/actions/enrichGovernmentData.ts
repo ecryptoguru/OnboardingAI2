@@ -1,6 +1,6 @@
 "use node";
 
-import { action } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { withRetry, toNum, extractDemographicsFromText } from "../lib/utils";
@@ -233,7 +233,7 @@ async function extractPdfViaGemini(
  * - AISHE (aishe.gov.in) → total enrollment, hostelites
  * - NAAC SSR / Mandatory Disclosure → hostel capacity, student numbers
  */
-export const enrichGovernmentData = action({
+export const enrichGovernmentData = internalAction({
   args: { universityId: v.id("universities") },
   handler: async (
     ctx,

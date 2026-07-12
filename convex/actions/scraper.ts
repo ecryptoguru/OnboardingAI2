@@ -1,6 +1,6 @@
 "use node";
 
-import { action, ActionCtx } from "../_generated/server";
+import { internalAction, ActionCtx } from "../_generated/server";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import {
@@ -286,7 +286,7 @@ function isRelevantInstitutionEmailDomain(
   );
 }
 
-export const scrapeUniversity = action({
+export const scrapeUniversity = internalAction({
   args: {
     universityId: v.id("universities"),
   },

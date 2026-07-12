@@ -1,7 +1,7 @@
 "use node";
 
-import { action } from "../_generated/server";
-import { internal, api } from "../_generated/api";
+import { internalAction } from "../_generated/server";
+import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import { Id } from "../_generated/dataModel";
 import { TEMPLATES } from "../lib/emailTemplates";
@@ -21,7 +21,7 @@ interface ProposalDoc {
   meet_link?: string;
 }
 
-export const sendAutoReply = action({
+export const sendAutoReply = internalAction({
   args: {
     universityId: v.id("universities"),
     stakeholderId: v.id("stakeholders"),
@@ -129,7 +129,7 @@ export const sendAutoReply = action({
           messageId?: string;
           error?: string;
         }> => {
-          return await ctx.runAction(api.actions.email.sendEmail, {
+          return await ctx.runAction(internal.actions.email.sendEmail, {
             to: st.email!,
             subject: emailData!.subject,
             text: emailData!.body,

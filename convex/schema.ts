@@ -271,7 +271,7 @@ export default defineSchema({
     proposal_json: v.optional(v.string()), // JSON string of structured proposal
     recommended_modules: v.optional(v.array(v.string())),
     pdf_storage_id: v.optional(v.id("_storage")),
-    status: v.union(v.literal("draft"), v.literal("ready"), v.literal("sent")),
+    status: v.union(v.literal("draft"), v.literal("ready"), v.literal("sent"), v.literal("meeting_confirmed"), v.literal("cancelled")),
     // Google Calendar / Meet integration
     calendar_event_id: v.optional(v.string()),
     meet_link: v.optional(v.string()),

@@ -38,6 +38,7 @@ OnboardingAI helps you:
 
 ## Pipeline Stages (Simple Meaning)
 
+- **Enriched** — AI research done; ready for sequencing
 - **Ready to Sequence** — Ready for first outreach
 - **Outreach Active** — Emails are in progress
 - **Replied** — Contact responded
@@ -46,6 +47,13 @@ OnboardingAI helps you:
 - **Closed** — Finished (won or archived)
 - **Not Interested** — Declined or opted out
 - **Skipped** — Intentionally excluded
+
+## Proposal Statuses
+
+- **Draft** — Proposal generated but not yet sent
+- **Sent** — Emailed to the stakeholder
+- **Meeting Confirmed** — Calendar event and Meet link created
+- **Cancelled** — The meeting was cancelled
 
 ---
 

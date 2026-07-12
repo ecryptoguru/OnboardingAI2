@@ -1,6 +1,6 @@
 "use node";
 
-import { action } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import { createHash } from "crypto";
@@ -142,7 +142,7 @@ function isNewsRecent(text: string): boolean {
   return ageMonths <= NEWS_MAX_AGE_MONTHS;
 }
 
-export const discoverSocialAndMedia = action({
+export const discoverSocialAndMedia = internalAction({
   args: { universityId: v.id("universities") },
   handler: async (
     ctx,
@@ -544,7 +544,7 @@ export const discoverSocialAndMedia = action({
  * Returns detailed diagnostics on candidate filtering, Serper results,
  * and acceptance decisions to surface why LinkedIn coverage stays at 0.
  */
-export const debugLinkedInEnrichment = action({
+export const debugLinkedInEnrichment = internalAction({
   args: { universityId: v.id("universities") },
   handler: async (ctx, args): Promise<Record<string, unknown>> => {
     const uni = await ctx.runQuery(internal.universities.getInternal, {

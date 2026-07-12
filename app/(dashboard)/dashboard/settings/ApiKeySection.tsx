@@ -4,15 +4,21 @@ import { useState } from "react";
 import { KeyIcon, ArrowPathIcon } from "@heroicons/react/24/outline";
 import { PasswordInput, TestResultAlert, StatusBadge } from "./components";
 
+type IconColor =
+  | "bg-blue-500/10 border border-blue-500/20 text-blue-500"
+  | "bg-emerald-500/10 border border-emerald-500/20 text-emerald-500"
+  | "bg-orange-500/10 border border-orange-500/20 text-orange-500"
+  | "bg-slate-500/10 border border-slate-500/20 text-slate-400";
+
 interface ApiKeySectionProps {
   title: string;
   description: string;
-  iconColor: string;
+  iconColor: IconColor;
   ringColor: "blue" | "emerald" | "orange" | "slate" | "red";
   isConfigured: boolean | undefined;
   placeholderConfigured: string;
   placeholderEmpty: string;
-  testResult: { success?: boolean; error?: string } | null;
+  testResult: { success?: boolean; error?: string; message?: string } | null;
   isSaving: boolean;
   isTestingNew: boolean;
   isTestingStored: boolean;

@@ -69,7 +69,7 @@ export const update = mutation({
     recommended_modules: v.optional(v.array(v.string())),
     pdf_storage_id: v.optional(v.id("_storage")),
     status: v.optional(
-      v.union(v.literal("draft"), v.literal("ready"), v.literal("sent")),
+      v.union(v.literal("draft"), v.literal("ready"), v.literal("sent"), v.literal("meeting_confirmed"), v.literal("cancelled")),
     ),
   },
   handler: async (ctx, args) => {
@@ -122,7 +122,7 @@ export const updateInternal = internalMutation({
     recommended_modules: v.optional(v.array(v.string())),
     pdf_storage_id: v.optional(v.id("_storage")),
     status: v.optional(
-      v.union(v.literal("draft"), v.literal("ready"), v.literal("sent")),
+      v.union(v.literal("draft"), v.literal("ready"), v.literal("sent"), v.literal("meeting_confirmed"), v.literal("cancelled")),
     ),
     calendar_event_id: v.optional(v.string()),
     meet_link: v.optional(v.string()),

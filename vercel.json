@@ -1,14 +1,4 @@
 {
-  "remotePatterns": [
-    {
-      "protocol": "https",
-      "hostname": "google.serper.dev"
-    },
-    {
-      "protocol": "https",
-      "hostname": "r.jina.ai"
-    }
-  ],
   "headers": [
     {
       "source": "/(.*)",
@@ -31,7 +21,7 @@
         },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' https://clerk.fretbox.io; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https://images.unsplash.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.convex.cloud https://*.convex.site https://clerk.fretbox.io https://google.serper.dev https://r.jina.ai https://*.sentry.io https://*.ingest.sentry.io; report-uri https://sentry.io/api/0/minidump/?sentry_key=; frame-ancestors 'none';"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https://images.unsplash.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.convex.cloud https://*.convex.site https://google.serper.dev https://r.jina.ai https://*.sentry.io https://*.ingest.sentry.io; frame-ancestors 'none';"
         }
       ]
     }

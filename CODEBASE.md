@@ -106,6 +106,14 @@ The entire backend ecosystem (Queries, Mutations, Actions, HTTP routes, Crons).
   - `liveTest.ts`: Live testing & recovery actions — `verifyUniversityDirect`, `recoverUniversityContacts`, `buildPriorityOutreachTable`, `repairUniversityStakeholders`. **Critical fix**: `verifyUniversityDirect` directly `await`s `runEnrichmentChain` without timeout-racing to prevent "outstanding action call" errors.
   - `listUniversities.ts`: University listing helpers
 
+### Action Visibility & Authentication
+
+- **Public actions** (`action(...)`) are exposed to the frontend and **must** call `await validateAuth(ctx)` at the top of the handler. Examples: `actions/proposals.confirmMeeting`, `actions/proposals.cancelMeeting`, `actions/proposals.emailProposal`, `actions/proposals.generateProposal`, `actions/replyClassifier.classifyReply`, `actions/email.approveAndSend`.
+- **Internal actions** (`internalAction(...)`) are callable only by the Convex scheduler, crons, webhooks, or other server functions. They are accessed via `ctx.runAction(internal.actions.<module>.<name>, args)`. Examples: `actions/email.sendEmail`, `actions/orchestrator.runEnrichmentChainInternal`, `actions/replyClassifier.classifyReplyInternal`, `actions/outreach.processSequenceStep`, `actions/liveTest.*`.
+- **Do not call `api.actions.*` from internal code.** All internal callers use `internal.actions.*` or `internal.<module>.*`.
+- **Avoid circular type inference:** extract shared action logic into `do*` helper functions (`doSendEmail`, `doGenerateProposal`) that are called by both the internal and public wrappers. This prevents `any` inference on the `internal` object and the `api` namespace.
+- `actions/outreach.ts` schedules `processSequenceStep` recursively for multi-step sequences, using `ctx.scheduler.runAfter(0, internal.actions.outreach.processSequenceStep, ...)`. The batch cap is 100 sequences per cron run with 250ms stagger.
+
 - `/lib/` (18 files)
   Shared backend utilities:
   - `llm.ts`: Gemini SDK wrappers (`callGemini`, `callGeminiWithUsage`, `callGeminiWithGrounding`, `callGeminiWithGroundingAndUsage`, `callFlash`, `embed`). **Exact cost tracking** via `createLlmUsageEntry` / `summarizeLlmUsage` using Gemini `usageMetadata`. Model constants (`MODELS`), temperature presets (`TEMP`), thinking budgets (`THINKING`). All calls use `httpOptions: { timeout: 25000 }`.
@@ -248,7 +256,7 @@ All external API keys are stored in the `systemSettings` table with **XOR obfusc
 - `zeptomailFromEmail` — `getInternalZeptomailFromEmail` reads DB first, falls back to `ZEPTOMAIL_FROM_EMAIL` / `outreach@fretbox.in`
 - `zeptomailFromName` — `getInternalZeptomailFromName` reads DB first, falls back to `ZEPTOMAIL_FROM_NAME` / `"Ashish Gupta (Fretbox)"`. Used in ZeptoMail `from.name` and proposal email HTML footer.
 
-Each API key has: status query (`get*KeyStatus`), set mutation (`set*Key`), test action (`test*Key`), remove mutation (`remove*Key`), and internal setter (`set*KeyInternal`) for seeding. Keys are sanitized on read with `sanitizeApiKey()` to strip control characters. Display names (`zeptomailFromName`) use `.trim()` only.
+Each API key has: status query (`get*KeyStatus`), set mutation (`set*Key`), test action (`test*Key`), remove mutation (`remove*Key`), and internal setter (`set*KeyInternal`) for seeding. Keys are validated and sanitized before storage with `sanitizeApiKey()`. `sanitizeApiKey()` only accepts printable ASCII characters (code points 33–126); control characters, whitespace, and non-ASCII characters are rejected. Display names (`zeptomailFromName`) use `.trim()` only and do not use `sanitizeApiKey()`.
 
 **Stored-key testing** — `testGeminiKeyStored`, `testSerperKeyStored`, `testFirecrawlKeyStored`, `testZeptomailKeyStored` (actions) let users validate already-saved keys without re-entering them. These call `internal.settings.getInternal*Key` via `ctx.runQuery` with explicit type casts to avoid circular dependency type errors.
 
@@ -258,9 +266,10 @@ Each API key has: status query (`get*KeyStatus`), set mutation (`set*Key`), test
 
 `convex/http.ts` handles inbound webhooks securely:
 - **ZeptoMail delivery events:** HMAC-SHA256 signature verification, normalized message ID mapping to `emailsSent` status updates via internal mutations.
-- **Inbound email replies:** Shared-secret auth, multi-layer context resolution (thread Message-ID -> email lookup -> sender email -> stakeholder lookup), then schedules `replyClassifier`.
-- **Google Calendar push notifications:** Channel token verification for sync notifications.
+- **Inbound email replies:** Shared-secret auth (`REQUIRE_WEBHOOK_AUTH`), multi-layer context resolution (thread Message-ID -> email lookup -> sender email -> stakeholder lookup), then schedules `internal.actions.replyClassifier.classifyReplyInternal`.
+- **Google Calendar push notifications:** Channel token verification (`GOOGLE_CALENDAR_WEBHOOK_TOKEN`) for sync notifications.
 - **Auth routes:** Convex Auth HTTP routes (sign-in, sign-out, session).
+- **Test endpoints:** HTTP test endpoints are disabled by default. Set `DISABLE_TEST_ENDPOINTS=false` and provide `TEST_WEBHOOK_SECRET` as a bearer token for any test route access.
 
 ### 7. Auth & Middleware
 
@@ -283,6 +292,8 @@ Flat design with glassmorphism accents. Fonts: Poppins (headings) + Open Sans (b
 - **Contact Inference Mod:** Changes to `convex/lib/contactInference.ts` affect `inferContacts.ts` and `scraper.ts`.
 - **Frontend Mod:** When changing UI in `/app/(dashboard)/`, ensure Tailwind classes follow the glassmorphism system in `globals.css` and `tailwind.config.ts`. Check `design-system/onboardingai/MASTER.md` for constraints.
 - **Package Mod:** When updating external SDKs, verify both Next.js frontend and Convex backend compatibility.
+- **Action Visibility Mod:** When adding an action, decide if it is `action` (public + needs `validateAuth`) or `internalAction` (scheduler/webhook-only). Internal callers use `internal.actions.*`; public callers use `api.actions.*`.
+- **Circular Type Mod:** If `npx tsc --noEmit` reports `implicitly has type 'any'` on actions, extract shared logic into a `do*` helper with an explicit return type, and have both the `internalAction` and `action` wrappers call it.
 
 ## 🛡 System Hardening Guidelines
 
@@ -291,24 +302,28 @@ Flat design with glassmorphism accents. Fonts: Poppins (headings) + Open Sans (b
 3. **Internal Mutations:** Webhook handlers in `convex/http.ts` must use internal mutations (not direct DB writes) to keep logic centralized and auditable.
 4. **ZeptoMail ID Persistence:** Always store normalized `zeptomail_message_id` in `emailsSent` for delivery event correlation.
 5. **Sentry Logging:** Ensure AI failures have structured payload logs.
-6. **Environment Variables:** Only `CONVEX_*`, `NEXT_PUBLIC_*`, and `SETTINGS_OBFUSCATION_SECRET` should live in `.env`. All API service keys belong in the DB via Settings page.
+6. **Environment Variables:** Only `CONVEX_*`, `NEXT_PUBLIC_*`, `SETTINGS_OBFUSCATION_SECRET`, `GOOGLE_CALENDAR_WEBHOOK_TOKEN`, `REQUIRE_WEBHOOK_AUTH`, `DISABLE_TEST_ENDPOINTS`, and `TEST_WEBHOOK_SECRET` should live in `.env` or Convex env. All API service keys belong in the DB via Settings page. Set `DISABLE_TEST_ENDPOINTS=false` and `TEST_WEBHOOK_SECRET` to enable HTTP test endpoints.
 7. **Rate Limiting:** Use `rateLimits` table + `withConcurrencyLimit` for external API call throttling.
 8. **Serper Budget:** Use `createSerperBudget` / `runWithSerperBudget` from `convex/lib/serperBudget.ts` to enforce per-university query caps and detect quota exhaustion.
 9. **Timeout Safety:** All Gemini SDK calls use `httpOptions: { timeout: 25000 }`. All `fetch()` calls use `AbortSignal.timeout(...)`. Do **not** wrap `ctx.runAction(...)` in `raceWithTimeout`.
-10. **API Key Validation:** Sanitize keys with `sanitizeApiKey()` before use to strip control characters that break HTTP headers. **Do NOT** use `sanitizeApiKey()` on human-readable display names (e.g., `zeptomailFromName`) — use `.trim()` instead.
+10. **API Key Validation:** `set*Key` mutations validate keys with `sanitizeApiKey()` before storage. `sanitizeApiKey()` only accepts printable ASCII characters (33–126); everything else (control characters, whitespace, non-ASCII) is rejected. **Do NOT** use `sanitizeApiKey()` on human-readable display names (e.g., `zeptomailFromName`) — use `.trim()` instead.
 11. **LLM Output Sanitization:** Always pipe LLM-generated text through `sanitizeLlmOutput()` before persistence or email injection. It strips leftover injection artifacts and placeholder markers (`[Name]`, `[University]`, `[Role]`).
 12. **Cache Policy:** Deterministic calls (same prompt, same model, same temperature) benefit from `llmCache`. Any call with university-specific, stakeholder-specific, or reply-specific data **must** pass `skipCache: true` to prevent cross-entity cache pollution.
 13. **Budget Soft Cap:** The `llmBudget` guard is a best-effort daily limit, not an atomic hard cap. Concurrent actions may slightly overspend under burst load. Set `LLM_DAILY_BUDGET_USD` conservatively.
 14. **No "use node" in Queries/Mutations:** Convex queries and mutations run in the V8 isolate runtime. Only **actions** can use `"use node"`. Files like `llmBudget.ts` that define `internalQuery` / `internalMutation` must remain V8-only. Importing a `"use node"` file (e.g., `llm.ts`) into a V8 file causes esbuild to bundle Node built-ins (`node:fs`, `node:http`, etc.) into the browser bundle, which crashes with "Could not resolve" errors.
 15. **Clean Convex Errors in UI:** Raw Convex mutation errors contain `[CONVEX M(...)] [Request ID: ...] Server Error Uncaught Error: ... Called by client` noise. Strip this metadata via a `cleanConvexError()` utility before displaying to users, so they see only the meaningful message (e.g., "Invalid Serper API Key format").
+16. **Public Action Authentication:** Every public `action` exposed to the frontend must call `await validateAuth(ctx)` at the start of the handler. Do not rely on client-side checks.
+17. **Internal Call Discipline:** Internal actions use `internalAction` and are called via `internal.actions.*` or `internal.<module>.*`. Never call `api.actions.*` from internal code or webhooks.
+18. **Proposal Status Values:** The `proposals` table supports `status` values: `draft`, `ready`, `sent`, `meeting_confirmed`, and `cancelled`. Update `convex/schema.ts` and `convex/proposals.ts` union validators when adding statuses.
+19. **Accurate Analytics Counts:** `getFunnelStats` in `convex/universities.ts` uses full `collect()` queries instead of `take(limit)` so stage counts and totals are accurate.
 
 ## 🏃‍♂️ Useful Commands
 
 - **Dev Console:** `npm run dev` starts both Convex and Next.js concurrently.
 - **Dev Split:** `npm run dev:next` or `npm run dev:convex` for individual services.
 - **Test (E2E):** `npm run test` — Playwright tests.
-- **Test (Unit):** `npm run test:unit` — tsx unit tests (239 tests, hermetic — no API keys required).
+- **Test (Unit):** `npm run test:unit` — tsx unit tests (398 tests, 79 suites, hermetic — no API keys required).
 - **Lint:** `npm run lint` — ESLint.
 - **Build:** `npm run build` — Next.js production build.
 - **Convex Dashboard:** `npx convex dev` opens the Convex dashboard for manual review of events, logs, and cron jobs.
-- **Type Check:** `npx tsc --noEmit --project convex/tsconfig.json` — Convex backend type checking.
+- **Type Check:** `npx tsc --noEmit` — full project TypeScript check. For backend-only: `npx tsc --noEmit --project convex/tsconfig.json`.

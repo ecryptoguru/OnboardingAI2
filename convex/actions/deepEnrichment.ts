@@ -1,6 +1,6 @@
 "use node";
 
-import { action } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import {
@@ -403,7 +403,7 @@ function buildBranchScopedPriorityUrls(
   }
 }
 
-export const runDeepEnrichment = action({
+export const runDeepEnrichment = internalAction({
   args: {
     universityId: v.id("universities"),
   },
@@ -1526,7 +1526,7 @@ ${safeContext}
  * Debug action: traces the deep enrichment pipeline WITHOUT writing to DB.
  * Returns a detailed report of what each phase discovered.
  */
-export const debugDeepEnrichment = action({
+export const debugDeepEnrichment = internalAction({
   args: { universityId: v.id("universities") },
   handler: async (ctx, args): Promise<Record<string, unknown>> => {
     const report: Record<string, unknown> = { phases: {} };

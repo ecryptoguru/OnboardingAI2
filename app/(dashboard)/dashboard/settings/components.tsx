@@ -58,6 +58,7 @@ export function PasswordInput({
 interface TestResult {
   success?: boolean;
   error?: string;
+  message?: string;
 }
 
 /** Strip Convex internal noise from thrown mutation errors. */
@@ -85,6 +86,7 @@ export function TestResultAlert({ result, successMessage }: TestResultAlertProps
   if (!result) return null;
 
   const displayError = result.error ? cleanConvexError(result.error) : undefined;
+  const displayMessage = result.success ? (result.message || successMessage) : undefined;
 
   return (
     <div
@@ -100,7 +102,7 @@ export function TestResultAlert({ result, successMessage }: TestResultAlertProps
         <XCircleIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
       )}
       <div className="text-sm font-medium leading-relaxed">
-        {result.success ? (result.error || successMessage) : displayError}
+        {result.success ? displayMessage : displayError}
       </div>
     </div>
   );

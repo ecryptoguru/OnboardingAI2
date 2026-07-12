@@ -1,6 +1,6 @@
 "use node";
 
-import { action } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { extractContactsFromMarkdown } from "../lib/scrapers";
@@ -24,7 +24,7 @@ const ANTI_RAGGING_PATHS = [
   "/welfare/anti-ragging",
 ];
 
-export const scrapeAntiRagging = action({
+export const scrapeAntiRagging = internalAction({
   args: { universityId: v.id("universities") },
   handler: async (ctx, args) => {
     try {

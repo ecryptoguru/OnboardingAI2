@@ -1,6 +1,6 @@
 import { mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { api } from "./_generated/api";
+import { internal } from "./_generated/api";
 import { validateAuth } from "./lib/auth_utils";
 
 export const dispatchWebsiteValidation = mutation({
@@ -19,14 +19,14 @@ export const dispatchWebsiteValidation = mutation({
     for (const uni of pending) {
       if (uni.website) {
         // Schedule validation
-        await ctx.scheduler.runAfter(delayMs, api.actions.discovery.validateWebsite, {
+        await ctx.scheduler.runAfter(delayMs, internal.actions.discovery.validateWebsite, {
           universityId: uni._id,
           website: uni.website,
           universityName: uni.university_name,
         });
       } else {
         // Schedule discovery
-        await ctx.scheduler.runAfter(delayMs, api.actions.discovery.discoverWebsite, {
+        await ctx.scheduler.runAfter(delayMs, internal.actions.discovery.discoverWebsite, {
           universityId: uni._id,
           universityName: uni.university_name,
         });

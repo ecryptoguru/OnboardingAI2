@@ -1,6 +1,6 @@
 "use node";
 
-import { action } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import { callFlash } from "../lib/llm";
@@ -11,7 +11,7 @@ import { validateRange, sanitizeLlmOutput } from "../lib/utils";
 
 // SYSTEM_PROMPT removed (using centralized prompts)
 
-export const scoreUniversity = action({
+export const scoreUniversity = internalAction({
   args: { universityId: v.id("universities") },
   handler: async (ctx, args) => {
     try {

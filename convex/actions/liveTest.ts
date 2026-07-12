@@ -1,9 +1,9 @@
 "use node";
 
-import { action } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import type { ActionCtx } from "../_generated/server";
 import { v } from "convex/values";
-import { api, internal } from "../_generated/api";
+import { internal } from "../_generated/api";
 import { Id, Doc } from "../_generated/dataModel";
 import type { LlmUsageSummary } from "../lib/llm";
 
@@ -440,7 +440,7 @@ async function runTargetedVitDataFetch(
   });
 }
 
-export const runLiveDeepEnrichmentTest = action({
+export const runLiveDeepEnrichmentTest = internalAction({
   args: {
     universities: v.array(
       v.object({
@@ -506,7 +506,7 @@ export const runLiveDeepEnrichmentTest = action({
       let enrichmentResult: EnrichmentResult | null = null;
       try {
         enrichmentResult = (await ctx.runAction(
-          api.actions.deepEnrichment.runDeepEnrichment,
+          internal.actions.deepEnrichment.runDeepEnrichment,
           { universityId: uniId },
         )) as EnrichmentResult;
       } catch (err) {
@@ -673,7 +673,7 @@ export const runLiveDeepEnrichmentTest = action({
   },
 });
 
-export const getTestResults = action({
+export const getTestResults = internalAction({
   args: {
     universityName: v.optional(v.string()),
   },
@@ -755,7 +755,7 @@ interface UniversitySnapshotResult {
   };
 }
 
-export const getUniversitySnapshot = action({
+export const getUniversitySnapshot = internalAction({
   args: { universityName: v.string() },
   handler: async (ctx, args): Promise<UniversitySnapshotResult> => {
     const uni: Doc<"universities"> | null = await ctx.runQuery(
@@ -849,7 +849,7 @@ export const getUniversitySnapshot = action({
   },
 });
 
-export const verifyUniversityDirect = action({
+export const verifyUniversityDirect = internalAction({
   args: {
     universityName: v.string(),
     state: v.optional(v.string()),
@@ -889,7 +889,7 @@ export const verifyUniversityDirect = action({
     let discoveryOk = false;
     if (!uni.website) {
       const discovered = await ctx.runAction(
-        api.actions.discovery.discoverWebsite,
+        internal.actions.discovery.discoverWebsite,
         {
           universityId: uni._id,
           universityName: args.universityName,
@@ -913,7 +913,7 @@ export const verifyUniversityDirect = action({
       | { status: "failed"; error: string };
     try {
       const orchestratorValue = await ctx.runAction(
-        api.actions.orchestrator.runEnrichmentChain,
+        internal.actions.orchestrator.runEnrichmentChainInternal,
         {
           universityId: uni._id,
         },
@@ -942,7 +942,7 @@ export const verifyUniversityDirect = action({
         university_id: uni._id,
       },
     );
-    const score = await ctx.runQuery(api.priorityScores.getByUniversity, {
+    const score = await ctx.runQuery(internal.priorityScores.getByUniversityInternal, {
       university_id: uni._id,
     });
 
@@ -1017,7 +1017,7 @@ export const verifyUniversityDirect = action({
   },
 });
 
-export const recoverUniversityContacts = action({
+export const recoverUniversityContacts = internalAction({
   args: { universityName: v.string() },
   handler: async (ctx, args): Promise<RecoveryReport> => {
     const uni = await ctx.runQuery(internal.universities.findByNameInternal, {
@@ -1063,7 +1063,7 @@ export const recoverUniversityContacts = action({
     let deepOk = false;
     let socialOk = false;
     try {
-      const scrape = await ctx.runAction(api.actions.scraper.scrapeUniversity, {
+      const scrape = await ctx.runAction(internal.actions.scraper.scrapeUniversity, {
         universityId: uni._id,
       });
       scraperOk = (scrape as { success?: boolean })?.success === true;
@@ -1072,7 +1072,7 @@ export const recoverUniversityContacts = action({
     }
     try {
       const gov = await ctx.runAction(
-        api.actions.enrichGovernmentData.enrichGovernmentData,
+        internal.actions.enrichGovernmentData.enrichGovernmentData,
         { universityId: uni._id },
       );
       govOk = (gov as { success?: boolean })?.success === true;
@@ -1081,7 +1081,7 @@ export const recoverUniversityContacts = action({
     }
     try {
       const deep = await ctx.runAction(
-        api.actions.deepEnrichment.runDeepEnrichment,
+        internal.actions.deepEnrichment.runDeepEnrichment,
         { universityId: uni._id },
       );
       deepOk = (deep as { success?: boolean })?.success === true;
@@ -1090,7 +1090,7 @@ export const recoverUniversityContacts = action({
     }
     try {
       const social = await ctx.runAction(
-        api.actions.enrichment.discoverSocialAndMedia,
+        internal.actions.enrichment.discoverSocialAndMedia,
         { universityId: uni._id },
       );
       socialOk = (social as { success?: boolean })?.success === true;
@@ -1200,7 +1200,7 @@ export const recoverUniversityContacts = action({
   },
 });
 
-export const repairUniversityStakeholders = action({
+export const repairUniversityStakeholders = internalAction({
   args: { universityName: v.string() },
   handler: async (ctx, args): Promise<StakeholderRepairReport> => {
     const uni = await ctx.runQuery(internal.universities.findByNameInternal, {
@@ -1252,7 +1252,7 @@ export const repairUniversityStakeholders = action({
   },
 });
 
-export const buildPriorityOutreachTable = action({
+export const buildPriorityOutreachTable = internalAction({
   args: {
     universityName: v.string(),
     applyCleanup: v.optional(v.boolean()),
@@ -1355,7 +1355,7 @@ export const buildPriorityOutreachTable = action({
   },
 });
 
-export const recoverFourUniversities = action({
+export const recoverFourUniversities = internalAction({
   args: {
     universityNames: v.optional(v.array(v.string())),
   },
@@ -1375,7 +1375,7 @@ export const recoverFourUniversities = action({
     for (const name of names) {
       try {
         const rec = (await ctx.runAction(
-          api.actions.liveTest.recoverUniversityContacts,
+          internal.actions.liveTest.recoverUniversityContacts,
           { universityName: name },
         )) as RecoveryReport;
 

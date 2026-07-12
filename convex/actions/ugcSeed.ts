@@ -1,9 +1,9 @@
 "use node";
 
-import { action } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { api } from "../_generated/api";
 
-export const seed50 = action({
+export const seed50 = internalAction({
   args: {},
   handler: async (ctx): Promise<{ addedCount: number }> => {
     const universities = [

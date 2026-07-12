@@ -2,14 +2,14 @@ import { mutation, query, action, internalQuery, QueryCtx, MutationCtx, ActionCt
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { GoogleGenAI } from "@google/genai";
+import { Auth } from "convex/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { MODELS } from "./lib/models";
 
 // ─── Auth helper ───────────────────────────────────────────────────────────
 // Centralises the dev-bypass check used across every settings endpoint.
 async function ensureAuth(ctx: QueryCtx | MutationCtx | ActionCtx) {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const userId = await getAuthUserId(ctx as any);
+  const userId = await getAuthUserId(ctx as { auth: Auth });
   if (!userId) throw new Error("Unauthenticated");
 }
 
@@ -20,27 +20,49 @@ const _OBF_SECRET = process.env.SETTINGS_OBFUSCATION_SECRET as
   | string
   | undefined;
 
-function obfuscate(plain: string): string {
+const MIN_OBF_SECRET_LENGTH = 32;
+
+function getObfSecret(): string {
   if (!_OBF_SECRET) throw new Error("SETTINGS_OBFUSCATION_SECRET is required");
-  let out = "";
-  for (let i = 0; i < plain.length; i++) {
-    out += String.fromCharCode(
-      plain.charCodeAt(i) ^ _OBF_SECRET.charCodeAt(i % _OBF_SECRET.length),
+  if (_OBF_SECRET.length < MIN_OBF_SECRET_LENGTH) {
+    throw new Error(
+      `SETTINGS_OBFUSCATION_SECRET must be at least ${MIN_OBF_SECRET_LENGTH} characters long`,
     );
   }
-  return btoa(out);
+  return _OBF_SECRET;
+}
+
+/**
+ * Encode a UTF-8 string to a base64 string using a byte-level XOR with the
+ * secret. This correctly preserves multi-byte UTF-8 characters (e.g. em dashes
+ * or non-Latin scripts) that btoa/String.fromCharCode would otherwise corrupt.
+ */
+function obfuscate(plain: string): string {
+  const secret = getObfSecret();
+  const encoder = new TextEncoder();
+  const plainBytes = encoder.encode(plain);
+  const secretBytes = encoder.encode(secret);
+  const outBytes = new Uint8Array(plainBytes.length);
+  for (let i = 0; i < plainBytes.length; i++) {
+    outBytes[i] = plainBytes[i] ^ secretBytes[i % secretBytes.length];
+  }
+  // Convert bytes to a Latin-1 string so btoa can encode them unchanged.
+  let latin1 = "";
+  for (let i = 0; i < outBytes.length; i++) {
+    latin1 += String.fromCharCode(outBytes[i]);
+  }
+  return btoa(latin1);
 }
 
 function deobfuscate(cipher: string): string {
-  if (!_OBF_SECRET) throw new Error("SETTINGS_OBFUSCATION_SECRET is required");
+  const secret = getObfSecret();
   const raw = atob(cipher);
-  let out = "";
+  const secretBytes = new TextEncoder().encode(secret);
+  const outBytes = new Uint8Array(raw.length);
   for (let i = 0; i < raw.length; i++) {
-    out += String.fromCharCode(
-      raw.charCodeAt(i) ^ _OBF_SECRET.charCodeAt(i % _OBF_SECRET.length),
-    );
+    outBytes[i] = raw.charCodeAt(i) ^ secretBytes[i % secretBytes.length];
   }
-  return out;
+  return new TextDecoder().decode(outBytes);
 }
 
 /**
@@ -52,14 +74,11 @@ function sanitizeApiKey(value: string | null | undefined): string | null {
   if (!value) return null;
   const trimmed = value.trim();
   if (!trimmed) return null;
-  // Reject if any character is outside printable ASCII + high-byte range
-  // (undici throws "invalid X-API-KEY header" on control chars / newlines)
+  // Reject control chars and any non-ASCII characters. API keys should only
+  // contain printable ASCII (33–126) to avoid HTTP header issues.
   for (let i = 0; i < trimmed.length; i++) {
     const code = trimmed.charCodeAt(i);
-    // Allow tab (9), space (32)–tilde (126), and extended ASCII (128–255)
-    if (code === 9) continue;
-    if (code >= 32 && code <= 126) continue;
-    if (code >= 128 && code <= 255) continue;
+    if (code >= 33 && code <= 126) continue;
     return null;
   }
   return trimmed;
@@ -120,12 +139,17 @@ export const setGeminiKey = mutation({
       throw new Error("Invalid Google Gemini API Key format");
     }
 
+    const sanitizedKey = sanitizeApiKey(args.apiKey);
+    if (!sanitizedKey) {
+      throw new Error("Invalid API key characters");
+    }
+
     const doc = await ctx.db
       .query("systemSettings")
       .withIndex("by_key", (q) => q.eq("configKey", "geminiApiKey"))
       .first();
 
-    const cipher = obfuscate(args.apiKey);
+    const cipher = obfuscate(sanitizedKey);
     if (doc) {
       await ctx.db.patch(doc._id, { value: cipher });
     } else {
@@ -437,12 +461,17 @@ export const setSerperKey = mutation({
       throw new Error("Invalid Serper API Key format");
     }
 
+    const sanitizedKey = sanitizeApiKey(args.apiKey);
+    if (!sanitizedKey) {
+      throw new Error("Invalid API key characters");
+    }
+
     const doc = await ctx.db
       .query("systemSettings")
       .withIndex("by_key", (q) => q.eq("configKey", "serperApiKey"))
       .first();
 
-    const cipher = obfuscate(args.apiKey);
+    const cipher = obfuscate(sanitizedKey);
     if (doc) {
       await ctx.db.patch(doc._id, { value: cipher });
     } else {
@@ -515,12 +544,17 @@ export const setFirecrawlKey = mutation({
       throw new Error("Invalid Firecrawl API Key format");
     }
 
+    const sanitizedKey = sanitizeApiKey(args.apiKey);
+    if (!sanitizedKey) {
+      throw new Error("Invalid API key characters");
+    }
+
     const doc = await ctx.db
       .query("systemSettings")
       .withIndex("by_key", (q) => q.eq("configKey", "firecrawlApiKey"))
       .first();
 
-    const cipher = obfuscate(args.apiKey);
+    const cipher = obfuscate(sanitizedKey);
     if (doc) {
       await ctx.db.patch(doc._id, { value: cipher });
     } else {
@@ -593,12 +627,17 @@ export const setZeptomailKey = mutation({
       throw new Error("Invalid ZeptoMail API Key format");
     }
 
+    const sanitizedKey = sanitizeApiKey(args.apiKey);
+    if (!sanitizedKey) {
+      throw new Error("Invalid API key characters");
+    }
+
     const doc = await ctx.db
       .query("systemSettings")
       .withIndex("by_key", (q) => q.eq("configKey", "zeptomailApiKey"))
       .first();
 
-    const cipher = obfuscate(args.apiKey);
+    const cipher = obfuscate(sanitizedKey);
     if (doc) {
       await ctx.db.patch(doc._id, { value: cipher });
     } else {

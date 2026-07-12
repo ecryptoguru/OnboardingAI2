@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { KeyIcon, ArrowPathIcon, EyeIcon, EyeSlashIcon, TrashIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
@@ -15,7 +15,7 @@ export default function SettingsPage() {
   const removeGeminiKeyFn = useMutation(api.settings.removeGeminiKey);
   const testGeminiKeyStoredFn = useAction(api.settings.testGeminiKeyStored);
 
-  const [geminiTestResult, setGeminiTestResult] = useState<{ success?: boolean; error?: string } | null>(null);
+  const [geminiTestResult, setGeminiTestResult] = useState<{ success?: boolean; error?: string; message?: string } | null>(null);
   const [isSavingGemini, setIsSavingGemini] = useState(false);
   const [isTestingGemini, setIsTestingGemini] = useState(false);
   const [isTestingGeminiStored, setIsTestingGeminiStored] = useState(false);
@@ -29,7 +29,7 @@ export default function SettingsPage() {
   const removeSerperKeyFn = useMutation(api.settings.removeSerperKey);
   const testSerperKeyStoredFn = useAction(api.settings.testSerperKeyStored);
 
-  const [serperTestResult, setSerperTestResult] = useState<{ success?: boolean; error?: string } | null>(null);
+  const [serperTestResult, setSerperTestResult] = useState<{ success?: boolean; error?: string; message?: string } | null>(null);
   const [isSavingSerper, setIsSavingSerper] = useState(false);
   const [isTestingSerper, setIsTestingSerper] = useState(false);
   const [isTestingSerperStored, setIsTestingSerperStored] = useState(false);
@@ -43,7 +43,7 @@ export default function SettingsPage() {
   const removeFirecrawlKeyFn = useMutation(api.settings.removeFirecrawlKey);
   const testFirecrawlKeyStoredFn = useAction(api.settings.testFirecrawlKeyStored);
 
-  const [firecrawlTestResult, setFirecrawlTestResult] = useState<{ success?: boolean; error?: string } | null>(null);
+  const [firecrawlTestResult, setFirecrawlTestResult] = useState<{ success?: boolean; error?: string; message?: string } | null>(null);
   const [isSavingFirecrawl, setIsSavingFirecrawl] = useState(false);
   const [isTestingFirecrawl, setIsTestingFirecrawl] = useState(false);
   const [isTestingFirecrawlStored, setIsTestingFirecrawlStored] = useState(false);
@@ -57,7 +57,7 @@ export default function SettingsPage() {
   const removeZeptomailKeyFn = useMutation(api.settings.removeZeptomailKey);
   const testZeptomailKeyStoredFn = useAction(api.settings.testZeptomailKeyStored);
 
-  const [zeptomailTestResult, setZeptomailTestResult] = useState<{ success?: boolean; error?: string } | null>(null);
+  const [zeptomailTestResult, setZeptomailTestResult] = useState<{ success?: boolean; error?: string; message?: string } | null>(null);
   const [isSavingZeptomail, setIsSavingZeptomail] = useState(false);
   const [isTestingZeptomail, setIsTestingZeptomail] = useState(false);
   const [isTestingZeptomailStored, setIsTestingZeptomailStored] = useState(false);
@@ -74,6 +74,7 @@ export default function SettingsPage() {
   const [zeptomailFromEmailTestResult, setZeptomailFromEmailTestResult] = useState<{
     success?: boolean;
     error?: string;
+    message?: string;
   } | null>(null);
 
   const zeptomailFromNameStatus = useQuery(api.settings.getZeptomailFromNameStatus);
@@ -86,6 +87,7 @@ export default function SettingsPage() {
   const [zeptomailFromNameTestResult, setZeptomailFromNameTestResult] = useState<{
     success?: boolean;
     error?: string;
+    message?: string;
   } | null>(null);
 
   const [showGoogleCalendarJson, setShowGoogleCalendarJson] = useState(false);
@@ -121,26 +123,34 @@ export default function SettingsPage() {
   const [googleCalendarIdTestResult, setGoogleCalendarIdTestResult] = useState<{
     success?: boolean;
     error?: string;
+    message?: string;
   } | null>(null);
 
-  // Sync text input states with query results so users can see current values
+  // Sync text input states with query results only once on first load so user
+  // edits are not overwritten when queries refetch.
+  const hasInitZeptomailFromEmail = useRef(false);
   useEffect(() => {
-    if (zeptomailFromEmailStatus?.fromEmail && !zeptomailFromEmail) {
+    if (!hasInitZeptomailFromEmail.current && zeptomailFromEmailStatus?.fromEmail) {
+      hasInitZeptomailFromEmail.current = true;
       setZeptomailFromEmail(zeptomailFromEmailStatus.fromEmail);
     }
-  }, [zeptomailFromEmailStatus?.fromEmail, zeptomailFromEmail]);
+  }, [zeptomailFromEmailStatus?.fromEmail]);
 
+  const hasInitZeptomailFromName = useRef(false);
   useEffect(() => {
-    if (zeptomailFromNameStatus?.fromName && !zeptomailFromName) {
+    if (!hasInitZeptomailFromName.current && zeptomailFromNameStatus?.fromName) {
+      hasInitZeptomailFromName.current = true;
       setZeptomailFromName(zeptomailFromNameStatus.fromName);
     }
-  }, [zeptomailFromNameStatus?.fromName, zeptomailFromName]);
+  }, [zeptomailFromNameStatus?.fromName]);
 
+  const hasInitGoogleCalendarId = useRef(false);
   useEffect(() => {
-    if (googleCalendarIdStatus?.calendarId && !googleCalendarId) {
+    if (!hasInitGoogleCalendarId.current && googleCalendarIdStatus?.calendarId) {
+      hasInitGoogleCalendarId.current = true;
       setGoogleCalendarId(googleCalendarIdStatus.calendarId);
     }
-  }, [googleCalendarIdStatus?.calendarId, googleCalendarId]);
+  }, [googleCalendarIdStatus?.calendarId]);
 
   // --- Handlers for standard API key sections (Gemini, Serper, Firecrawl, ZeptoMail) ---
 
@@ -189,7 +199,7 @@ export default function SettingsPage() {
     setGeminiTestResult(null);
     try {
       await removeGeminiKeyFn();
-      setGeminiTestResult({ success: true, error: "API Key removed successfully." });
+      setGeminiTestResult({ success: true, message: "API Key removed successfully." });
     } catch (err: unknown) {
       setGeminiTestResult({ success: false, error: (err as Error).message || "Failed to remove key." });
     } finally {
@@ -242,7 +252,7 @@ export default function SettingsPage() {
     setSerperTestResult(null);
     try {
       await removeSerperKeyFn();
-      setSerperTestResult({ success: true, error: "API Key removed successfully." });
+      setSerperTestResult({ success: true, message: "API Key removed successfully." });
     } catch (err: unknown) {
       setSerperTestResult({ success: false, error: (err as Error).message || "Failed to remove key." });
     } finally {
@@ -295,7 +305,7 @@ export default function SettingsPage() {
     setFirecrawlTestResult(null);
     try {
       await removeFirecrawlKeyFn();
-      setFirecrawlTestResult({ success: true, error: "API Key removed successfully." });
+      setFirecrawlTestResult({ success: true, message: "API Key removed successfully." });
     } catch (err: unknown) {
       setFirecrawlTestResult({ success: false, error: (err as Error).message || "Failed to remove key." });
     } finally {
@@ -348,7 +358,7 @@ export default function SettingsPage() {
     setZeptomailTestResult(null);
     try {
       await removeZeptomailKeyFn();
-      setZeptomailTestResult({ success: true, error: "API Key removed successfully." });
+      setZeptomailTestResult({ success: true, message: "API Key removed successfully." });
     } catch (err: unknown) {
       setZeptomailTestResult({ success: false, error: (err as Error).message || "Failed to remove key." });
     } finally {

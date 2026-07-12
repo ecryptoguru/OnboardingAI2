@@ -1,11 +1,13 @@
 "use node";
 
-import { action } from "../_generated/server";
-import { internal, api } from "../_generated/api";
+import { action, internalAction } from "../_generated/server";
+import type { ActionCtx } from "../_generated/server";
+import { internal } from "../_generated/api";
 import { v } from "convex/values";
+import { validateAuth } from "../lib/auth_utils";
 import type { Id } from "../_generated/dataModel";
 import { callGemini, TEMP, MODELS } from "../lib/llm";
-import { validateJsonOutput, sanitizeLlmInput, sanitizeLlmOutput } from "../lib/utils";
+import { validateJsonOutput, sanitizeLlmInput, sanitizeLlmOutput, isValidEmail } from "../lib/utils";
 import { recommendModules, suggestPricingTier } from "../lib/moduleRecommender";
 import { PROPOSAL_SYSTEM_PROMPT, PROPOSAL_SCHEMA } from "../lib/prompts";
 import { createMeetingEvent, updateEvent } from "../lib/googleCalendar";
@@ -25,13 +27,14 @@ interface ProposalContent extends Record<string, unknown> {
  * Generates a full AI proposal for a university.
  * No PDF — content is emailed directly as rich HTML.
  */
-export const generateProposal = action({
+async function doGenerateProposal(
+  ctx: ActionCtx,
   args: {
-    universityId: v.id("universities"),
-    proposalId: v.id("proposals"),
-    stakeholderId: v.optional(v.id("stakeholders")),
+    universityId: Id<"universities">;
+    proposalId: Id<"proposals">;
+    stakeholderId?: Id<"stakeholders">;
   },
-  handler: async (ctx, args) => {
+): Promise<{ success: boolean; proposalId?: Id<"proposals">; error?: string }> {
     const uni = await ctx.runQuery(internal.universities.getInternal, {
       universityId: args.universityId,
     });
@@ -131,6 +134,28 @@ export const generateProposal = action({
       });
       return { success: false, error: String(e) };
     }
+}
+
+export const generateProposalInternal = internalAction({
+  args: {
+    universityId: v.id("universities"),
+    proposalId: v.id("proposals"),
+    stakeholderId: v.optional(v.id("stakeholders")),
+  },
+  handler: async (ctx, args) => {
+    return await doGenerateProposal(ctx, args);
+  },
+});
+
+export const generateProposal = action({
+  args: {
+    universityId: v.id("universities"),
+    proposalId: v.id("proposals"),
+    stakeholderId: v.optional(v.id("stakeholders")),
+  },
+  handler: async (ctx, args) => {
+    await validateAuth(ctx);
+    return await doGenerateProposal(ctx, args);
   },
 });
 
@@ -140,12 +165,44 @@ export const confirmMeeting = action({
     startTime: v.number(),
     durationMinutes: v.optional(v.number()),
   },
-  handler: async (ctx, args) => {
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ success: boolean; eventId?: string; meetLink?: string; meetingDate?: number; error?: string }> => {
+    await validateAuth(ctx);
     const proposal = await ctx.runQuery(internal.proposals.getInternal, {
       id: args.proposalId,
     });
     if (!proposal) {
       return { success: false, error: "Proposal not found" };
+    }
+
+    const startTimeMs = args.startTime;
+    if (!Number.isFinite(startTimeMs) || startTimeMs <= 0) {
+      return { success: false, error: "Invalid meeting time" };
+    }
+    if (startTimeMs < Date.now() - 5 * 60 * 1000) {
+      return { success: false, error: "Meeting time cannot be in the past" };
+    }
+
+    if (
+      proposal.status !== "ready" &&
+      proposal.status !== "sent" &&
+      proposal.status !== "meeting_confirmed"
+    ) {
+      return { success: false, error: "Proposal must be ready before confirming a meeting" };
+    }
+
+    if (proposal.calendar_event_status === "confirmed") {
+      if (proposal.meeting_date && Math.abs(proposal.meeting_date - startTimeMs) < 60000) {
+        return {
+          success: true,
+          eventId: proposal.calendar_event_id,
+          meetLink: proposal.meet_link,
+          meetingDate: proposal.meeting_date,
+        };
+      }
+      return { success: false, error: "Meeting already confirmed for a different time" };
     }
 
     const university = await ctx.runQuery(internal.universities.getInternal, {
@@ -160,14 +217,6 @@ export const confirmMeeting = action({
           id: proposal.stakeholder_id,
         })
       : null;
-
-    const startTimeMs = args.startTime;
-    if (!Number.isFinite(startTimeMs) || startTimeMs <= 0) {
-      return { success: false, error: "Invalid meeting time" };
-    }
-    if (startTimeMs < Date.now() - 5 * 60 * 1000) {
-      return { success: false, error: "Meeting time cannot be in the past" };
-    }
 
     const duration = Math.max(15, Math.min(args.durationMinutes ?? 30, 120));
     const start = new Date(startTimeMs);
@@ -222,6 +271,7 @@ export const confirmMeeting = action({
       calendar_event_id: meeting.eventId,
       meet_link: meeting.meetLink,
       calendar_event_status: "confirmed",
+      status: "meeting_confirmed",
     });
 
     return {
@@ -241,8 +291,12 @@ export const cancelMeeting = action({
   args: {
     proposalId: v.id("proposals"),
   },
-  handler: async (ctx, args) => {
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ success: boolean; error?: string }> => {
     try {
+      await validateAuth(ctx);
       const proposal = await ctx.runQuery(internal.proposals.getInternal, {
         id: args.proposalId,
       });
@@ -299,12 +353,26 @@ export const emailProposal = action({
     toEmails: v.array(v.string()),
     ccEmails: v.optional(v.array(v.string())),
   },
-  handler: async (ctx, args) => {
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ success: boolean; messageId?: string; error?: string }> => {
+    await validateAuth(ctx);
     const proposal = await ctx.runQuery(internal.proposals.getInternal, {
       id: args.proposalId,
     });
     if (!proposal || !proposal.proposal_json)
       throw new Error("Proposal content not found");
+
+    const invalidTo = args.toEmails.filter((e: string) => !isValidEmail(e));
+    const invalidCc = (args.ccEmails ?? []).filter(
+      (e: string) => !isValidEmail(e),
+    );
+    if (invalidTo.length > 0 || invalidCc.length > 0) {
+      throw new Error(
+        `Invalid recipient email(s): ${[...invalidTo, ...invalidCc].join(", ")}`,
+      );
+    }
 
     const uni = await ctx.runQuery(internal.universities.getInternal, {
       universityId: proposal.university_id,
@@ -526,7 +594,7 @@ export const emailProposal = action({
       success: boolean;
       messageId?: string;
       error?: string;
-    } = await ctx.runAction(api.actions.email.sendEmail, {
+    } = await ctx.runAction(internal.actions.email.sendEmail, {
       to: args.toEmails,
       cc: args.ccEmails && args.ccEmails.length > 0 ? args.ccEmails : undefined,
       subject: `Fretbox Partnership Proposal — ${uni.university_name}`,

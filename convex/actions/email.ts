@@ -1,14 +1,116 @@
 "use node";
 
-import { action } from "../_generated/server";
-import { internal, api } from "../_generated/api";
+import { action, internalAction } from "../_generated/server";
+import type { ActionCtx } from "../_generated/server";
+import { internal } from "../_generated/api";
 import { v } from "convex/values";
+import { validateAuth } from "../lib/auth_utils";
+
+type SendEmailArgs = {
+  to: string | string[];
+  cc?: string[];
+  subject: string;
+  text: string;
+  html?: string;
+  messageIdHeader?: string;
+  inReplyTo?: string;
+  references?: string;
+  clientReference?: string;
+};
+
+type SendEmailResult = {
+  success: boolean;
+  messageId?: string;
+  error?: string;
+  retryAfter?: number;
+  details?: unknown;
+};
 
 /**
  * Sends an email via the ZeptoMail (Zoho) REST API.
  * Uses fetch() directly to avoid heavy dependencies in Convex actions.
  */
-export const sendEmail = action({
+async function doSendEmail(ctx: ActionCtx, args: SendEmailArgs): Promise<SendEmailResult> {
+  // ─── Rate limit guard (per destination, 3 per minute) ─────────────────
+  const toList = Array.isArray(args.to) ? args.to : [args.to];
+  const rateLimitKey = `send_email:${toList[0]}`;
+  const rateLimit: { allowed: boolean; retryAfter?: number } =
+    await ctx.runMutation(internal.rateLimits.checkRateLimitInternal, {
+      key: rateLimitKey,
+      windowMs: 60_000,
+      maxRequests: 3,
+    });
+  if (!rateLimit.allowed) {
+    console.warn(`[Email Action] Rate limited for ${toList[0]}`);
+    return {
+      success: false,
+      error: "RATE_LIMITED",
+      retryAfter: rateLimit.retryAfter,
+    };
+  }
+
+  // Fetch ZeptoMail key, from-email, and sender name from settings DB (Settings page only)
+  const [dbKey, dbFromEmail, dbFromName] = await Promise.all([
+    ctx.runQuery(internal.settings.getInternalZeptomailKey),
+    ctx.runQuery(internal.settings.getInternalZeptomailFromEmail),
+    ctx.runQuery(internal.settings.getInternalZeptomailFromName),
+  ]);
+  const apiKey = dbKey;
+  const fromEmail = dbFromEmail || "outreach@fretbox.in";
+  const fromName = dbFromName || "Ashish Gupta (Fretbox)";
+
+  if (!apiKey) {
+    console.error("[Email Action] ZEPTOMAIL_API_KEY is not configured");
+    return { success: false, error: "ZEPTOMAIL_API_KEY_MISSING" };
+  }
+
+  const mimeHeaders: Record<string, string> = {};
+  if (args.messageIdHeader) mimeHeaders["Message-ID"] = args.messageIdHeader;
+  if (args.inReplyTo) mimeHeaders["In-Reply-To"] = args.inReplyTo;
+  if (args.references) mimeHeaders["References"] = args.references;
+
+  const response = await fetch("https://api.zeptomail.com/v1.1/email", {
+    method: "POST",
+    headers: {
+      Authorization: `Zoho-enczapikey ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    signal: AbortSignal.timeout(15000),
+    body: JSON.stringify({
+      from: { address: fromEmail, name: fromName },
+      to: (Array.isArray(args.to) ? args.to : [args.to]).map((e) => ({
+        email_address: { address: e },
+      })),
+      ...(args.cc && args.cc.length > 0
+        ? { cc: args.cc.map((e) => ({ email_address: { address: e } })) }
+        : {}),
+      subject: args.subject,
+      textbody: args.text,
+      ...(args.html ? { htmlbody: args.html } : {}),
+      ...(Object.keys(mimeHeaders).length > 0 ? { mime_headers: mimeHeaders } : {}),
+      ...(args.clientReference ? { client_reference: args.clientReference } : {}),
+    }),
+  });
+
+  if (!response.ok) {
+    const errorData = await response
+      .json()
+      .catch(() => ({ message: "Unknown error" }));
+    console.error("[Email Action] ZeptoMail error:", errorData);
+    return {
+      success: false,
+      error: "ZEPTOMAIL_API_ERROR",
+      details: errorData,
+    };
+  }
+
+  // ZeptoMail returns 200 OK with JSON { data: [...], message: "OK", request_id: "...", object: "email" }
+  const responseData = await response.json().catch(() => ({}));
+  const messageId = (responseData as { request_id?: string })?.request_id ?? undefined;
+  return { success: true, messageId };
+}
+
+export const sendEmail = internalAction({
   args: {
     to: v.union(v.string(), v.array(v.string())),
     cc: v.optional(v.array(v.string())),
@@ -20,93 +122,8 @@ export const sendEmail = action({
     references: v.optional(v.string()),
     clientReference: v.optional(v.string()),
   },
-  handler: async (
-    ctx,
-    args,
-  ): Promise<{
-    success: boolean;
-    messageId?: string;
-    error?: string;
-    retryAfter?: number;
-    details?: unknown;
-  }> => {
-    // ─── Rate limit guard (per destination, 3 per minute) ─────────────────
-    const toList = Array.isArray(args.to) ? args.to : [args.to];
-    const rateLimitKey = `send_email:${toList[0]}`;
-    const rateLimit: { allowed: boolean; retryAfter?: number } =
-      await ctx.runMutation(internal.rateLimits.checkRateLimitInternal, {
-        key: rateLimitKey,
-        windowMs: 60_000,
-        maxRequests: 3,
-      });
-    if (!rateLimit.allowed) {
-      console.warn(`[Email Action] Rate limited for ${toList[0]}`);
-      return {
-        success: false,
-        error: "RATE_LIMITED",
-        retryAfter: rateLimit.retryAfter,
-      };
-    }
-
-    // Fetch ZeptoMail key, from-email, and sender name from settings DB (Settings page only)
-    const [dbKey, dbFromEmail, dbFromName] = await Promise.all([
-      ctx.runQuery(internal.settings.getInternalZeptomailKey),
-      ctx.runQuery(internal.settings.getInternalZeptomailFromEmail),
-      ctx.runQuery(internal.settings.getInternalZeptomailFromName),
-    ]);
-    const apiKey = dbKey;
-    const fromEmail = dbFromEmail || "outreach@fretbox.in";
-    const fromName = dbFromName || "Ashish Gupta (Fretbox)";
-
-    if (!apiKey) {
-      console.error("[Email Action] ZEPTOMAIL_API_KEY is not configured");
-      return { success: false, error: "ZEPTOMAIL_API_KEY_MISSING" };
-    }
-
-    const mimeHeaders: Record<string, string> = {};
-    if (args.messageIdHeader) mimeHeaders["Message-ID"] = args.messageIdHeader;
-    if (args.inReplyTo) mimeHeaders["In-Reply-To"] = args.inReplyTo;
-    if (args.references) mimeHeaders["References"] = args.references;
-
-    const response = await fetch("https://api.zeptomail.com/v1.1/email", {
-      method: "POST",
-      headers: {
-        Authorization: `Zoho-enczapikey ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      signal: AbortSignal.timeout(15000),
-      body: JSON.stringify({
-        from: { address: fromEmail, name: fromName },
-        to: (Array.isArray(args.to) ? args.to : [args.to]).map((e) => ({
-          email_address: { address: e },
-        })),
-        ...(args.cc && args.cc.length > 0
-          ? { cc: args.cc.map((e) => ({ email_address: { address: e } })) }
-          : {}),
-        subject: args.subject,
-        textbody: args.text,
-        ...(args.html ? { htmlbody: args.html } : {}),
-        ...(Object.keys(mimeHeaders).length > 0 ? { mime_headers: mimeHeaders } : {}),
-        ...(args.clientReference ? { client_reference: args.clientReference } : {}),
-      }),
-    });
-
-    if (!response.ok) {
-      const errorData = await response
-        .json()
-        .catch(() => ({ message: "Unknown error" }));
-      console.error("[Email Action] ZeptoMail error:", errorData);
-      return {
-        success: false,
-        error: "ZEPTOMAIL_API_ERROR",
-        details: errorData,
-      };
-    }
-
-    // ZeptoMail returns 200 OK with JSON { data: [...], message: "OK", request_id: "...", object: "email" }
-    const responseData = await response.json().catch(() => ({}));
-    const messageId = (responseData as { request_id?: string })?.request_id ?? undefined;
-    return { success: true, messageId };
+  handler: async (ctx, args) => {
+    return await doSendEmail(ctx, args);
   },
 });
 
@@ -117,6 +134,7 @@ export const sendEmail = action({
 export const approveAndSend = action({
   args: { emailId: v.id("emailsSent") },
   handler: async (ctx, args) => {
+    await validateAuth(ctx);
     // 1. Fetch the drafted email
     const email = await ctx.runQuery(internal.emails.getInternal, {
       id: args.emailId,
@@ -133,7 +151,7 @@ export const approveAndSend = action({
 
     // 2. Send via ZeptoMail
     const customMessageId = `<fretbox-${email._id}@reply.fretbox.in>`;
-    const sendResult = await ctx.runAction(api.actions.email.sendEmail, {
+    const sendResult = await doSendEmail(ctx, {
       to: st.email,
       subject: email.subject,
       text: email.body,

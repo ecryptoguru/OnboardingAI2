@@ -1,6 +1,6 @@
 "use node";
 
-import { action } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { isValidEmail } from "../lib/utils";
@@ -19,7 +19,7 @@ import * as Sentry from "@sentry/node";
  * common patterns based on the person's role and the university domain.
  */
 
-export const inferContacts = action({
+export const inferContacts = internalAction({
   args: { universityId: v.id("universities") },
   handler: async (ctx, args) => {
     try {

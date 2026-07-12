@@ -3,6 +3,7 @@
 import { action } from "../_generated/server";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
+import { validateAuth } from "../lib/auth_utils";
 import type { Doc, Id } from "../_generated/dataModel";
 
 /**
@@ -97,6 +98,7 @@ export const syncUgcData = action({
     ctx,
     args,
   ): Promise<{ addedCount: number; updatedCount: number }> => {
+    await validateAuth(ctx);
     console.log(`Starting UGC sync with ${args.universities.length} universities...`);
 
     // Fetch all existing universities for in-memory fuzzy matching

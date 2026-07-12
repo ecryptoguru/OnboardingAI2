@@ -8,27 +8,42 @@ import assert from "node:assert";
  * to verify the round-trip property: deobfuscate(obfuscate(x)) === x.
  * The actual functions are not exported from settings.ts, so we test
  * the algorithm here to catch any future changes that break the invariant.
+ *
+ * The implementation uses byte-level XOR with a UTF-8 secret and encodes
+ * the result as base64. This preserves multi-byte characters correctly.
  */
+const MIN_OBF_SECRET_LENGTH = 32;
+
 function makeObfuscate(secret: string) {
+  if (secret.length < MIN_OBF_SECRET_LENGTH) {
+    throw new Error(
+      `Secret must be at least ${MIN_OBF_SECRET_LENGTH} characters long`,
+    );
+  }
+
   function obfuscate(plain: string): string {
-    let out = "";
-    for (let i = 0; i < plain.length; i++) {
-      out += String.fromCharCode(
-        plain.charCodeAt(i) ^ secret.charCodeAt(i % secret.length),
-      );
+    const encoder = new TextEncoder();
+    const plainBytes = encoder.encode(plain);
+    const secretBytes = encoder.encode(secret);
+    const outBytes = new Uint8Array(plainBytes.length);
+    for (let i = 0; i < plainBytes.length; i++) {
+      outBytes[i] = plainBytes[i] ^ secretBytes[i % secretBytes.length];
     }
-    return Buffer.from(out, "binary").toString("base64");
+    let latin1 = "";
+    for (let i = 0; i < outBytes.length; i++) {
+      latin1 += String.fromCharCode(outBytes[i]);
+    }
+    return Buffer.from(latin1, "binary").toString("base64");
   }
 
   function deobfuscate(cipher: string): string {
     const raw = Buffer.from(cipher, "base64").toString("binary");
-    let out = "";
+    const secretBytes = new TextEncoder().encode(secret);
+    const outBytes = new Uint8Array(raw.length);
     for (let i = 0; i < raw.length; i++) {
-      out += String.fromCharCode(
-        raw.charCodeAt(i) ^ secret.charCodeAt(i % secret.length),
-      );
+      outBytes[i] = raw.charCodeAt(i) ^ secretBytes[i % secretBytes.length];
     }
-    return out;
+    return new TextDecoder().decode(outBytes);
   }
 
   return { obfuscate, deobfuscate };
@@ -83,6 +98,12 @@ describe("settings obfuscation round-trip", () => {
     assert.strictEqual(deobfuscate(cipher), value);
   });
 
+  it("round-trips unicode characters", () => {
+    const value = "café — naïve 🎸";
+    const cipher = obfuscate(value);
+    assert.strictEqual(deobfuscate(cipher), value);
+  });
+
   it("produces different ciphertexts for different plaintexts", () => {
     const c1 = obfuscate("key-one-12345");
     const c2 = obfuscate("key-two-12345");
@@ -92,5 +113,12 @@ describe("settings obfuscation round-trip", () => {
   it("is deterministic (same input → same output)", () => {
     const key = "AIzaSyTestKey123456789";
     assert.strictEqual(obfuscate(key), obfuscate(key));
+  });
+
+  it("rejects a short secret", () => {
+    assert.throws(
+      () => makeObfuscate("short"),
+      /Secret must be at least 32 characters long/,
+    );
   });
 });

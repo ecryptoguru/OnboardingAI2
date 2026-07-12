@@ -119,6 +119,8 @@ The **Outreach** page is a Kanban-style pipeline that tracks where each universi
 ### Pipeline Stages
 | Stage | Meaning |
 |-------|---------|
+| **Enriched** | AI enrichment completed; ready for sequencing |
+| **Sequencing** | Sequence is being prepared for this university |
 | **Ready to Sequence** | Enriched and ready for outreach |
 | **Outreach Active** | Emails are being sent automatically |
 | **Replied** | A stakeholder has replied |
@@ -127,6 +129,15 @@ The **Outreach** page is a Kanban-style pipeline that tracks where each universi
 | **Closed** | Won or archived |
 | **Not Interested** | The contact opted out or declined |
 | **Skipped** | Manually excluded from outreach |
+
+### Proposal Statuses
+| Status | Meaning |
+|--------|---------|
+| **Draft** | Proposal generated but not yet finalized |
+| **Ready** | Proposal ready to send |
+| **Sent** | Proposal emailed to the stakeholder |
+| **Meeting Confirmed** | Meeting confirmed and a Google Calendar/Meet event created |
+| **Cancelled** | The scheduled meeting was cancelled |
 
 ### Starting a Sequence
 1. Find a university in **Ready to Sequence**.
@@ -212,6 +223,24 @@ Proposals are created automatically when the system detects **meeting intent** f
 - **Preview & Send** — Preview the generated document inline, edit content if needed, and send.
 - **Regenerate Content** — If generation fails, click to retry.
 
+### Sending a Proposal
+When a proposal is ready, you can send it directly as a rich HTML email:
+
+1. Open the proposal preview.
+2. Click **Send Proposal**.
+3. Add the primary recipient email(s) and optional CC addresses.
+4. The system validates each address and then sends the email via ZeptoMail.
+
+A proposal can be in one of these statuses:
+
+| Status | Meaning |
+|--------|---------|
+| **Draft** | Generated but not yet ready |
+| **Ready** | Ready to send or preview |
+| **Sent** | Emailed to the stakeholder |
+| **Meeting Confirmed** | Calendar event and Google Meet link created |
+| **Cancelled** | The meeting was cancelled |
+
 ### Confirming a Meeting
 When a proposal has **Meeting Pending** status (created from a `meeting_request` reply):
 1. Click **Confirm Meeting & Create Meet Link** on the proposal card.
@@ -221,6 +250,14 @@ When a proposal has **Meeting Pending** status (created from a `meeting_request`
 5. Once confirmed, click **Open Meet Link** to join the call.
 
 > **Tip:** If you need to reschedule, click **Reschedule Meeting** on any confirmed proposal to change the time.
+
+### Cancelling a Meeting
+If a confirmed meeting can no longer happen:
+1. Open the proposal with status **Meeting Confirmed**.
+2. Click **Cancel Meeting**.
+3. The system updates the Google Calendar event status to `cancelled` and marks the proposal as **Cancelled**.
+
+> **Note:** Cancelling does not delete the proposal; it only cancels the calendar event so you can reconfirm later if needed.
 
 ### Google Calendar Integration
 To enable automatic calendar event creation:
@@ -242,8 +279,10 @@ The **Analytics** page gives you a high-level view of your pipeline performance.
 A visual bar chart shows how many universities are at each stage:
 
 ```
-Total → Enriched → Outreach Active → Replied → Meeting Booked → Proposal Sent → Closed / Won
+Total → Enriched → Sequencing → Outreach Active → Replied → Meeting Booked → Proposal Sent → Closed / Not Interested / Skipped
 ```
+
+The funnel counts every university, including those in `Not Interested` and `Skipped`, so the totals match your database. You will also see the number of **High-Tier** and **Medium-Tier** leads at the top of the page.
 
 ### Email Performance
 Track delivery metrics for each sequence step (Steps 1–4):
@@ -289,6 +328,8 @@ Add, test, and remove keys for the following services. Each shows a **status ind
 | **ZeptoMail From Email** | Verified sender address for all outbound emails (default: `outreach@fretbox.in`) |
 
 > **Edge case:** If a key shows as valid but features still fail, check that the corresponding service account has active credits or permissions.
+>
+> **Validation:** Keys are sanitized before storage. Only printable ASCII characters are accepted; leading/trailing whitespace, control characters, and non-ASCII characters are rejected. If a key is rejected, re-enter it without extra spaces or special characters.
 
 ### Google Calendar Integration
 | Setting | Purpose |

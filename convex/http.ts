@@ -1,6 +1,6 @@
 import { httpRouter } from "convex/server";
 import { httpAction, ActionCtx } from "./_generated/server";
-import { api, internal } from "./_generated/api";
+import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { auth } from "./auth";
 
@@ -300,7 +300,7 @@ http.route({
     });
 
     // Schedule reply classification action (Phase 4)
-    await ctx.scheduler.runAfter(0, api.actions.replyClassifier.classifyReply, {
+    await ctx.scheduler.runAfter(0, internal.actions.replyClassifier.classifyReplyInternal, {
       replyId: replyId,
     });
 
@@ -371,21 +371,23 @@ http.route({
   path: "/test/run-pipeline",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
-    const testDisabled = process.env.DISABLE_TEST_ENDPOINTS === "true";
-    if (testDisabled) {
+    // Test endpoints are disabled by default. Set DISABLE_TEST_ENDPOINTS=false
+    // and provide TEST_WEBHOOK_SECRET to enable.
+    const testEnabled = process.env.DISABLE_TEST_ENDPOINTS === "false";
+    if (!testEnabled) {
       console.error("[Pipeline Test] Test endpoints are disabled. Forbidden.");
       return new Response("Forbidden", { status: 403 });
     }
 
     const secret = process.env.TEST_WEBHOOK_SECRET;
-    if (secret) {
-      const authHeader = req.headers.get("authorization") ?? "";
-      const provided = authHeader.replace(/^Bearer\s+/i, "").trim();
-      if (!timingSafeEqual(provided, secret)) {
-        return new Response("Unauthorized", { status: 401 });
-      }
-    } else {
-      console.warn("[Pipeline Test] ⚠️ TEST_WEBHOOK_SECRET not configured. Allowing unauthenticated dev request.");
+    if (!secret) {
+      console.error("[Pipeline Test] TEST_WEBHOOK_SECRET not configured.");
+      return new Response("Unauthorized", { status: 401 });
+    }
+    const authHeader = req.headers.get("authorization") ?? "";
+    const provided = authHeader.replace(/^Bearer\s+/i, "").trim();
+    if (!timingSafeEqual(provided, secret)) {
+      return new Response("Unauthorized", { status: 401 });
     }
 
     let body: Record<string, unknown> = {};
@@ -395,7 +397,7 @@ http.route({
       return new Response("Invalid JSON", { status: 400 });
     }
 
-    const result = await ctx.runAction(api.actions.realWorldVerify.runFullPipeline, {
+    const result = await ctx.runAction(internal.actions.realWorldVerify.runFullPipeline, {
       universityName: String(body.universityName || "Test University"),
       state: body.state ? String(body.state) : undefined,
       city: body.city ? String(body.city) : undefined,

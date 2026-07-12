@@ -30,10 +30,15 @@ export function Sidebar() {
   const { signOut } = useAuthActions();
 
   const handleSignOut = async () => {
-    await signOut();
-    // Use a hard redirect to avoid Next.js router race conditions with the
-    // middleware redirect that fires when the auth state flips to unauthenticated.
-    window.location.href = "/sign-in";
+    try {
+      await signOut();
+      // Use a hard redirect to avoid Next.js router race conditions with the
+      // middleware redirect that fires when the auth state flips to unauthenticated.
+      window.location.href = "/sign-in";
+    } catch (err) {
+      console.error("Sign out failed:", err);
+      alert("Could not sign out. Please try again.");
+    }
   };
   const pendingCount = useQuery(api.emails.pendingCount) ?? 0;
   const unclassifiedReplies = useQuery(api.replies.unclassifiedCount) ?? 0;

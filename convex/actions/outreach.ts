@@ -1,7 +1,7 @@
 "use node";
 
-import { action } from "../_generated/server";
-import { internal, api } from "../_generated/api";
+import { internalAction } from "../_generated/server";
+import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import { TEMPLATES } from "../lib/emailTemplates";
 import * as Sentry from "@sentry/node";
@@ -10,7 +10,7 @@ import * as Sentry from "@sentry/node";
  * Orchestrates a single step in an outreach sequence.
  * Personalizes, sends, and schedules the next step.
  */
-export const processSequenceStep = action({
+export const processSequenceStep = internalAction({
   args: {
     sequenceId: v.id("outreachSequences"),
   },
@@ -47,7 +47,7 @@ export const processSequenceStep = action({
         case 1: {
           // Use internal call for personalization
           const opener = await ctx.runAction(
-            api.actions.personalize.generateOpener,
+            internal.actions.personalize.generateOpener,
             {
               universityId: seq.university_id,
               stakeholderId: seq.stakeholder_id,
@@ -164,7 +164,7 @@ export const processSequenceStep = action({
  * Sweeps all active sequences due for an email and triggers them.
  * Called by crons.ts.
  */
-export const processDueSequences = action({
+export const processDueSequences = internalAction({
   args: {},
   handler: async (ctx): Promise<{ processed: number }> => {
     // 1. Get all due sequences
@@ -181,7 +181,7 @@ export const processDueSequences = action({
       const seq = batch[i];
       await ctx.scheduler.runAfter(
         i * staggerMs,
-        api.actions.outreach.processSequenceStep,
+        internal.actions.outreach.processSequenceStep,
         {
           sequenceId: seq._id,
         },

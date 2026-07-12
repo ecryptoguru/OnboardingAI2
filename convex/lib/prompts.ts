@@ -437,8 +437,12 @@ export const REPLY_CLASSIFIER_SCHEMA: Schema = {
         "other",
       ],
     },
+    confidence: {
+      type: Type.NUMBER,
+      description: "Confidence score between 0.0 and 1.0 for this classification. Be calibrated: higher when the email clearly matches the category, lower when ambiguous.",
+    },
   },
-  required: ["category"],
+  required: ["category", "confidence"],
 };
 
 export const REPLY_CLASSIFIER_SYSTEM_PROMPT = (rawReply: string) =>
@@ -447,7 +451,8 @@ You are an expert lead qualification assistant. Your task is to classify an inco
 The outreach was about Fretbox, a campus management platform.
 
 <rules>
-- Respond ONLY with the category name based on the schema provided.
+- Respond with a JSON object containing the category and a confidence score (0.0 to 1.0).
+- Be calibrated: high confidence only when the email clearly matches the category; low confidence when ambiguous.
 - Be conservative: if it looks like a meeting request, prioritize that.
 - If it looks like an opt-out or unsubscribe, prioritize "opt_out" above all else.
 </rules>

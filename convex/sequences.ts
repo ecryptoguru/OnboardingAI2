@@ -6,7 +6,7 @@ import {
 } from "./_generated/server";
 import { v, ConvexError } from "convex/values";
 import { validateAuth } from "./lib/auth_utils";
-import { api } from "./_generated/api";
+import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import type { GenericMutationCtx } from "convex/server";
 import type { DataModel } from "./_generated/dataModel";
@@ -236,7 +236,7 @@ async function doEnroll(
   });
 
   // 4. Schedule the first email immediately — this is what kicks off the outreach pipeline
-  await ctx.scheduler.runAfter(0, api.actions.outreach.processSequenceStep, {
+  await ctx.scheduler.runAfter(0, internal.actions.outreach.processSequenceStep, {
     sequenceId,
   });
 

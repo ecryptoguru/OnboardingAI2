@@ -1,6 +1,6 @@
 "use node";
 
-import { action } from "../_generated/server";
+import { internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import { callGemini, TEMP, MODELS } from "../lib/llm";
@@ -12,7 +12,7 @@ import * as Sentry from "@sentry/node";
  * Generates a personalized 2-sentence opener for an outreach email.
  * Uses signals and university news to create context.
  */
-export const generateOpener = action({
+export const generateOpener = internalAction({
   args: {
     universityId: v.id("universities"),
     stakeholderId: v.id("stakeholders"),
