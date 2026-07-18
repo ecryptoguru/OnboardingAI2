@@ -16,20 +16,25 @@ async function ensureAuth(ctx: QueryCtx | MutationCtx | ActionCtx) {
 // ─── Simple reversible obfuscation for stored API keys ─────────────────────
 // NOT encryption — just prevents casual plaintext exposure in DB dumps.
 // The secret MUST be set via SETTINGS_OBFUSCATION_SECRET env var.
-const _OBF_SECRET = process.env.SETTINGS_OBFUSCATION_SECRET as
-  | string
-  | undefined;
-
+//
+// IMPORTANT: Read process.env at CALL TIME, not at module load time.
+// In Convex V8 isolates (queries/mutations), process.env may not be
+// populated when the module is first evaluated, leading to undefined.
 const MIN_OBF_SECRET_LENGTH = 32;
 
 function getObfSecret(): string {
-  if (!_OBF_SECRET) throw new Error("SETTINGS_OBFUSCATION_SECRET is required");
-  if (_OBF_SECRET.length < MIN_OBF_SECRET_LENGTH) {
+  const secret = process.env.SETTINGS_OBFUSCATION_SECRET;
+  if (!secret) {
     throw new Error(
-      `SETTINGS_OBFUSCATION_SECRET must be at least ${MIN_OBF_SECRET_LENGTH} characters long`,
+      "SETTINGS_OBFUSCATION_SECRET is not set. Run: npx convex env set SETTINGS_OBFUSCATION_SECRET <value>",
     );
   }
-  return _OBF_SECRET;
+  if (secret.length < MIN_OBF_SECRET_LENGTH) {
+    throw new Error(
+      `SETTINGS_OBFUSCATION_SECRET must be at least ${MIN_OBF_SECRET_LENGTH} characters long (currently ${secret.length}).`,
+    );
+  }
+  return secret;
 }
 
 /**

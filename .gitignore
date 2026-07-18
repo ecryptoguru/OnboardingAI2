@@ -27,6 +27,7 @@ tmp_jwt_key.txt
 # Build
 build/
 dist/
+*.tsbuildinfo
 
 # OS
 .DS_Store

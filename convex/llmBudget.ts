@@ -9,9 +9,9 @@ function getTodayKey(): string {
 }
 
 function getMaxBudgetUsd(): number {
-  // NOTE: Queries/mutations run in V8 isolate and cannot access process.env.
-  // Environment variable configuration should be handled at the action level
-  // or stored in the database if dynamic configuration is needed.
+  // process.env is available in V8 isolates at call time, but the budget
+  // is passed from the action layer (checkDailyBudget in lib/llm.ts) which
+  // reads LLM_DAILY_BUDGET_USD and passes it via the maxBudgetUsd arg.
   return DEFAULT_DAILY_BUDGET_USD;
 }
 
