@@ -103,6 +103,15 @@ export default function SignInPage() {
 
           <input name="flow" type="hidden" value="signIn" />
 
+          <div className="text-right -mt-2">
+            <Link
+              href="/forgot-password"
+              className="text-sm text-indigo-400 hover:text-indigo-300 font-medium transition-colors"
+            >
+              Forgot password?
+            </Link>
+          </div>
+
           {error && (
             <p className="text-red-400 text-sm bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
               {error}

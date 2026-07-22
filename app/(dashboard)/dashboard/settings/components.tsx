@@ -62,19 +62,42 @@ interface TestResult {
 }
 
 /** Strip Convex internal noise from thrown mutation errors. */
-function cleanConvexError(raw: string | undefined): string {
+export function cleanConvexError(raw: string | undefined): string {
   if (!raw) return "An unexpected error occurred.";
+  // Remove stack-trace lines first so prefix stripping does not swallow the
+  // leading whitespace the stack-trace regex needs to match.
+  let cleaned = raw.replace(/\s+at handler \([^)]+\)\s*/gi, "");
   // Remove [CONVEX M(...)] [Request ID: ...] prefix
-  let cleaned = raw.replace(/\[CONVEX M\([^)]+\)\]\s*\[Request ID:\s*[a-f0-9]+\]\s*/gi, "");
-  // Remove "Server Error" prefix
-  cleaned = cleaned.replace(/^Server Error\s*/i, "");
+  cleaned = cleaned.replace(/\[CONVEX M\([^)]+\)\]\s*\[Request ID:\s*[a-f0-9]+\]\s*/gi, "");
   // Remove "Uncaught Error:" prefix
   cleaned = cleaned.replace(/^Uncaught Error:\s*/i, "");
-  // Remove stack-trace lines
-  cleaned = cleaned.replace(/\s+at handler \([^)]+\)\s*/gi, "");
+  // Remove "Server Error" prefix
+  cleaned = cleaned.replace(/^Server Error\s*/i, "");
   // Remove "Called by client" suffix
   cleaned = cleaned.replace(/\s*Called by client\s*$/i, "");
-  return cleaned.trim() || "An unexpected error occurred.";
+  cleaned = cleaned.trim();
+  // If stripping removed the entire message, fall back to the raw error so the
+  // user (and developers) see *something* actionable instead of a generic line.
+  return cleaned || raw.trim() || "An unexpected error occurred.";
+}
+
+/** Extract a string message from any thrown value, including Convex errors. */
+export function getErrorMessage(err: unknown): string {
+  if (err === null || err === undefined) return "An unexpected error occurred.";
+  if (typeof err === "string") return err;
+  if (err instanceof Error) return err.message;
+  // ConvexError / structured errors may expose the message in a `data` or
+  // `message` property. Try the most common shapes without exposing internals.
+  const record = err as Record<string, unknown>;
+  if (typeof record.message === "string" && record.message) return record.message;
+  if (typeof record.error === "string" && record.error) return record.error;
+  if (typeof record.errorMessage === "string" && record.errorMessage) return record.errorMessage;
+  if (typeof record.data === "string" && record.data) return record.data;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return "An unexpected error occurred.";
+  }
 }
 
 interface TestResultAlertProps {

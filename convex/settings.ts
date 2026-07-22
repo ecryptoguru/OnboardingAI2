@@ -1,17 +1,9 @@
-import { mutation, query, action, internalQuery, QueryCtx, MutationCtx, ActionCtx } from "./_generated/server";
+import { mutation, query, action, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { GoogleGenAI } from "@google/genai";
-import { Auth } from "convex/server";
-import { getAuthUserId } from "@convex-dev/auth/server";
+import { validateAuth } from "./lib/auth_utils";
 import { MODELS } from "./lib/models";
-
-// ─── Auth helper ───────────────────────────────────────────────────────────
-// Centralises the dev-bypass check used across every settings endpoint.
-async function ensureAuth(ctx: QueryCtx | MutationCtx | ActionCtx) {
-  const userId = await getAuthUserId(ctx as { auth: Auth });
-  if (!userId) throw new Error("Unauthenticated");
-}
 
 // ─── Simple reversible obfuscation for stored API keys ─────────────────────
 // NOT encryption — just prevents casual plaintext exposure in DB dumps.
@@ -21,6 +13,17 @@ async function ensureAuth(ctx: QueryCtx | MutationCtx | ActionCtx) {
 // In Convex V8 isolates (queries/mutations), process.env may not be
 // populated when the module is first evaluated, leading to undefined.
 const MIN_OBF_SECRET_LENGTH = 32;
+
+export const getObfuscationSecretStatus = query({
+  handler: async (ctx) => {
+    await validateAuth(ctx);
+    const secret = process.env.SETTINGS_OBFUSCATION_SECRET;
+    return {
+      isSet: !!secret && secret.length >= MIN_OBF_SECRET_LENGTH,
+      isTooShort: !!secret && secret.length < MIN_OBF_SECRET_LENGTH,
+    };
+  },
+});
 
 function getObfSecret(): string {
   const secret = process.env.SETTINGS_OBFUSCATION_SECRET;
@@ -103,7 +106,7 @@ function sanitizeStringValue(value: string | null | undefined): string | null {
 
 export const getGeminiKeyStatus = query({
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
@@ -137,7 +140,7 @@ export const getInternalGeminiKey = internalQuery({
 export const setGeminiKey = mutation({
   args: { apiKey: v.string() },
   handler: async (ctx, args) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     // Check if the key looks like a Gemini key
     if (!args.apiKey.startsWith("AIza")) {
@@ -170,7 +173,7 @@ export const setGeminiKey = mutation({
 export const testGeminiKey = action({
   args: { apiKey: v.string() },
   handler: async (ctx, args) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     try {
       const ai = new GoogleGenAI({ apiKey: args.apiKey, httpOptions: { timeout: 15000 } });
@@ -204,7 +207,7 @@ export const testGeminiKey = action({
 export const testGeminiKeyStored = action({
   args: {},
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
     const key = await ctx.runQuery(internal.settings.getInternalGeminiKey) as string | null;
     if (!key) {
       return { success: false, error: "No Gemini API key configured." };
@@ -229,7 +232,7 @@ export const testGeminiKeyStored = action({
 export const removeGeminiKey = mutation({
   args: {},
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
@@ -246,7 +249,7 @@ export const removeGeminiKey = mutation({
 export const testSerperKey = action({
   args: { apiKey: v.string() },
   handler: async (ctx, args) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     try {
       const res = await fetch("https://google.serper.dev/search", {
@@ -272,7 +275,7 @@ export const testSerperKey = action({
 export const testSerperKeyStored = action({
   args: {},
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
     const key = await ctx.runQuery(internal.settings.getInternalSerperKey) as string | null;
     if (!key) {
       return { success: false, error: "No Serper API key configured." };
@@ -301,7 +304,7 @@ export const testSerperKeyStored = action({
 export const testFirecrawlKey = action({
   args: { apiKey: v.string() },
   handler: async (ctx, args) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     try {
       const res = await fetch("https://api.firecrawl.dev/v2/scrape", {
@@ -328,7 +331,7 @@ export const testFirecrawlKey = action({
 export const testFirecrawlKeyStored = action({
   args: {},
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
     const key = await ctx.runQuery(internal.settings.getInternalFirecrawlKey) as string | null;
     if (!key) {
       return { success: false, error: "No Firecrawl API key configured." };
@@ -357,7 +360,7 @@ export const testFirecrawlKeyStored = action({
 export const testZeptomailKey = action({
   args: { apiKey: v.string() },
   handler: async (ctx, args) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     try {
       const res = await fetch("https://api.zeptomail.com/v1.1/email", {
@@ -390,7 +393,7 @@ export const testZeptomailKey = action({
 export const testZeptomailKeyStored = action({
   args: {},
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
     const key = await ctx.runQuery(internal.settings.getInternalZeptomailKey) as string | null;
     if (!key) {
       return { success: false, error: "No ZeptoMail API key configured." };
@@ -427,7 +430,7 @@ export const testZeptomailKeyStored = action({
 
 export const getSerperKeyStatus = query({
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
@@ -460,7 +463,7 @@ export const getInternalSerperKey = internalQuery({
 export const setSerperKey = mutation({
   args: { apiKey: v.string() },
   handler: async (ctx, args) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     if (args.apiKey.length < 32) {
       throw new Error("Invalid Serper API Key format");
@@ -492,7 +495,7 @@ export const setSerperKey = mutation({
 export const removeSerperKey = mutation({
   args: {},
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
@@ -510,7 +513,7 @@ export const removeSerperKey = mutation({
 
 export const getFirecrawlKeyStatus = query({
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
@@ -543,7 +546,7 @@ export const getInternalFirecrawlKey = internalQuery({
 export const setFirecrawlKey = mutation({
   args: { apiKey: v.string() },
   handler: async (ctx, args) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     if (args.apiKey.length < 20) {
       throw new Error("Invalid Firecrawl API Key format");
@@ -575,7 +578,7 @@ export const setFirecrawlKey = mutation({
 export const removeFirecrawlKey = mutation({
   args: {},
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
@@ -593,7 +596,7 @@ export const removeFirecrawlKey = mutation({
 
 export const getZeptomailKeyStatus = query({
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
@@ -626,7 +629,7 @@ export const getInternalZeptomailKey = internalQuery({
 export const setZeptomailKey = mutation({
   args: { apiKey: v.string() },
   handler: async (ctx, args) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     if (args.apiKey.length < 20) {
       throw new Error("Invalid ZeptoMail API Key format");
@@ -658,7 +661,7 @@ export const setZeptomailKey = mutation({
 export const removeZeptomailKey = mutation({
   args: {},
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
@@ -676,7 +679,7 @@ export const removeZeptomailKey = mutation({
 
 export const getGoogleCalendarStatus = query({
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
@@ -709,7 +712,7 @@ export const getInternalGoogleCalendarJson = internalQuery({
 export const setGoogleCalendarJson = mutation({
   args: { serviceAccountJson: v.string() },
   handler: async (ctx, args) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     // Basic validation: must be valid JSON with client_email and private_key
     let parsed: Record<string, unknown>;
@@ -743,7 +746,7 @@ export const setGoogleCalendarJson = mutation({
 export const removeGoogleCalendarJson = mutation({
   args: {},
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
@@ -761,7 +764,7 @@ export const removeGoogleCalendarJson = mutation({
 
 export const getGoogleCalendarIdStatus = query({
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
@@ -804,7 +807,7 @@ export const getInternalGoogleCalendarId = internalQuery({
 export const setGoogleCalendarId = mutation({
   args: { calendarId: v.string() },
   handler: async (ctx, args) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
@@ -827,7 +830,7 @@ export const setGoogleCalendarId = mutation({
 export const removeGoogleCalendarId = mutation({
   args: {},
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
@@ -846,7 +849,7 @@ export const removeGoogleCalendarId = mutation({
 export const testGoogleCalendar = action({
   args: {},
   handler: async (ctx): Promise<{ success: boolean; error?: string; message?: string }> => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     const serviceAccountJson = await ctx.runQuery(
       internal.settings.getInternalGoogleCalendarJson,
@@ -895,7 +898,7 @@ export const testGoogleCalendar = action({
 
 export const getZeptomailFromEmailStatus = query({
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
@@ -938,7 +941,7 @@ export const getInternalZeptomailFromEmail = internalQuery({
 export const setZeptomailFromEmail = mutation({
   args: { fromEmail: v.string() },
   handler: async (ctx, args) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -967,7 +970,7 @@ export const setZeptomailFromEmail = mutation({
 export const removeZeptomailFromEmail = mutation({
   args: {},
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
@@ -985,7 +988,7 @@ export const removeZeptomailFromEmail = mutation({
 
 export const getZeptomailFromNameStatus = query({
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")
@@ -1028,7 +1031,7 @@ export const getInternalZeptomailFromName = internalQuery({
 export const setZeptomailFromName = mutation({
   args: { fromName: v.string() },
   handler: async (ctx, args) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     if (args.fromName.length < 2) {
       throw new Error("Sender name must be at least 2 characters");
@@ -1055,7 +1058,7 @@ export const setZeptomailFromName = mutation({
 export const removeZeptomailFromName = mutation({
   args: {},
   handler: async (ctx) => {
-    await ensureAuth(ctx);
+    await validateAuth(ctx);
 
     const doc = await ctx.db
       .query("systemSettings")

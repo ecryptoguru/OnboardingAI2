@@ -4,10 +4,13 @@ import { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { KeyIcon, ArrowPathIcon, EyeIcon, EyeSlashIcon, TrashIcon, ExclamationTriangleIcon } from "@heroicons/react/24/outline";
-import { TestResultAlert, StatusBadge } from "./components";
+import { TestResultAlert, StatusBadge, getErrorMessage } from "./components";
 import { ApiKeySection } from "./ApiKeySection";
 
 export default function SettingsPage() {
+  // Global config health check
+  const obfuscationStatus = useQuery(api.settings.getObfuscationSecretStatus);
+
   // --- Gemini ---
   const geminiStatus = useQuery(api.settings.getGeminiKeyStatus);
   const setGeminiKeyFn = useMutation(api.settings.setGeminiKey);
@@ -161,7 +164,8 @@ export default function SettingsPage() {
       await setGeminiKeyFn({ apiKey: key });
       setGeminiTestResult({ success: true });
     } catch (err: unknown) {
-      setGeminiTestResult({ success: false, error: (err as Error).message || "Failed to save key." });
+      console.error("Save Gemini key failed:", err);
+      setGeminiTestResult({ success: false, error: getErrorMessage(err) });
     } finally {
       setIsSavingGemini(false);
     }
@@ -174,7 +178,8 @@ export default function SettingsPage() {
       const res = await testGeminiKeyFn({ apiKey: key });
       setGeminiTestResult(res);
     } catch (err: unknown) {
-      setGeminiTestResult({ success: false, error: (err as Error).message || "Test failed." });
+      console.error("Test Gemini new key failed:", err);
+      setGeminiTestResult({ success: false, error: getErrorMessage(err) });
     } finally {
       setIsTestingGemini(false);
     }
@@ -187,7 +192,8 @@ export default function SettingsPage() {
       const res = await testGeminiKeyStoredFn({});
       setGeminiTestResult(res);
     } catch (err: unknown) {
-      setGeminiTestResult({ success: false, error: (err as Error).message || "Test failed." });
+      console.error("Test Gemini stored key failed:", err);
+      setGeminiTestResult({ success: false, error: getErrorMessage(err) });
     } finally {
       setIsTestingGeminiStored(false);
     }
@@ -201,7 +207,8 @@ export default function SettingsPage() {
       await removeGeminiKeyFn();
       setGeminiTestResult({ success: true, message: "API Key removed successfully." });
     } catch (err: unknown) {
-      setGeminiTestResult({ success: false, error: (err as Error).message || "Failed to remove key." });
+      console.error("Remove Gemini key failed:", err);
+      setGeminiTestResult({ success: false, error: getErrorMessage(err) });
     } finally {
       setIsRemovingGemini(false);
     }
@@ -214,7 +221,8 @@ export default function SettingsPage() {
       await setSerperKeyFn({ apiKey: key });
       setSerperTestResult({ success: true });
     } catch (err: unknown) {
-      setSerperTestResult({ success: false, error: (err as Error).message || "Failed to save key." });
+      console.error("Save Serper key failed:", err);
+      setSerperTestResult({ success: false, error: getErrorMessage(err) });
     } finally {
       setIsSavingSerper(false);
     }
@@ -227,7 +235,8 @@ export default function SettingsPage() {
       const res = await testSerperKeyFn({ apiKey: key });
       setSerperTestResult(res);
     } catch (err: unknown) {
-      setSerperTestResult({ success: false, error: (err as Error).message || "Test failed." });
+      console.error("Test Serper new key failed:", err);
+      setSerperTestResult({ success: false, error: getErrorMessage(err) });
     } finally {
       setIsTestingSerper(false);
     }
@@ -240,7 +249,8 @@ export default function SettingsPage() {
       const res = await testSerperKeyStoredFn({});
       setSerperTestResult(res);
     } catch (err: unknown) {
-      setSerperTestResult({ success: false, error: (err as Error).message || "Test failed." });
+      console.error("Test Serper stored key failed:", err);
+      setSerperTestResult({ success: false, error: getErrorMessage(err) });
     } finally {
       setIsTestingSerperStored(false);
     }
@@ -254,7 +264,8 @@ export default function SettingsPage() {
       await removeSerperKeyFn();
       setSerperTestResult({ success: true, message: "API Key removed successfully." });
     } catch (err: unknown) {
-      setSerperTestResult({ success: false, error: (err as Error).message || "Failed to remove key." });
+      console.error("Remove Serper key failed:", err);
+      setSerperTestResult({ success: false, error: getErrorMessage(err) });
     } finally {
       setIsRemovingSerper(false);
     }
@@ -267,7 +278,8 @@ export default function SettingsPage() {
       await setFirecrawlKeyFn({ apiKey: key });
       setFirecrawlTestResult({ success: true });
     } catch (err: unknown) {
-      setFirecrawlTestResult({ success: false, error: (err as Error).message || "Failed to save key." });
+      console.error("Save Firecrawl key failed:", err);
+      setFirecrawlTestResult({ success: false, error: getErrorMessage(err) });
     } finally {
       setIsSavingFirecrawl(false);
     }
@@ -280,7 +292,8 @@ export default function SettingsPage() {
       const res = await testFirecrawlKeyFn({ apiKey: key });
       setFirecrawlTestResult(res);
     } catch (err: unknown) {
-      setFirecrawlTestResult({ success: false, error: (err as Error).message || "Test failed." });
+      console.error("Test Firecrawl new key failed:", err);
+      setFirecrawlTestResult({ success: false, error: getErrorMessage(err) });
     } finally {
       setIsTestingFirecrawl(false);
     }
@@ -293,7 +306,8 @@ export default function SettingsPage() {
       const res = await testFirecrawlKeyStoredFn({});
       setFirecrawlTestResult(res);
     } catch (err: unknown) {
-      setFirecrawlTestResult({ success: false, error: (err as Error).message || "Test failed." });
+      console.error("Test Firecrawl stored key failed:", err);
+      setFirecrawlTestResult({ success: false, error: getErrorMessage(err) });
     } finally {
       setIsTestingFirecrawlStored(false);
     }
@@ -307,7 +321,8 @@ export default function SettingsPage() {
       await removeFirecrawlKeyFn();
       setFirecrawlTestResult({ success: true, message: "API Key removed successfully." });
     } catch (err: unknown) {
-      setFirecrawlTestResult({ success: false, error: (err as Error).message || "Failed to remove key." });
+      console.error("Remove Firecrawl key failed:", err);
+      setFirecrawlTestResult({ success: false, error: getErrorMessage(err) });
     } finally {
       setIsRemovingFirecrawl(false);
     }
@@ -320,7 +335,8 @@ export default function SettingsPage() {
       await setZeptomailKeyFn({ apiKey: key });
       setZeptomailTestResult({ success: true });
     } catch (err: unknown) {
-      setZeptomailTestResult({ success: false, error: (err as Error).message || "Failed to save key." });
+      console.error("Save ZeptoMail key failed:", err);
+      setZeptomailTestResult({ success: false, error: getErrorMessage(err) });
     } finally {
       setIsSavingZeptomail(false);
     }
@@ -333,7 +349,8 @@ export default function SettingsPage() {
       const res = await testZeptomailKeyFn({ apiKey: key });
       setZeptomailTestResult(res);
     } catch (err: unknown) {
-      setZeptomailTestResult({ success: false, error: (err as Error).message || "Test failed." });
+      console.error("Test ZeptoMail new key failed:", err);
+      setZeptomailTestResult({ success: false, error: getErrorMessage(err) });
     } finally {
       setIsTestingZeptomail(false);
     }
@@ -346,7 +363,8 @@ export default function SettingsPage() {
       const res = await testZeptomailKeyStoredFn({});
       setZeptomailTestResult(res);
     } catch (err: unknown) {
-      setZeptomailTestResult({ success: false, error: (err as Error).message || "Test failed." });
+      console.error("Test ZeptoMail stored key failed:", err);
+      setZeptomailTestResult({ success: false, error: getErrorMessage(err) });
     } finally {
       setIsTestingZeptomailStored(false);
     }
@@ -360,7 +378,8 @@ export default function SettingsPage() {
       await removeZeptomailKeyFn();
       setZeptomailTestResult({ success: true, message: "API Key removed successfully." });
     } catch (err: unknown) {
-      setZeptomailTestResult({ success: false, error: (err as Error).message || "Failed to remove key." });
+      console.error("Remove ZeptoMail key failed:", err);
+      setZeptomailTestResult({ success: false, error: getErrorMessage(err) });
     } finally {
       setIsRemovingZeptomail(false);
     }
@@ -379,9 +398,10 @@ export default function SettingsPage() {
       setZeptomailFromEmail("");
       setZeptomailFromEmailTestResult({ success: true });
     } catch (err: unknown) {
+      console.error("Save ZeptoMail from email failed:", err);
       setZeptomailFromEmailTestResult({
         success: false,
-        error: (err as Error).message || "Failed to save from email.",
+        error: getErrorMessage(err),
       });
     } finally {
       setIsSavingZeptomailFromEmail(false);
@@ -399,12 +419,13 @@ export default function SettingsPage() {
       setZeptomailFromEmail("");
       setZeptomailFromEmailTestResult({
         success: true,
-        error: "From Email reset to default successfully.",
+        message: "From Email reset to default successfully.",
       });
     } catch (err: unknown) {
+      console.error("Remove ZeptoMail from email failed:", err);
       setZeptomailFromEmailTestResult({
         success: false,
-        error: (err as Error).message || "Failed to reset from email.",
+        error: getErrorMessage(err),
       });
     } finally {
       setIsRemovingZeptomailFromEmail(false);
@@ -422,9 +443,10 @@ export default function SettingsPage() {
       setZeptomailFromName("");
       setZeptomailFromNameTestResult({ success: true });
     } catch (err: unknown) {
+      console.error("Save ZeptoMail sender name failed:", err);
       setZeptomailFromNameTestResult({
         success: false,
-        error: (err as Error).message || "Failed to save sender name.",
+        error: getErrorMessage(err),
       });
     } finally {
       setIsSavingZeptomailFromName(false);
@@ -442,12 +464,13 @@ export default function SettingsPage() {
       setZeptomailFromName("");
       setZeptomailFromNameTestResult({
         success: true,
-        error: "Sender Name reset to default successfully.",
+        message: "Sender Name reset to default successfully.",
       });
     } catch (err: unknown) {
+      console.error("Remove ZeptoMail sender name failed:", err);
       setZeptomailFromNameTestResult({
         success: false,
-        error: (err as Error).message || "Failed to reset sender name.",
+        error: getErrorMessage(err),
       });
     } finally {
       setIsRemovingZeptomailFromName(false);
@@ -465,9 +488,10 @@ export default function SettingsPage() {
       setGoogleCalendarJson("");
       setGoogleCalendarTestResult({ success: true });
     } catch (err: unknown) {
+      console.error("Save Google Calendar JSON failed:", err);
       setGoogleCalendarTestResult({
         success: false,
-        error: (err as Error).message || "Failed to save service account JSON.",
+        error: getErrorMessage(err),
       });
     } finally {
       setIsSavingGoogleCalendar(false);
@@ -481,9 +505,10 @@ export default function SettingsPage() {
       const result = await testGoogleCalendarFn({});
       setGoogleCalendarTestResult(result);
     } catch (err: unknown) {
+      console.error("Test Google Calendar failed:", err);
       setGoogleCalendarTestResult({
         success: false,
-        error: (err as Error).message || "Failed to test Google Calendar integration.",
+        error: getErrorMessage(err),
       });
     } finally {
       setIsTestingGoogleCalendar(false);
@@ -501,12 +526,13 @@ export default function SettingsPage() {
       setGoogleCalendarJson("");
       setGoogleCalendarTestResult({
         success: true,
-        error: "Service Account removed successfully.",
+        message: "Service Account removed successfully.",
       });
     } catch (err: unknown) {
+      console.error("Remove Google Calendar JSON failed:", err);
       setGoogleCalendarTestResult({
         success: false,
-        error: (err as Error).message || "Failed to remove service account.",
+        error: getErrorMessage(err),
       });
     } finally {
       setIsRemovingGoogleCalendar(false);
@@ -524,9 +550,10 @@ export default function SettingsPage() {
       setGoogleCalendarId("");
       setGoogleCalendarIdTestResult({ success: true });
     } catch (err: unknown) {
+      console.error("Save Google Calendar ID failed:", err);
       setGoogleCalendarIdTestResult({
         success: false,
-        error: (err as Error).message || "Failed to save calendar ID.",
+        error: getErrorMessage(err),
       });
     } finally {
       setIsSavingGoogleCalendarId(false);
@@ -544,12 +571,13 @@ export default function SettingsPage() {
       setGoogleCalendarId("");
       setGoogleCalendarIdTestResult({
         success: true,
-        error: "Calendar ID reset to default successfully.",
+        message: "Calendar ID reset to default successfully.",
       });
     } catch (err: unknown) {
+      console.error("Remove Google Calendar ID failed:", err);
       setGoogleCalendarIdTestResult({
         success: false,
-        error: (err as Error).message || "Failed to reset calendar ID.",
+        error: getErrorMessage(err),
       });
     } finally {
       setIsRemovingGoogleCalendarId(false);
@@ -566,6 +594,29 @@ export default function SettingsPage() {
           Manage your workspace configuration and API integrations.
         </p>
       </div>
+
+      {obfuscationStatus && !obfuscationStatus.isSet && (
+        <div className="p-4 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400 flex items-start gap-3 shadow-sm">
+          <ExclamationTriangleIcon className="w-5 h-5 flex-shrink-0 mt-0.5" />
+          <div className="text-sm">
+            <p className="font-semibold mb-1">
+              API key storage is not configured on the server.
+            </p>
+            <p className="opacity-90">
+              Saving API keys will fail until an administrator sets the
+              SETTINGS_OBFUSCATION_SECRET environment variable in Convex. Run:
+            </p>
+            <code className="block mt-2 px-2 py-1.5 rounded bg-amber-900/10 dark:bg-amber-500/10 font-mono text-xs">
+              npx convex env set SETTINGS_OBFUSCATION_SECRET &lt;32+ character secret&gt;
+            </code>
+            {obfuscationStatus.isTooShort && (
+              <p className="mt-2 opacity-90">
+                The current secret is too short. It must be at least 32 characters.
+              </p>
+            )}
+          </div>
+        </div>
+      )}
 
       <ApiKeySection
         title="Google Gemini API Configuration"
@@ -1100,9 +1151,10 @@ export default function SettingsPage() {
                     });
                     setShowWipeModal(false);
                   } catch (err: unknown) {
+                    console.error("Wipe everything failed:", err);
                     setWipeResult({
                       success: false,
-                      message: `Error: ${(err as Error).message || "Wipe failed"}`,
+                      message: `Error: ${getErrorMessage(err)}`,
                     });
                     setShowWipeModal(false);
                   } finally {
