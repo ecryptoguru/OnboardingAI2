@@ -89,7 +89,7 @@ const TARGET_ROLES = [
 ];
 
 async function fetchJinaText(targetUrl: string, timeoutMs = 15000) {
-  const response = await fetch(`https://r.jina.ai/${targetUrl}`, {
+  const response = await fetch(`https://r.jina.ai/${encodeURIComponent(targetUrl)}`, {
     headers: { Accept: "text/plain" },
     signal: AbortSignal.timeout(timeoutMs),
   });

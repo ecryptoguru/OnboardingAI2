@@ -22,7 +22,21 @@
 
 ---
 
-## 2. Dashboard Navigation
+## 2. Forgot Password
+
+If you forget your password, you can reset it from the sign-in page:
+
+1. Click **Forgot password?** on the sign-in screen.
+2. Enter your account email and click **Send reset code**.
+3. Check your inbox for the reset code (it expires in 1 hour).
+4. Enter the code on the **Reset password** page and choose a new password (at least 8 characters).
+5. You will be signed in automatically and redirected to the dashboard.
+
+> **Tip:** The reset code is sent by email, so make sure the **ZeptoMail API Key** and **From Email** are configured in **Settings → API Keys**.
+
+---
+
+## 3. Dashboard Navigation
 
 The left sidebar is organized into three sections:
 
@@ -41,7 +55,7 @@ Badges on **Outreach** and **Approvals** show the count of unclassified replies 
 
 ---
 
-## 3. Universities
+## 4. Universities
 
 ### Browse the List
 The **Universities** page shows all universities in your database. Use the tabs at the top to filter by type: *All*, *Central*, *State*, *Private*, *Deemed*, or *Other*.
@@ -85,7 +99,7 @@ Click any university card to open a detail panel. Here you can:
 
 ---
 
-## 4. Enrichment
+## 5. Enrichment
 
 Enrichment is the process of using AI to research a university and extract valuable signals.
 
@@ -112,7 +126,7 @@ For each selected university, the AI:
 
 ---
 
-## 5. Outreach
+## 6. Outreach
 
 The **Outreach** page is a Kanban-style pipeline that tracks where each university sits in your sales process.
 
@@ -173,7 +187,7 @@ Auto-replies are sent only when a valid conversation context is available.
 
 ---
 
-## 6. Approvals
+## 7. Approvals
 
 All AI-drafted emails land here for human review before they are sent. This is a mandatory Human-in-the-Loop (HITL) gate.
 
@@ -199,7 +213,7 @@ If you have multiple pending drafts, click **Approve All** to send them all at o
 
 ---
 
-## 7. Proposals
+## 8. Proposals
 
 Proposals are AI-generated rich HTML documents tailored to each university.
 
@@ -271,7 +285,7 @@ Once configured, clicking **Confirm Meeting** on a proposal will create a calend
 
 ---
 
-## 8. Analytics
+## 9. Analytics
 
 The **Analytics** page gives you a high-level view of your pipeline performance.
 
@@ -312,7 +326,7 @@ A grid of classification cards shows how stakeholders have responded and the per
 
 ---
 
-## 9. Settings
+## 10. Settings
 
 The **Settings** page is where you configure API integrations and credentials.
 
@@ -344,7 +358,7 @@ Use the **Theme Toggle** in the sidebar header (next to the logo) to switch betw
 
 ---
 
-## 10. Quick Tips
+## 11. Quick Tips
 
 - **Start small** — Enrich 5–10 universities first to see how the AI personalizes emails before scaling up.
 - **Review approvals carefully** — All emails must be approved before sending. A quick human edit can significantly improve open rates.

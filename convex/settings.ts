@@ -142,11 +142,6 @@ export const setGeminiKey = mutation({
   handler: async (ctx, args) => {
     await validateAuth(ctx);
 
-    // Check if the key looks like a Gemini key
-    if (!args.apiKey.startsWith("AIza")) {
-      throw new Error("Invalid Google Gemini API Key format");
-    }
-
     const sanitizedKey = sanitizeApiKey(args.apiKey);
     if (!sanitizedKey) {
       throw new Error("Invalid API key characters");
@@ -180,12 +175,15 @@ export const testGeminiKey = action({
       const response = await ai.models.generateContent({
         model: MODELS.gemini,
         contents: "Return only the word OK",
-        config: { maxOutputTokens: 5 },
+        config: { maxOutputTokens: 20 },
       });
+      // A valid key reaches the Gemini API and returns candidates. The model
+      // may return an empty/short response due to token limits, but the call
+      // itself succeeding proves the key is authorized.
       if (
         response &&
-        response.text &&
-        response.text.toLowerCase().includes("ok")
+        (response.text?.toLowerCase().includes("ok") ||
+          (response.candidates && response.candidates.length > 0))
       ) {
         return { success: true };
       }
@@ -217,9 +215,13 @@ export const testGeminiKeyStored = action({
       const response = await ai.models.generateContent({
         model: MODELS.gemini,
         contents: "Return only the word OK",
-        config: { maxOutputTokens: 5 },
+        config: { maxOutputTokens: 20 },
       });
-      if (response && response.text && response.text.toLowerCase().includes("ok")) {
+      if (
+        response &&
+        (response.text?.toLowerCase().includes("ok") ||
+          (response.candidates && response.candidates.length > 0))
+      ) {
         return { success: true };
       }
       return { success: false, error: "Received unexpected response from Gemini." };
@@ -357,33 +359,66 @@ export const testFirecrawlKeyStored = action({
   },
 });
 
+function isZeptoMailKeyAccepted(status: number, body: string): boolean {
+  if (status >= 200 && status < 300) return true;
+  if (status === 400 || status === 422) return true;
+  if (status === 401) {
+    // ZeptoMail returns 401 for both auth and validation errors. Parse the body
+    // to distinguish an invalid token from a valid key with a malformed request.
+    try {
+      const parsed = JSON.parse(body) as {
+        error?: {
+          code?: string;
+          details?: Array<{ code?: string; message?: string; target?: string; inner_error?: { code?: string; message?: string } }>;
+          message?: string;
+        };
+      };
+      const details = parsed.error?.details ?? [];
+      const hasRecipientError = details.some(
+        (d) =>
+          d.code === "SM_113" &&
+          (d.target?.includes("to") || d.target?.includes("cc") || d.target?.includes("bcc")),
+      );
+      const hasNoRecipients = details.some(
+        (d) => d.inner_error?.code === "SMI_116" || d.inner_error?.message?.toLowerCase().includes("no valid recipients"),
+      );
+      if (hasRecipientError || hasNoRecipients) return true;
+    } catch {
+      // Ignore parse errors; fall through to failure.
+    }
+  }
+  return false;
+}
+
 export const testZeptomailKey = action({
   args: { apiKey: v.string() },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
 
+    // Users often paste the full "Zoho-enczapikey <token>" string. Strip the
+    // prefix before testing so it behaves the same as the stored key.
+    const rawKey = args.apiKey.replace(/^Zoho-enczapikey\s*/i, "").trim();
+
     try {
-      const res = await fetch("https://api.zeptomail.com/v1.1/email", {
+      const res = await fetch("https://api.zeptomail.in/v1.1/email", {
         method: "POST",
         headers: {
-          Authorization: `Zoho-enczapikey ${args.apiKey}`,
+          Authorization: `Zoho-enczapikey ${rawKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          from: { address: "test@fretbox.in" },
+          from: { address: "outreach@fretbox.in" },
           to: [],
           subject: "Key Validation Test",
           textbody: "This is a validation test.",
         }),
         signal: AbortSignal.timeout(10000),
       });
-      // 400/422 = valid key, but request rejected (empty to list) — key is valid
-      // 401 = invalid key
-      if (res.ok || res.status === 400 || res.status === 422) {
+      const body = await res.text().catch(() => "Invalid response");
+      if (isZeptoMailKeyAccepted(res.status, body)) {
         return { success: true };
       }
-      const err = await res.text().catch(() => "Invalid response");
-      return { success: false, error: `ZeptoMail API error (${res.status}): ${err}` };
+      return { success: false, error: `ZeptoMail API error (${res.status}): ${body}` };
     } catch (e: unknown) {
       return { success: false, error: (e as Error).message || "Failed to test ZeptoMail key." };
     }
@@ -399,27 +434,25 @@ export const testZeptomailKeyStored = action({
       return { success: false, error: "No ZeptoMail API key configured." };
     }
     try {
-      const res = await fetch("https://api.zeptomail.com/v1.1/email", {
+      const res = await fetch("https://api.zeptomail.in/v1.1/email", {
         method: "POST",
         headers: {
           Authorization: `Zoho-enczapikey ${key}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          from: { address: "test@fretbox.in" },
+          from: { address: "outreach@fretbox.in" },
           to: [],
           subject: "Key Validation Test",
           textbody: "This is a validation test.",
         }),
         signal: AbortSignal.timeout(10000),
       });
-      // 400/422 = valid key, but request rejected (empty to list) — key is valid
-      // 401 = invalid key
-      if (res.ok || res.status === 400 || res.status === 422) {
+      const body = await res.text().catch(() => "Invalid response");
+      if (isZeptoMailKeyAccepted(res.status, body)) {
         return { success: true };
       }
-      const err = await res.text().catch(() => "Invalid response");
-      return { success: false, error: `ZeptoMail API error (${res.status}): ${err}` };
+      return { success: false, error: `ZeptoMail API error (${res.status}): ${body}` };
     } catch (e: unknown) {
       return { success: false, error: (e as Error).message || "Failed to test stored ZeptoMail key." };
     }
@@ -609,6 +642,11 @@ export const getZeptomailKeyStatus = query({
   },
 });
 
+function normalizeZeptomailKey(key: string | null | undefined): string | null {
+  if (!key) return null;
+  return key.replace(/^Zoho-enczapikey\s*/i, "").trim();
+}
+
 export const getInternalZeptomailKey = internalQuery({
   handler: async (ctx) => {
     const doc = await ctx.db
@@ -617,9 +655,11 @@ export const getInternalZeptomailKey = internalQuery({
       .first();
     if (doc?.value) {
       try {
-        return sanitizeApiKey(deobfuscate(doc.value)) ?? sanitizeApiKey(doc.value);
+        return normalizeZeptomailKey(
+          sanitizeApiKey(deobfuscate(doc.value)) ?? sanitizeApiKey(doc.value),
+        );
       } catch {
-        return sanitizeApiKey(doc.value);
+        return normalizeZeptomailKey(sanitizeApiKey(doc.value));
       }
     }
     return null;
@@ -631,11 +671,17 @@ export const setZeptomailKey = mutation({
   handler: async (ctx, args) => {
     await validateAuth(ctx);
 
-    if (args.apiKey.length < 20) {
+    // Users often paste the full "Zoho-enczapikey <token>" string from the
+    // ZeptoMail dashboard. Strip the prefix and keep only the raw token.
+    const rawKey = args.apiKey
+      .replace(/^Zoho-enczapikey\s*/i, "")
+      .trim();
+
+    if (rawKey.length < 20) {
       throw new Error("Invalid ZeptoMail API Key format");
     }
 
-    const sanitizedKey = sanitizeApiKey(args.apiKey);
+    const sanitizedKey = sanitizeApiKey(rawKey);
     if (!sanitizedKey) {
       throw new Error("Invalid API key characters");
     }
@@ -1071,3 +1117,4 @@ export const removeZeptomailFromName = mutation({
     return { success: true };
   },
 });
+

@@ -69,7 +69,7 @@ async function doSendEmail(ctx: ActionCtx, args: SendEmailArgs): Promise<SendEma
   if (args.inReplyTo) mimeHeaders["In-Reply-To"] = args.inReplyTo;
   if (args.references) mimeHeaders["References"] = args.references;
 
-  const response = await fetch("https://api.zeptomail.com/v1.1/email", {
+  const response = await fetch("https://api.zeptomail.in/v1.1/email", {
     method: "POST",
     headers: {
       Authorization: `Zoho-enczapikey ${apiKey}`,

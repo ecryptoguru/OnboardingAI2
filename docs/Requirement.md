@@ -14,6 +14,7 @@
 9. Fix meeting via Google Calendar/Meet integration.
 10. Generate and send AI proposals.
 11. Support proposal statuses: `draft`, `ready`, `sent`, `meeting_confirmed`, `cancelled`.
+12. **Password Reset**: Users can request a password reset code via email, then set a new password using the code. Reset codes expire after a configurable time (default 1 hour).
 
 ## Non-Functional / Security Requirements
 

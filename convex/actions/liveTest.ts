@@ -404,7 +404,7 @@ async function runTargetedVitDataFetch(
   } = {};
   for (const url of Array.from(sourceUrls).slice(0, 6)) {
     try {
-      const res = await fetch(`https://r.jina.ai/${url}`, {
+      const res = await fetch(`https://r.jina.ai/${encodeURIComponent(url)}`, {
         headers: { Accept: "text/plain" },
         signal: AbortSignal.timeout(15000),
       });

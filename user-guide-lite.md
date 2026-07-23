@@ -88,6 +88,16 @@ If you need to reschedule, click **Reschedule Meeting** on any confirmed proposa
 
 ---
 
+## Forgot Your Password?
+
+1. Go to **Sign In** and click **Forgot password?**
+2. Enter your email and click **Send reset code**.
+3. Paste the code from your email and choose a new password.
+
+Reset codes expire in 1 hour. If you do not receive a code, ask the tech team to check the **ZeptoMail API Key** and **From Email** in **Settings → API Keys**.
+
+---
+
 ## If Something Looks Wrong
 
 1. Check **Settings** for missing/expired keys

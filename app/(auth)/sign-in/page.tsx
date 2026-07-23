@@ -1,8 +1,6 @@
 "use client";
 
 import { useAuthActions } from "@convex-dev/auth/react";
-import { useQuery } from "convex/react";
-import { api } from "../../../convex/_generated/api";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -12,23 +10,12 @@ export default function SignInPage() {
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
 
-  const emailExists = useQuery(
-    api.auth.checkEmailExists,
-    email.length > 3 ? { email } : "skip",
-  );
-
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setLoading(true);
     setError("");
     const formData = new FormData(e.currentTarget);
     const emailValue = (formData.get("email") as string).trim().toLowerCase();
-
-    if (emailExists === false && email.length > 3) {
-      setError("No account found with this email. Please sign up first.");
-      setLoading(false);
-      return;
-    }
 
     signIn("password", {
       email: emailValue,
@@ -93,13 +80,6 @@ export default function SignInPage() {
               placeholder="••••••••"
             />
           </div>
-
-          {emailExists === false && email.length > 3 && (
-            <p className="text-amber-400 text-sm bg-amber-500/10 border border-amber-500/20 rounded-lg px-3 py-2">
-              No account found with this email.{" "}
-              <Link href="/sign-up" className="underline font-semibold">Sign up instead</Link>.
-            </p>
-          )}
 
           <input name="flow" type="hidden" value="signIn" />
 

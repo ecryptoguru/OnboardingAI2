@@ -4,7 +4,7 @@ import {
   GenericActionCtxWithAuthConfig,
 } from "@convex-dev/auth/server";
 import { Password } from "@convex-dev/auth/providers/Password";
-import { query } from "./_generated/server";
+import { internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { DataModel } from "./_generated/dataModel";
 import { v } from "convex/values";
@@ -46,7 +46,7 @@ export const { auth, signIn, signOut, store, isAuthenticated } = convexAuth({
   ],
 });
 
-export const checkEmailExists = query({
+export const checkEmailExists = internalQuery({
   args: { email: v.string() },
   handler: async (ctx, args) => {
     const normalized = args.email.trim().toLowerCase();

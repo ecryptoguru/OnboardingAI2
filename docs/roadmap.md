@@ -93,6 +93,15 @@ The following security and maintainability improvements have been implemented af
 7. **Circular Type Fix** — `email.ts` (`doSendEmail`) and `proposals.ts` (`doGenerateProposal`) use helper functions to avoid circular `any` inference.
 
 ═══════════════════════════════════════════════════════════════
+PART 1.6: AUTHENTICATION — FORGOT PASSWORD (COMPLETED)
+═══════════════════════════════════════════════════════════════
+
+1. **Forgot Password Flow** — Added `/forgot-password` and `/reset-password` pages using Convex Auth's Password provider `reset` email configuration.
+2. **Reset Code Delivery** — Generates a 32-character code, stores it in `authVerificationCodes`, and sends it via ZeptoMail through the existing `actions/email.sendEmail` internal action.
+3. **UI Integration** — "Forgot password?" link on `/sign-in`, email pre-fill via query params on `/reset-password`, and 8-character minimum password validation.
+4. **Env Configuration** — Requires `SITE_URL` (Convex env) for reset-callback URL construction and a valid `zeptomailApiKey` in Dashboard → Settings for email delivery.
+
+═══════════════════════════════════════════════════════════════
 PART 2: 6-PHASE BUILD ROADMAP
 ═══════════════════════════════════════════════════════════════
 

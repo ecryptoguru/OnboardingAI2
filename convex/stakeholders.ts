@@ -5,6 +5,7 @@ import {
   internalQuery,
 } from "./_generated/server";
 import { v } from "convex/values";
+import { Doc } from "./_generated/dataModel";
 import { validateAuth } from "./lib/auth_utils";
 import {
   canonicalizeInstitutionEmail,
@@ -590,7 +591,7 @@ export const getPrimaryInternal = internalQuery({
 export const updateLinkedinInternal = internalMutation({
   args: {
     id: v.id("stakeholders"),
-    linkedin_url: v.string(),
+    linkedin_url: v.optional(v.string()),
     name: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -599,13 +600,63 @@ export const updateLinkedinInternal = internalMutation({
       ? await ctx.db.get(existing.university_id)
       : null;
     const institutionDomain = normalizeInstitutionDomain(university?.website);
-    await ctx.db.patch(args.id, {
-      linkedin_url: args.linkedin_url,
+    const patch: Partial<Doc<"stakeholders">> = {
       name: args.name ?? existing?.name,
       role: sanitizeRole(existing?.role) ?? existing?.role,
       phone: sanitizePhone(existing?.phone),
       email: sanitizeEmail(existing?.email, institutionDomain) ?? existing?.email,
-    });
+    };
+    if (args.linkedin_url !== undefined) {
+      patch.linkedin_url = args.linkedin_url;
+    } else {
+      patch.linkedin_url = undefined;
+    }
+    await ctx.db.patch(args.id, patch as Doc<"stakeholders">);
+  },
+});
+
+export const updateContactInternal = internalMutation({
+  args: {
+    id: v.id("stakeholders"),
+    email: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    email_source: v.optional(
+      v.union(
+        v.literal("scraped"),
+        v.literal("regex"),
+        v.literal("inferred"),
+        v.literal("linkedin"),
+        v.literal("manual"),
+      ),
+    ),
+    phone_source: v.optional(
+      v.union(
+        v.literal("scraped"),
+        v.literal("regex"),
+        v.literal("inferred"),
+        v.literal("manual"),
+      ),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.get(args.id);
+    if (!existing) return;
+    const university = await ctx.db.get(existing.university_id);
+    const institutionDomain = normalizeInstitutionDomain(university?.website);
+    const sanitizedEmail = sanitizeEmail(args.email, institutionDomain);
+    const normalizedPhone = sanitizePhone(args.phone);
+    const patch: Partial<Doc<"stakeholders">> = {};
+    if (args.email !== undefined && sanitizedEmail) {
+      patch.email = sanitizedEmail;
+      if (args.email_source) patch.email_source = args.email_source;
+    }
+    if (args.phone !== undefined && normalizedPhone) {
+      patch.phone = normalizedPhone;
+      if (args.phone_source) patch.phone_source = args.phone_source;
+    }
+    if (Object.keys(patch).length > 0) {
+      await ctx.db.patch(args.id, patch as Doc<"stakeholders">);
+    }
   },
 });
 

@@ -59,14 +59,21 @@ const TARGET_ROLES = [
   "Chancellor",
   "Vice Chancellor",
   "Pro Vice Chancellor",
+  "Advisor",
+  "Advisor to Chancellor",
   "Registrar",
   "Dy Registrar",
+  "Joint Registrar",
+  "Dean",
+  "Deputy Dean",
   "Dean Student Welfare",
   "Dean Student Affairs",
   "Director Administration",
   "Chief Warden",
   "Controller of Examinations",
+  "Deputy Controller of Examinations",
   "Finance Officer",
+  "Chief Finance Officer",
   "Librarian",
   "Head of Department",
   "Placement Officer",
@@ -86,7 +93,7 @@ const TARGET_ROLES = [
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 const MAX_CONTEXT_CHARS = 50_000; // Cap context to keep Gemini calls fast
-const MAX_URLS_TO_SCRAPE = 3; // Limit Firecrawl API calls per enrichment
+const MAX_URLS_TO_SCRAPE = 6; // Limit Firecrawl API calls per enrichment
 const MAX_CHARS_PER_SOURCE = 8_000; // Truncate each scraped source
 const MIN_BLOCK_LENGTH = 200; // Minimum length for a block to be considered valid
 const MAX_REGEX_CONTACTS = 20; // Cap to avoid bloating the prompt
@@ -319,6 +326,31 @@ function deduplicateContext(sources: string[]): string {
   return deduped.join("\n\n");
 }
 
+const LEADERSHIP_URL_PATTERNS = [
+  /(chancellor|vice[-\s]?chancellor|pro[-\s]?vice[-\s]?chancellor|vc|provc)/i,
+  /(registrar|controller|finance|librarian|warden|rector|secretary|treasurer)/i,
+  /(dean|director|principal|head|hod|chairman|chairperson|president|owner)/i,
+  /(administration|leadership|governance|management|executive|team|directory)/i,
+  /(about[-\s]?us|about)/i,
+  /(contact|contact[-\s]?us)/i,
+  /(anti[-\s]?ragging|committee)/i,
+];
+
+function scoreLeadershipUrl(url: string): number {
+  const lower = url.toLowerCase();
+  let score = 0;
+  for (let i = 0; i < LEADERSHIP_URL_PATTERNS.length; i++) {
+    if (LEADERSHIP_URL_PATTERNS[i].test(lower)) {
+      score += LEADERSHIP_URL_PATTERNS.length - i;
+    }
+  }
+  // Penalise very long URLs, query strings and PDFs which are usually not leadership pages.
+  if (/\?/.test(url)) score -= 2;
+  if (/\.pdf$/i.test(url)) score -= 3;
+  if (url.length > 120) score -= 1;
+  return score;
+}
+
 function buildBranchScopedPriorityUrls(
   workingUrl: string,
   discoveredLinks: string[],
@@ -364,40 +396,39 @@ function buildBranchScopedPriorityUrls(
       }
     });
 
-    const guessed: string[] = [];
-    if (pathPrefix && pathPrefix !== "") {
-      guessed.push(
-        workingUrl,
-        `${parsed.origin}${pathPrefix}/contact`,
-        `${parsed.origin}${pathPrefix}/contact-us`,
-        `${parsed.origin}${pathPrefix}/administration`,
-        `${parsed.origin}${pathPrefix}/about`,
-        `${parsed.origin}${pathPrefix}/faculty`,
-        `${parsed.origin}${pathPrefix}/hostel`,
-        `${parsed.origin}${pathPrefix}/anti-ragging`,
-        `${parsed.origin}${pathPrefix}/leadership`,
-        `${parsed.origin}${pathPrefix}/governance`,
-        `${parsed.origin}${pathPrefix}/team`,
-        `${parsed.origin}${pathPrefix}/directory`,
-      );
-    } else {
-      // For subdomain branches or root domains, guess common paths
-      guessed.push(
-        workingUrl,
-        `${workingUrl.replace(/\/$/, "")}/contact`,
-        `${workingUrl.replace(/\/$/, "")}/contact-us`,
-        `${workingUrl.replace(/\/$/, "")}/administration`,
-        `${workingUrl.replace(/\/$/, "")}/about`,
-        `${workingUrl.replace(/\/$/, "")}/faculty`,
-        `${workingUrl.replace(/\/$/, "")}/leadership`,
-        `${workingUrl.replace(/\/$/, "")}/governance`,
-        `${workingUrl.replace(/\/$/, "")}/team`,
-        `${workingUrl.replace(/\/$/, "")}/directory`,
-        `${workingUrl.replace(/\/$/, "")}/anti-ragging`,
-      );
-    }
+    // Prioritise pages that are most likely to list named decision makers.
+    branchScopedLinks.sort((a, b) => scoreLeadershipUrl(b) - scoreLeadershipUrl(a));
 
-    return [...new Set([...branchScopedLinks, ...guessed])].slice(0, maxUrls);
+    const guessed: string[] = [];
+    const root = workingUrl.replace(/\/$/, "");
+    const base = pathPrefix && pathPrefix !== "" ? `${parsed.origin}${pathPrefix}` : root;
+    guessed.push(
+      workingUrl,
+      // Multi-person leadership pages first — highest yield for stakeholder count
+      `${base}/about/principal-officers`,
+      `${base}/administration`,
+      `${base}/leadership`,
+      `${base}/governance`,
+      `${base}/team`,
+      `${base}/directory`,
+      // Specific leadership roles
+      `${base}/about/chancellor`,
+      `${base}/chancellor`,
+      `${base}/about/vice-chancellor`,
+      `${base}/vice-chancellor`,
+      `${base}/about/pro-vice-chancellor`,
+      `${base}/pro-vice-chancellor`,
+      // General about/contact pages
+      `${base}/about`,
+      `${base}/contact`,
+      `${base}/contact-us`,
+      `${base}/faculty`,
+      `${base}/anti-ragging`,
+    );
+
+    // Use guessed leadership URLs first (they are generic and prioritise multi-person
+    // officer pages), then backfill with highest-scoring discovered map links.
+    return [...new Set([...guessed, ...branchScopedLinks])].slice(0, maxUrls);
   } catch {
     return [];
   }
@@ -441,6 +472,10 @@ export const runDeepEnrichment = internalAction({
         );
       }
 
+      // Some university records store websites without a scheme (e.g. "www.example.com").
+      // Firecrawl tolerates this, but URL constructors and external source discovery do not.
+      const normalizedUrl = /^https?:\/\//i.test(url) ? url : `https://${url}`;
+
       console.log(`[DeepEnrichment] Starting for ${uniName}...`);
 
       const firecrawlKey = await ctx.runQuery(
@@ -459,7 +494,7 @@ export const runDeepEnrichment = internalAction({
       const serperBudget = createSerperBudget({ maxQueries: 2 });
 
       // ─── Domain extraction ────────────────────────────────────────────────
-      const rawDomain = url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+      const rawDomain = normalizedUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
       const domain = rawDomain.replace(/^www\./, "");
 
       console.log(
@@ -469,13 +504,13 @@ export const runDeepEnrichment = internalAction({
       // ─── Phase 1: Firecrawl Map → Discover high-yield URLs ───────────────
       let highYieldUrls: string[] = [];
       let mapResult: Awaited<ReturnType<typeof firecrawlMap>> | null = null;
-      let workingUrl = url;
+      let workingUrl = normalizedUrl;
 
-      const urlVariants = [url];
-      if (url.startsWith("http://")) {
-        urlVariants.push(url.replace("http://", "https://"));
-      } else if (url.startsWith("https://")) {
-        urlVariants.push(url.replace("https://", "http://"));
+      const urlVariants = [normalizedUrl];
+      if (normalizedUrl.startsWith("http://")) {
+        urlVariants.push(normalizedUrl.replace("http://", "https://"));
+      } else if (normalizedUrl.startsWith("https://")) {
+        urlVariants.push(normalizedUrl.replace("https://", "http://"));
       }
 
       for (const tryUrl of urlVariants) {
@@ -549,7 +584,7 @@ export const runDeepEnrichment = internalAction({
             );
             const jinaPromises = externalUrls.map(async (extUrl) => {
               try {
-                const jinaRes = await fetch(`https://r.jina.ai/${extUrl}`, {
+                const jinaRes = await fetch(`https://r.jina.ai/${encodeURIComponent(extUrl)}`, {
                   headers: { Accept: "text/plain" },
                   signal: AbortSignal.timeout(8000),
                 });
@@ -594,7 +629,34 @@ export const runDeepEnrichment = internalAction({
           );
           return `\n=== SOURCE: ${targetUrl} ===\n${normalized}\n`;
         } catch (e) {
-          console.error(`[DeepEnrichment] Scrape failed for ${targetUrl}:`, e);
+          console.warn(
+            `[DeepEnrichment] Firecrawl failed for ${targetUrl}, trying Jina Reader fallback:`,
+            e instanceof Error ? e.message : String(e),
+          );
+          try {
+            const jinaRes = await fetch(`https://r.jina.ai/${encodeURIComponent(targetUrl)}`, {
+              headers: { Accept: "text/plain" },
+              signal: AbortSignal.timeout(12000),
+            });
+            if (jinaRes.ok) {
+              const text = await jinaRes.text();
+              const normalized = normalizeContent(text).substring(
+                0,
+                MAX_CHARS_PER_SOURCE,
+              );
+              if (normalized.length >= MIN_BLOCK_LENGTH) {
+                console.log(
+                  `[DeepEnrichment] Jina Reader fallback succeeded for ${targetUrl}`,
+                );
+                return `\n=== SOURCE: ${targetUrl} ===\n${normalized}\n`;
+              }
+            }
+          } catch (jinaErr) {
+            console.warn(
+              `[DeepEnrichment] Jina Reader fallback also failed for ${targetUrl}:`,
+              jinaErr instanceof Error ? jinaErr.message : String(jinaErr),
+            );
+          }
           return "";
         }
       });
@@ -641,7 +703,7 @@ export const runDeepEnrichment = internalAction({
       };
       for (const arUrl of antiRaggingUrls) {
         try {
-          const arRes = await fetch(`https://r.jina.ai/${arUrl}`, {
+          const arRes = await fetch(`https://r.jina.ai/${encodeURIComponent(arUrl)}`, {
             headers: { Accept: "text/plain" },
             signal: AbortSignal.timeout(8000),
           });
@@ -833,7 +895,8 @@ ${safeContext}
             maxOutputTokens: 8192,
             label: "deep_enrichment_synthesis",
             ctx,
-            skipCache: true,
+            skipCache: false,
+            cacheTtlMs: 24 * 60 * 60 * 1000,
           });
           llmUsageEntries.push(result.usage);
           console.log(
@@ -1383,7 +1446,7 @@ ${safeContext}
       // Filter out historical/non-current stakeholders (Founder, Former X, etc.)
       // even if archived contact details still exist on old pages.
       const HISTORICAL_ROLE_PATTERNS =
-        /\b(former|ex-|past|retired|late|historical|emeritus|previous|incumbent)\b|^(founder|chairman emeritus|president emeritus|chancellor emeritus|vice chancellor emeritus)$/i;
+        /\b(former|ex-|past|retired|late|historical|emeritus|previous)\b|^(founder|chairman emeritus|president emeritus|chancellor emeritus|vice chancellor emeritus)$/i;
 
       // Email-name consistency: if both exist, the email local part should
       // roughly match the person's name. Reject obvious mismatches.
@@ -1433,31 +1496,53 @@ ${safeContext}
         return matches >= 1;
       }
 
-      const currentStakeholders = validStakeholders.filter((st) => {
-        const role = st.role || "";
-        const isHistorical = HISTORICAL_ROLE_PATTERNS.test(role);
-        if (isHistorical) {
-          console.warn(
-            `[DeepEnrichment] Rejecting historical stakeholder: ${st.name} (${st.role})`,
+      const currentStakeholders = validStakeholders
+        .map((st) => {
+          const cleaned: StakeholderCandidate = { ...st };
+          // Strip mismatched generic emails instead of discarding the whole stakeholder.
+          // A named Chancellor/Registrar with info@... is still valuable without that email.
+          if (cleaned.email && cleaned.name && !emailMatchesStakeholder(cleaned.email, cleaned.name, cleaned.role)) {
+            console.warn(
+              `[DeepEnrichment] Stripping mismatched email ${cleaned.email} for ${cleaned.name}`,
+            );
+            cleaned.email = undefined;
+          }
+          // Strip mismatched LinkedIn URLs similarly.
+          if (cleaned.linkedin_url && cleaned.name && !linkedinMatchesName(cleaned.linkedin_url, cleaned.name)) {
+            console.warn(
+              `[DeepEnrichment] Stripping mismatched LinkedIn ${cleaned.linkedin_url} for ${cleaned.name}`,
+            );
+            cleaned.linkedin_url = undefined;
+          }
+          return cleaned;
+        })
+        .filter((st) => {
+          const role = st.role || "";
+          const isHistorical = HISTORICAL_ROLE_PATTERNS.test(role);
+          if (isHistorical) {
+            console.warn(
+              `[DeepEnrichment] Rejecting historical stakeholder: ${st.name} (${st.role})`,
+            );
+            return false;
+          }
+          // After cleaning contacts, keep stakeholders that still carry outreach value:
+          // a real name plus either a priority role or a remaining valid contact channel.
+          const hasName = !!st.name?.trim();
+          const hasRole = !!st.role?.trim();
+          const decisionRole = isDecisionMakerRole(st.role);
+          const priorityRole = decisionRole || isSingletonRole(st.role);
+          const hasValidEmail = !!st.email && isValidEmail(st.email);
+          const hasValidPhone = !!st.phone && isValidIndianPhone(st.phone);
+          const hasLinkedin =
+            !!st.linkedin_url &&
+            /^https?:\/\/(?:[a-z]{2,3}\.)?linkedin\.com\//i.test(
+              st.linkedin_url,
+            );
+          return (
+            hasName &&
+            (hasValidEmail || hasValidPhone || hasLinkedin || (hasRole && priorityRole))
           );
-          return false;
-        }
-        // Reject bad email-name pairings
-        if (st.email && st.name && !emailMatchesStakeholder(st.email, st.name, st.role)) {
-          console.warn(
-            `[DeepEnrichment] Rejecting mismatched email-name: ${st.email} → ${st.name}`,
-          );
-          return false;
-        }
-        // Reject bad LinkedIn-name pairings
-        if (st.linkedin_url && st.name && !linkedinMatchesName(st.linkedin_url, st.name)) {
-          console.warn(
-            `[DeepEnrichment] Rejecting mismatched LinkedIn: ${st.linkedin_url} → ${st.name}`,
-          );
-          return false;
-        }
-        return true;
-      });
+        });
 
       if (currentStakeholders.length > 0) {
         await ctx.runMutation(internal.stakeholders.upsertBulkInternal, {
@@ -1537,12 +1622,11 @@ export const debugDeepEnrichment = internalAction({
     if (!university) return { error: "University not found" };
 
     const uniName = university.university_name;
-    const url =
+    const rawUrl =
       typeof university.website === "string" ? university.website : "";
+    const url = /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
     report.university = uniName;
     report.website = url;
-
-    // Phase 1: Check keys
     const apiKey = await ctx.runQuery(internal.settings.getInternalGeminiKey);
     const firecrawlKey = await ctx.runQuery(internal.settings.getInternalFirecrawlKey);
     const rawSerperKey = await ctx.runQuery(internal.settings.getInternalSerperKey);
@@ -1643,7 +1727,7 @@ export const debugDeepEnrichment = internalAction({
             /\/contact(?:-us)?$/i.test(candidate),
           ) || `${url.replace(/\/$/, "")}/contact`;
         const contactRes = await fetch(
-          `https://r.jina.ai/${contactTarget}`,
+          `https://r.jina.ai/${encodeURIComponent(contactTarget)}`,
           {
             headers: { Accept: "text/plain" },
             signal: AbortSignal.timeout(15000),
@@ -1673,7 +1757,7 @@ export const debugDeepEnrichment = internalAction({
     const allPhones = new Set<string>();
     for (const link of mapLinks.slice(0, 10)) {
       try {
-        const res = await fetch(`https://r.jina.ai/${link}`, {
+        const res = await fetch(`https://r.jina.ai/${encodeURIComponent(link)}`, {
           headers: { Accept: "text/plain" },
           signal: AbortSignal.timeout(10000),
         });

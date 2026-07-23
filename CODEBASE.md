@@ -35,6 +35,8 @@ Next.js 15 App Router frontend.
 - `/(auth)/`
   - `sign-in/page.tsx`: Sign-in page (Convex Auth Password, FormData-based, `redirectTo: "/dashboard"`)
   - `sign-up/page.tsx`: Sign-up page (same pattern)
+  - `forgot-password/page.tsx`: Email submission page to request a password reset code via `signIn("password", { flow: "reset" })`
+  - `reset-password/page.tsx`: Code + new password entry page via `signIn("password", { flow: "reset-verification" })`, pre-fills email from query params
 - `/(dashboard)/`
   - `layout.tsx`: Dashboard shell with `<Sidebar />`, glassmorphism styling, theme support
   - `not-found.tsx`: Global 404 page
@@ -79,7 +81,7 @@ The entire backend ecosystem (Queries, Mutations, Actions, HTTP routes, Crons).
   - `crons.ts`: Scheduled jobs — outreach sequence processing every **15 minutes** (was hourly), weekly proposal cleanup. Batch cap = 100 sequences with 250ms stagger.
   - `dispatcher.ts`: Staggered job scheduling for website validation/discovery
   - `http.ts`: Convex HTTP webhooks (ZeptoMail delivery, inbound replies, Google Calendar push, auth routes)
-  - `auth.ts` / `auth.config.ts`: Convex Auth configuration (Password provider)
+  - `auth.ts` / `auth.config.ts`: Convex Auth configuration (Password provider with a `reset` email provider for password reset codes, plus `checkEmailExists` query)
 
 - `/actions/` (23 files)
   Heavy / side-effect serverless operations. **All action files must start with `"use node"`**:
@@ -273,8 +275,9 @@ Each API key has: status query (`get*KeyStatus`), set mutation (`set*Key`), test
 
 ### 7. Auth & Middleware
 
-- `@convex-dev/auth` with Password provider (`convex/auth.ts`).
-- `middleware.ts` protects all non-public routes. Development auth bypass is supported via `DEV_AUTH_BYPASS_SECRET` but **never** active in production.
+- `@convex-dev/auth` with Password provider (`convex/auth.ts`). Password reset is implemented via a `reset` email provider that generates a 32-character code and sends it through ZeptoMail.
+- Password reset flow: `/forgot-password` submits email → reset code is stored in `authVerificationCodes` and emailed → `/reset-password` verifies code and sets a new password.
+- `middleware.ts` protects `/dashboard` routes and redirects authenticated users away from `/sign-in` / `/sign-up`. `/forgot-password` and `/reset-password` are public. Development auth bypass is supported via `DEV_AUTH_BYPASS_SECRET` but **never** active in production.
 
 ### 8. Design System
 

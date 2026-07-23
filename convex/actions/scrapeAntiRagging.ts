@@ -58,7 +58,7 @@ export const scrapeAntiRagging = internalAction({
       for (const path of ANTI_RAGGING_PATHS) {
         try {
           const pageUrl = `${baseUrl}${path}`;
-          const res = await fetch(`https://r.jina.ai/${pageUrl}`, {
+          const res = await fetch(`https://r.jina.ai/${encodeURIComponent(pageUrl)}`, {
             headers: { Accept: "text/plain" },
             signal: AbortSignal.timeout(12000),
           });

@@ -274,6 +274,20 @@ export function isTransientLlmError(err: unknown): boolean {
     return false;
   }
 
+  // Quota / credit / auth failures should never be retried.
+  if (
+    msgLower.includes("not enough credits") ||
+    msgLower.includes("insufficient credits") ||
+    msgLower.includes("quota") ||
+    msgLower.includes("rate limit") ||
+    msgLower.includes("billing") ||
+    msgLower.includes("invalid api key") ||
+    msgLower.includes("api key not valid") ||
+    msgLower.includes("authentication")
+  ) {
+    return false;
+  }
+
   // Only regex-scan messages when there is NO structured status.
   if (typeof status !== "number") {
     // Retry on explicit transient HTTP status codes inside message strings
@@ -722,12 +736,23 @@ export async function callFlash(
  * with the existing 768-dim vector index. Falls back to zero-vector on failure.
  * Note: Uses the same API key as Gemini chat (getInternalGeminiKey).
  */
+
+// Track embedding API availability within the current process. A 401/403 means
+// the key is invalid, so we avoid burning retries/credits on every signal.
+let embeddingApiAvailable = true;
+
 export async function embed(
   text: string,
   apiKey?: string | null,
 ): Promise<number[]> {
-  if (!apiKey) {
-    console.warn("[LLM:Embed] No API key — returning zero vector");
+  if (!apiKey || process.env.DISABLE_EMBEDDINGS === "true" || !embeddingApiAvailable) {
+    if (!apiKey) {
+      console.warn("[LLM:Embed] No API key — returning zero vector");
+    } else if (process.env.DISABLE_EMBEDDINGS === "true") {
+      console.log("[LLM:Embed] DISABLE_EMBEDDINGS is set — returning zero vector");
+    } else {
+      console.log("[LLM:Embed] Embedding API marked unavailable — returning zero vector");
+    }
     return new Array(768).fill(0);
   }
 
@@ -742,7 +767,7 @@ export async function embed(
             method: "POST",
             headers: {
               "Content-Type": "application/json",
-              "Authorization": `Bearer ${apiKey}`,
+              "x-goog-api-key": apiKey,
             },
             body: JSON.stringify({
               model: `models/${MODEL}`,
@@ -757,6 +782,11 @@ export async function embed(
 
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
+          // Auth failures will never succeed on retry — mark unavailable to
+          // stop burning credits across multiple embed() calls in one run.
+          if (res.status === 401 || res.status === 403) {
+            embeddingApiAvailable = false;
+          }
           throw new Error(JSON.stringify(err));
         }
 

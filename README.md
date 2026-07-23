@@ -20,14 +20,13 @@ npm run dev -- -p 3001
 
 ### 2. Environment Setup
 
-Set these variables in your Convex dashboard (or via CLI):
+Set these environment variables in your Convex dashboard (or via `npx convex env set`):
 
-- `GEMINI_API_KEY` — Gemini models (also stored via dashboard Settings)
-- `ZEPTOMAIL_API_KEY` — Email delivery via ZeptoMail (also stored via Settings)
-- `SERPER_API_KEY` — Website discovery / search (also stored via Settings)
-- `FIRECRAWL_API_KEY` — Web scraping / sitemap extraction (also stored via Settings)
-- `GOOGLE_CALENDAR_WEBHOOK_TOKEN` — Verify Google Calendar push notifications
+- `NEXT_PUBLIC_CONVEX_URL` — Convex deployment URL for the frontend
+- `NEXT_PUBLIC_CONVEX_SITE_URL` — Convex site URL (HTTP actions)
+- `SITE_URL` — Public frontend URL used by Convex Auth for password-reset callbacks (e.g., `https://your-app.netlify.app` or `https://your-app.vercel.app`)
 - `SETTINGS_OBFUSCATION_SECRET` — XOR-obfuscate API keys stored in DB
+- `GOOGLE_CALENDAR_WEBHOOK_TOKEN` — Verify Google Calendar push notifications
 - `LLM_DAILY_BUDGET_USD` — Daily LLM spend soft cap (default $50)
 - `DISABLE_TEST_ENDPOINTS` — Set `false` to enable HTTP test endpoints in `convex/http.ts`
 - `TEST_WEBHOOK_SECRET` — Bearer token required for HTTP test endpoints
@@ -36,9 +35,26 @@ Set these variables in your Convex dashboard (or via CLI):
 - `SKIP_RATE_LIMITS` *(optional)* — Set `true` only for local testing; must be unset in production
 - `SENTRY_DSN` *(optional)* — Sentry error tracking
 
-API keys can be managed in **Settings → API Keys**. Values are stored in Convex and XOR-obfuscated with `SETTINGS_OBFUSCATION_SECRET`.
+### 3. Dashboard Settings
 
-### 3. Core Features
+API keys and sender details are managed in **Settings → API Keys** in the app. Values are stored in the `systemSettings` table and XOR-obfuscated with `SETTINGS_OBFUSCATION_SECRET`:
+
+| Setting | What It Powers |
+| ------- | ---------------- |
+| **Google Gemini** | AI reasoning, reply classification, proposal generation |
+| **Serper** | Web search, news, and image discovery |
+| **Firecrawl** | Deep crawling, sitemap discovery, contact extraction |
+| **ZeptoMail API Key** | Sending transactional and outreach emails, including password reset codes |
+| **ZeptoMail From Email** | Verified sender address for all outbound emails (default: `outreach@fretbox.in`) |
+| **ZeptoMail From Name** | Display name for outbound emails |
+| **Google Calendar Service Account** | Creating calendar events and Meet links from proposals |
+
+### 4. Authentication
+
+- **Email / Password Auth**: Convex Auth Password provider (`convex/auth.ts`).
+- **Forgot Password**: Users can request a reset code via `/forgot-password` and set a new password on `/reset-password`. Reset codes are sent through ZeptoMail and expire in 1 hour.
+
+### 5. Core Features
 
 - **University Ingestion**: Bulk CSV upload and UGC.gov.in sync.
 - **Automated Discovery**: AI finds and validates university websites, then enriches signals.

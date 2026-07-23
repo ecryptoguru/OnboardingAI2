@@ -158,7 +158,7 @@ export const validateWebsite = internalAction({
 
     async function tryJinaFallback(targetUrl: string): Promise<boolean> {
       try {
-        const response = await fetch(`https://r.jina.ai/${targetUrl}`, {
+        const response = await fetch(`https://r.jina.ai/${encodeURIComponent(targetUrl)}`, {
           headers: { Accept: "text/plain" },
           signal: AbortSignal.timeout(12000),
         });

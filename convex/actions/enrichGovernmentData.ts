@@ -354,7 +354,7 @@ export const enrichGovernmentData = internalAction({
             // Fallback 1: Jina Reader can extract text from PDF URLs too
             if (combinedPdf.length < 200) {
               try {
-                const jinaRes = await fetch(`https://r.jina.ai/${extUrl}`, {
+                const jinaRes = await fetch(`https://r.jina.ai/${encodeURIComponent(extUrl)}`, {
                   headers: { Accept: "text/plain" },
                   signal: AbortSignal.timeout(15000),
                 });
@@ -387,7 +387,7 @@ export const enrichGovernmentData = internalAction({
             }
           }
 
-          const jinaRes = await fetch(`https://r.jina.ai/${extUrl}`, {
+          const jinaRes = await fetch(`https://r.jina.ai/${encodeURIComponent(extUrl)}`, {
             headers: { Accept: "text/plain" },
             signal: AbortSignal.timeout(15000),
           });

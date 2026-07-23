@@ -111,11 +111,20 @@ export async function withRetry<T>(
       const msg = err instanceof Error ? err.message : String(err);
       const msgLower = msg.toLowerCase();
 
-      // Do NOT retry on safety/policy blocks
+      // Do NOT retry on safety/policy blocks or quota/credit exhaustion
       if (
         msgLower.includes("halted") ||
         msgLower.includes("blockreason") ||
         msgLower.includes("safety")
+      ) {
+        return false;
+      }
+      if (
+        msgLower.includes("not enough credits") ||
+        msgLower.includes("insufficient credits") ||
+        msgLower.includes("quota") ||
+        msgLower.includes("rate limit") ||
+        msgLower.includes("billing")
       ) {
         return false;
       }
@@ -136,6 +145,8 @@ export async function withRetry<T>(
         "socket hang up",
         "econnrefused",
         "econnreset",
+        "abort",
+        "aborted",
       ];
       return transientKeywords.some((keyword) => msgLower.includes(keyword));
     },
@@ -309,6 +320,12 @@ export interface ParsedDemographics {
   day_scholars_female?: number;
 }
 
+const MAX_PLAUSIBLE_STUDENT_COUNT = 2_000_000; // Upper bound for any demographic count
+
+function isPlausibleStudentCount(n?: number): n is number {
+  return typeof n === "number" && n > 0 && n <= MAX_PLAUSIBLE_STUDENT_COUNT;
+}
+
 /**
  * Parse common demographics fields from mixed/tabular text.
  * This is a deterministic fallback for cases where LLM extraction returns nulls.
@@ -322,16 +339,18 @@ export function extractDemographicsFromText(text: string): ParsedDemographics {
     maleValue?: number,
     femaleValue?: number,
   ) {
-    if (maleValue && maleValue > 50) {
+    const safeMale = isPlausibleStudentCount(maleValue) ? maleValue : undefined;
+    const safeFemale = isPlausibleStudentCount(femaleValue) ? femaleValue : undefined;
+    if (safeMale && safeMale > 50) {
       out[`${label}_male` as "hostelites_male" | "day_scholars_male"] =
-        maleValue;
+        safeMale;
     }
-    if (femaleValue && femaleValue > 50) {
+    if (safeFemale && safeFemale > 50) {
       out[`${label}_female` as "hostelites_female" | "day_scholars_female"] =
-        femaleValue;
+        safeFemale;
     }
-    if (maleValue && femaleValue) {
-      const derivedTotal = maleValue + femaleValue;
+    if (safeMale && safeFemale) {
+      const derivedTotal = safeMale + safeFemale;
       if (
         !out[label] ||
         typeof out[label] !== "number" ||
@@ -347,26 +366,26 @@ export function extractDemographicsFromText(text: string): ParsedDemographics {
   );
   const male = maleFemalePair ? toNum(maleFemalePair[1]) : undefined;
   const female = maleFemalePair ? toNum(maleFemalePair[2]) : undefined;
-  if (male && male > 100) out.total_students_male = male;
-  if (female && female > 100) out.total_students_female = female;
+  if (isPlausibleStudentCount(male) && male > 100) out.total_students_male = male;
+  if (isPlausibleStudentCount(female) && female > 100) out.total_students_female = female;
 
   const totalMatch = text.match(
     /(total\s+(?:students|enrol+ed|enrollment|student\s+strength)|overall\s+students?)[^0-9]{0,25}([\d,]+)/i,
   );
   const total = totalMatch ? toNum(totalMatch[2]) : undefined;
-  if (total && total > 500) out.total_students = total;
+  if (isPlausibleStudentCount(total) && total > 500) out.total_students = total;
 
   const hostelMatch = text.match(
     /(hostel(?:ite|er)?s?|hostellers?|hostel\s+strength|residential\s+students?)[^0-9]{0,25}([\d,]+)/i,
   );
   const hostel = hostelMatch ? toNumStrict(hostelMatch[2]) : undefined;
-  if (hostel && hostel > 100) out.hostelites = hostel;
+  if (isPlausibleStudentCount(hostel) && hostel > 100) out.hostelites = hostel;
 
   const dayMatch = text.match(
     /(day[\s-]*scholars?|non[\s-]*residential)[^0-9]{0,25}([\d,]+)/i,
   );
   const day = dayMatch ? toNumStrict(dayMatch[2]) : undefined;
-  if (day && day > 100) out.day_scholars = day;
+  if (isPlausibleStudentCount(day) && day > 100) out.day_scholars = day;
 
   const hostelSplitMatch = compactText.match(
     /(hostel(?:ite|er)?s?|hostellers?|residential students?)[^0-9]{0,40}(?:male|boys)[^0-9]{0,20}([\d,]+)[^a-zA-Z0-9]{0,30}(?:female|girls)[^0-9]{0,20}([\d,]+)/i,
