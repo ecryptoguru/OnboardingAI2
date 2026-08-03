@@ -20,3 +20,31 @@ Convex agent skills for common tasks can be installed by running
 - **HTTP test endpoints** in `convex/http.ts` are disabled by default. Enable them with `DISABLE_TEST_ENDPOINTS=false` and pass `TEST_WEBHOOK_SECRET` as a bearer token.
 
 <!-- convex-ai-end -->
+
+## Learned project info
+
+### Tech stack
+- Convex + Next.js 15 + React 19 + Tailwind CSS v3.4.1
+- Convex backend: queries, mutations, actions, crons, HTTP routes, vector search, and a `systemSettings` key-value store for API keys
+
+### Data seeding
+- 80 curated INIs (IIT/NIT/IIIT) are seeded via `convex/actions/iniSeed.ts` and protected from UGC sync overwrites in `convex/actions/ugcSync.ts`
+
+### Email and webhooks
+- ZeptoMail is the email service: `convex/actions/email.ts`, `convex/http.ts` webhooks, and settings in `convex/settings.ts`
+- Webhook paths live on the Convex site origin: `https://<project>.convex.site/webhooks/zeptomail` and `https://<project>.convex.site/webhooks/email-reply`
+- Emails are HITL-approved: `convex/actions/email.ts` `approveAndSend` only sends after a human approves a `pending_approval` draft
+- Reply classification and auto-replies are in `convex/actions/replyClassifier.ts` and `convex/actions/autoReply.ts`
+- Proposals use Google Calendar integration in `convex/actions/proposals.ts` and `convex/lib/googleCalendar.ts`
+
+### Build, test, and verification commands
+- Master checklist script: `python3 .devin/scripts/checklist.py .`
+- Type check: `npx tsc --noEmit`
+- Lint: `npm run lint`
+- Unit tests: `npm run test:unit`
+- E2E tests: `npm test` (Playwright; requires dev server on port 3000)
+
+### Recent configuration findings
+- Playwright `baseURL` is `http://localhost:3000`
+- ZeptoMail webhooks live on `.convex.site`, not `.convex.cloud`
+- Email sending requires all three of: ZeptoMail API key, From Email, and From Name

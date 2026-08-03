@@ -1,60 +1,68 @@
-# AI Enrichment Pipeline Audit & Refactor Plan
+# Fretbox Outreach AI v2 — Implementation & Delivery Plan
 
 ## Status
 
-The initial audit and the P0 security/maintainability refactor have been implemented. The remaining ongoing work is to keep the audit dimensions in mind while adding new features.
+All v2.0 milestones are **delivered and operational**. The current focus is continuous improvement: data quality, pipeline refinements, monitoring, and audit-driven hardening. This document tracks what has been built and the ongoing guardrails that guide future changes.
 
 ## Scope
 
-Full audit of the Outreach AI enrichment pipeline for Fretbox, covering:
+End-to-end outreach automation for university hostel management:
 
-- `convex/actions/discovery.ts` — Website discovery via Serper
-- `convex/actions/scraper.ts` — Stakeholder extraction (Jina + Gemini 3.5 Flash)
-- `convex/actions/deepEnrichment.ts` — Deep enrichment (Firecrawl + Gemini 3.5 Flash)
-- `convex/actions/enrichment.ts` — Social/media enrichment (Serper + Gemini Grounding)
-- `convex/actions/scoring.ts` — AI scoring (Gemini Flash-Lite)
-- `convex/actions/orchestrator.ts` — Enrichment chain orchestration
-- `convex/actions/outreach.ts` — Sequence dispatch and cadence
-- `convex/actions/replyClassifier.ts` — Inbound reply classification
-- `convex/actions/proposals.ts` — Proposal generation and meeting management
-- `convex/actions/email.ts` — Email dispatch
-- `convex/lib/llm.ts` — LLM abstraction layer
-- `convex/lib/prompts.ts` — System prompts and schemas
-- `convex/lib/scrapers.ts` — Firecrawl client + regex fallback
+- University ingestion (CSV, UGC sync, curated INI seed)
+- Website discovery and validation
+- Stakeholder extraction and enrichment
+- AI-driven signal discovery, demographics, and scoring
+- Multi-step outreach sequences with human-in-the-loop (HITL) approval
+- ZeptoMail email delivery, inbound reply handling, and auto-replies
+- AI proposal generation (rich HTML) with Google Calendar / Meet integration
+- Real-time dashboard (Universities, Enrichment, Outreach, Approvals, Proposals, Analytics, Settings)
+- Authentication, including password reset
+- Security, UX, and SEO hardening with audit scripts and test coverage
+
+## Completed Milestones
+
+| Milestone | Delivered | Key Outcome |
+|-----------|-----------|-------------|
+| **M1 — Architecture** | Done | Convex + Next.js 15 backend/frontend, Convex Native Auth, reactive queries, serverless actions |
+| **M2 — Data Ingestion** | Done | CSV upload, UGC.gov.in sync, curated INI seed, batched bulk writes |
+| **M3 — AI Enrichment** | Done | Discovery, scraping, signals, government-data enrichment, demographics, contact inference, scoring |
+| **M4 — Outreach Engine** | Done | Scheduled sequences, HITL approvals, ZeptoMail dispatch, reply classification, auto-replies |
+| **M5 — Proposals** | Done | AI-generated rich HTML proposals, Google Calendar events, Meet links, confirmation/cancellation flows |
+| **M6 — Dashboard** | Done | Universities, Enrichment, Outreach, Approvals, Proposals, Analytics, Settings pages |
+| **M7 — Security & Hardening** | Done | Action internalization, API key sanitization, webhook auth, test-endpoint lockdown, audit scripts |
+| **M8 — Testing** | Done | Unit tests (`tests/unit`), Playwright E2E (`tests/e2e`), master checklist runner |
 
 ## Audit Dimensions
 
+These dimensions are kept in mind for every new feature or refactor:
+
 | Dimension | Focus |
 |-----------|-------|
-| **Factual Grounding** | Hallucination risks in extraction, scoring, and proposal generation. Null-vs-0 handling. Source attribution. |
+| **Factual Grounding** | Hallucination risks in extraction, scoring, and proposals. Null-vs-0 handling. Source attribution. |
 | **Structured Output Reliability** | JSON schema validation, parsing fallbacks, malformed response handling. |
-| **Fallback Behavior** | Graceful degradation when APIs (Jina, Firecrawl, Serper, Gemini) fail. |
-| **Cost & Latency** | Model routing appropriateness, token budgets, missing cost telemetry. |
+| **Fallback Behavior** | Graceful degradation when Jina, Firecrawl, Serper, Gemini, or ZeptoMail fail. |
+| **Cost & Latency** | Model routing, token budgets, daily LLM budget (`llmBudget`), 48h deterministic cache (`llmCache`). |
 | **Privacy Exposure** | PII leakage in logs, prompts, or third-party APIs. Data retention boundaries. |
-| **Prompt Injection** | Content sanitization, user-input boundaries, filter robustness. |
-| **Instrumentation** | Observability gaps, missing metrics, alert boundaries. |
-| **Security** | Public action auth (`validateAuth`), internalization (`internalAction`), HTTP test endpoint lockdown (`DISABLE_TEST_ENDPOINTS` / `TEST_WEBHOOK_SECRET`), API key sanitization (`sanitizeApiKey`). |
+| **Prompt Injection** | `sanitizeLlmInput` and `sanitizeLlmOutput` boundaries. |
+| **Instrumentation** | Sentry error tracking, `llmUsage` cost telemetry, rate-limiting. |
+| **Security** | `validateAuth` on public actions, `internalAction` for crons/webhooks, `sanitizeApiKey`, HTTP endpoint lockdown. |
 
-## Agent Assignments (Phase 2)
+## Agent Responsibilities
 
 | Agent | Responsibility |
-|-------|---------------|
+|-------|----------------|
 | `ai-engineer` | Prompt quality, structured output reliability, model routing, hallucination guardrails |
 | `security-auditor` | Prompt injection, PII leakage, API key handling, data exposure, auth/internalization |
 | `backend-specialist` | Service resilience, retry logic, timeout handling, error propagation, internal actions |
 | `test-engineer` | Evaluation gaps, regression tests, output validation coverage |
+| `documentation-writer` | Keep `PLAN.md`, `Requirement.md`, `roadmap.md`, and `README.md` aligned with shipped behavior |
 
-## Completed Refactor Items
+## Ongoing Work
 
-- Pipeline actions internalized (`internalAction`) and public actions wrapped with `validateAuth()`.
-- `api.actions.*` references in internal code replaced with `internal.actions.*`.
-- HTTP test endpoints disabled by default and gated by `DISABLE_TEST_ENDPOINTS` / `TEST_WEBHOOK_SECRET`.
-- `sanitizeApiKey()` tightened to printable ASCII (33–126) and applied in `set*Key` mutations.
-- Proposal statuses extended to include `meeting_confirmed` and `cancelled`.
-- `confirmMeeting` made idempotent and `cancelMeeting` implemented.
-- `getFunnelStats` uses `collect()` for accurate counts.
-- Circular type inference in `email.ts` and `proposals.ts` resolved via `do*` helpers.
+- Pipeline data-quality improvements (source attribution, demographics accuracy)
+- Additional unit/E2E coverage for new flows
+- LLM cost and telemetry dashboards
+- UX/SEO/accessibility refinements driven by `.devin/scripts/checklist.py`
 
-## Deliverable
-
-`docs/AI_AUDIT_REPORT.md` with findings ranked: **blocker** / **risk** / **recommended fix** (create when the next audit cycle is run).
+---
+*Last updated: v2.0 delivery*
