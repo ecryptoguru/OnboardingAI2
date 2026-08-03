@@ -26,17 +26,20 @@
 ## 2. Sign Up, Sign In, and Forgot Password
 
 ### Creating an account
+
 1. Open the **Sign Up** page.
 2. Enter your email and a password with at least 8 characters.
 3. Click **Create account**.
 4. You are signed in automatically and redirected to the dashboard.
 
 ### Signing in
+
 1. Open the **Sign In** page.
 2. Enter your email and password.
 3. Click **Sign in**.
 
 ### Resetting your password
+
 1. On the **Sign In** page, click **Forgot password?**
 2. Enter your account email and click **Send reset code**.
 3. Check your inbox for the reset code (it expires in 1 hour).
@@ -63,6 +66,7 @@ The left sidebar is organized into three sections:
   - **Settings** — Configure API keys, sender details, and calendar integration.
 
 Badges on the sidebar show live counts:
+
 - **Outreach** — Number of unclassified replies.
 - **Approvals** — Number of pending emails awaiting your review.
 
@@ -73,14 +77,17 @@ A **Sign out** button is at the bottom of the sidebar. The **Theme Toggle** is i
 ## 4. Universities
 
 ### Browse the list
+
 The **Universities** page shows your full database in a table. Use the tabs at the top to filter by type: **All**, **Central**, **State**, **Private**, **Deemed**, and **Other**.
 
 Each tab also shows a count badge for that type.
 
 ### Search
+
 Type at least two characters in the search bar. Results update automatically after you stop typing (with a 300 ms debounce).
 
 ### Upload universities via CSV
+
 1. Click **Upload CSV**.
 2. Select a CSV with at least a `university_name` column.
 
@@ -91,7 +98,7 @@ Type at least two characters in the search bar. Results update automatically aft
 | `university_name` | Yes | `Name`, `University` | "Delhi University" |
 | `state` | No | `State` | "Delhi" |
 | `city` | No | `City` | "New Delhi" |
-| `website` | No | `Website` | "https://du.ac.in" |
+| `website` | No | `Website` | "<https://du.ac.in>" |
 | `student_count` | No | `Students` | 70000 |
 | `type` | No | `Type` | "Public", "Private", "Deemed", "Central", "State" |
 | `naac_grade` | No | `NAAC` | "A++", "A+", "A", "B" |
@@ -99,16 +106,21 @@ Type at least two characters in the search bar. Results update automatically aft
 > **Edge case:** Universities with a duplicate `university_name` are skipped during upload. The upload status shows how many were imported and how many were skipped.
 
 ### Sync from UGC
+
 Click **Sync All UGC Universities** to fetch the latest Indian university dataset from UGC. The action merges new and changed records into your database and shows the number of universities added and updated.
 
 ### Sync IITs / NITs / IIITs
+
 Click **Sync IITs / NITs / IIITs** to seed Institutes of National Importance (IITs, NITs, IIITs, and similar elite institutions). The action shows how many were added, updated, and skipped because they were already present.
 
 ### Validate Websites
+
 Click **Validate Websites** to schedule automated website verification across your database. Validation runs in batches of 50 and checks whether each university has a valid, discoverable, or invalid website.
 
 ### University detail view
+
 Click any table row to open a detail panel. The panel shows:
+
 - University name, location, zip code, and a link to its website.
 - Student count and UGC recognition status.
 - A **Deep Enrich (AISHE + Social)** button to run the full enrichment chain on that university.
@@ -128,6 +140,7 @@ Click any table row to open a detail panel. The panel shows:
 Enrichment is the multi-phase process of using AI to research a university and extract valuable signals.
 
 ### The enrichment chain
+
 For each selected university, the system runs the following phases in order:
 
 | Phase | What it does |
@@ -142,6 +155,7 @@ For each selected university, the system runs the following phases in order:
 | **Scoring** | Generates a **Priority Score** and a **lead tier** (High / Medium / Low). |
 
 ### How to run enrichment
+
 1. Go to **Enrichment**.
 2. In the **Pending / New** column, select universities via the checkboxes.
 3. Use **Select All** to quickly pick every visible university.
@@ -151,7 +165,9 @@ For each selected university, the system runs the following phases in order:
 > **Tip:** Start with a small batch (5–10) to see how the AI personalizes signals before scaling. The system runs selected enrichments in parallel.
 
 ### Results
+
 After enrichment, a university shows:
+
 - A **lead tier** (High / Medium / Low) in the Enrichment and Outreach cards.
 - A **priority score** in the detail panel.
 - **Demographics** — student totals, day scholars, and hostelites.
@@ -165,6 +181,7 @@ After enrichment, a university shows:
 The **Outreach** page is a Kanban-style pipeline that tracks where each university sits in your sales process.
 
 ### Pipeline columns
+
 The Kanban has five columns:
 
 | Column | Meaning |
@@ -178,6 +195,7 @@ The Kanban has five columns:
 Each card shows the university name, location, lead tier, current outreach stage, and a meeting badge when applicable. Cards in an active sequence display the current step, total steps, status (Active or Awaiting Approval), and a progress bar.
 
 ### Starting a sequence
+
 1. Find a university in **Ready to Sequence**.
 2. Click its card and then **Begin Sequence**.
 3. The AI creates a 4-step sequence and drafts the first email.
@@ -185,7 +203,9 @@ Each card shows the university name, location, lead tier, current outreach stage
 5. Once approved, the email is sent via ZeptoMail and the sequence resumes.
 
 ### Sequence steps
+
 The default sequence has 4 steps:
+
 1. **Initial Outreach**
 2. **Follow-up 1**
 3. **Value-Add Follow-up**
@@ -194,12 +214,15 @@ The default sequence has 4 steps:
 Auto-replies use a special step number **99** and are visible in the approvals queue with that label.
 
 ### Reverting a stage
+
 Each Kanban card has a **Move back a step** button that rewinds the university to the previous stage.
 
 ### Skipping a university
+
 Use the **Skip University** button in the header to permanently remove a university from the active pipeline. A **Skipped List** tab lets you review and search skipped universities.
 
 ### Client demo view
+
 The **Client Demo View** button opens a read-only demo page of the pipeline.
 
 ---
@@ -209,6 +232,7 @@ The **Client Demo View** button opens a read-only demo page of the pipeline.
 The **Approvals** page is the mandatory Human-in-the-Loop (HITL) gate. Every AI-drafted email must be reviewed before it is sent.
 
 ### Reviewing an email
+
 1. Go to **Approvals**.
 2. Each card shows the step number, step label, university, recipient, subject, and body.
 3. Choose an action:
@@ -220,6 +244,7 @@ The **Approvals** page is the mandatory Human-in-the-Loop (HITL) gate. Every AI-
 | **Reject** | Deletes the draft permanently and pauses the sequence for that stakeholder. |
 
 ### Bulk approve
+
 If you have multiple pending drafts, click **Approve All** to send them all at once. The button shows the number of pending emails.
 
 > **Tip:** A quick human edit — like mentioning a recent university award or specific hostel count — can significantly improve open and reply rates.
@@ -231,12 +256,16 @@ If you have multiple pending drafts, click **Approve All** to send them all at o
 Proposals are AI-generated rich HTML deal documents tailored to each university. They are not PDFs; they are sent as HTML emails.
 
 ### Creating a proposal
+
 You can create a proposal in two ways:
+
 - **Manually** — Click **Generate Proposal**, select a university, optionally select a stakeholder, and confirm.
 - **Automatically** — When a stakeholder replies with a meeting request, the system creates a draft proposal with **Meeting Pending** status.
 
 ### Proposal content
+
 The AI produces a structured document containing:
+
 - Executive summary (hook, why now, vision statement)
 - Problem statement
 - Solution overview
@@ -255,6 +284,7 @@ The AI produces a structured document containing:
 | **Meeting Confirmed** | A meeting has been confirmed and a Google Calendar event with a Meet link created. |
 
 ### Previewing and sending
+
 1. Open a ready proposal.
 2. Click **Preview & Send**.
 3. The modal has two sides: the document editor on the left and send settings on the right.
@@ -264,7 +294,9 @@ The AI produces a structured document containing:
 7. Click **Send Proposal**. The proposal is sent as a rich HTML email via ZeptoMail.
 
 ### Confirming, rescheduling, or cancelling a meeting
+
 When a proposal is **Meeting Pending**:
+
 1. Click **Confirm Meeting & Create Meet Link**.
 2. Choose a **start time** and a **duration** (15, 30, 45, or 60 minutes).
 3. Click **Confirm & Generate Link**.
@@ -274,7 +306,9 @@ When a proposal is **Meeting Pending**:
 For confirmed meetings, the button becomes **Reschedule Meeting**. If the meeting cannot happen, click **Cancel** to set the Google Calendar event status to cancelled; the proposal remains in the system so you can reconfirm later.
 
 ### Google Calendar integration
+
 To enable automatic calendar events:
+
 1. Go to **Settings → API Keys**.
 2. Add your **Google Calendar Service Account JSON** (from Google Cloud).
 3. Set a **Calendar ID** — use `primary` or a specific calendar. The default is `primary`.
@@ -286,13 +320,16 @@ To enable automatic calendar events:
 ## 9. Replies and Auto-Replies
 
 ### Inbound reply webhook
+
 When a stakeholder replies, the inbound reply webhook (`/webhooks/email-reply`) resolves the conversation context by:
+
 - Matching the `Message-ID` / `In-Reply-To` headers to a sent email.
 - Falling back to the sender email address to find the stakeholder.
 
 If the context cannot be resolved, the webhook returns an error and the reply must be reviewed manually.
 
 ### Reply classification
+
 Once context is resolved, the system stores the raw reply and uses Gemini to classify it into one of these categories:
 
 | Classification | Follow-up action |
@@ -307,6 +344,7 @@ Once context is resolved, the system stores the raw reply and uses Gemini to cla
 The outreach stage is updated automatically: `meeting_request` becomes **Meeting Booked**, `not_interested` / `opt_out` becomes **Not Interested**, and other replies become **Replied**.
 
 ### Auto-replies
+
 For `meeting_request`, `positive_interest`, and `request_info` replies, the system automatically sends a polite, threaded response (with proper `In-Reply-To` and `References` headers). For `meeting_request`, the response uses any existing Google Meet link when available.
 
 High-stakes classifications (`meeting_request` or `positive_interest`) with low model confidence (below 0.85) are blocked from auto-reply and flagged for human review.
@@ -320,6 +358,7 @@ Unclassified or unmatched replies show a badge on the **Outreach** sidebar item 
 The **Analytics** page gives a high-level view of pipeline performance.
 
 ### Outreach funnel
+
 A horizontal bar chart shows how many universities are at each stage:
 
 ```
@@ -329,13 +368,16 @@ Total Universities → Enriched → Outreach Active → Replied → Meeting Book
 The funnel uses the exact sum of all tracked outreach stages. Each bar also shows the conversion rate from the previous stage.
 
 ### Key metrics
+
 Four cards show:
+
 - **Reply Rate** — percentage of active outreach that received a reply.
 - **Meeting Rate** — percentage of replies that booked a meeting.
 - **High Tier Leads** — count of universities with a High lead tier (plus Medium tier shown as a sub-label).
 - **Not Interested** — count of universities that opted out or did not reply.
 
 ### Email performance
+
 A table breaks down delivery metrics for each of the four sequence steps:
 
 | Metric | What it tells you |
@@ -349,6 +391,7 @@ A table breaks down delivery metrics for each of the four sequence steps:
 The step labels are **Initial Outreach**, **Follow-up 1**, **Value Add**, and **Break-up**.
 
 ### Reply intent breakdown
+
 A grid of classification cards shows how stakeholders have responded and the percentage of total replies each represents.
 
 ---
@@ -358,6 +401,7 @@ A grid of classification cards shows how stakeholders have responded and the per
 The **Settings** page is where you configure all integrations and credentials.
 
 ### API Keys
+
 Each integration has its own card with a status indicator, input field, **Save**, **Test**, and **Remove** actions:
 
 | Section | What it powers |
@@ -372,6 +416,7 @@ Each integration has its own card with a status indicator, input field, **Save**
 | **Google Calendar ID** | Target calendar for meetings (default: `primary`). |
 
 For every API key you can:
+
 - Paste a new key and click **Save**.
 - Click **Test** to verify the new key before saving.
 - Click **Test Stored** to verify the currently saved key.
@@ -380,12 +425,15 @@ For every API key you can:
 > **Validation:** API keys are sanitized before storage. Only printable ASCII characters (33–126) are accepted; leading/trailing whitespace, control characters, and non-ASCII characters are rejected. If a key is rejected, re-enter it without extra spaces or special characters.
 
 ### Google Calendar test
+
 Click the **Test** button in the **Google Calendar Service Account** section to verify that the service account can create a test event on the configured calendar.
 
 ### Danger Zone
+
 The **Danger Zone** at the bottom of the Settings page contains **Wipe All Enrichment & Outreach Data**. Use this with caution; it permanently removes enrichment, outreach, reply, and proposal data from the workspace.
 
 ### Theme
+
 Use the **Theme Toggle** in the sidebar header to switch between light and dark mode.
 
 ---
