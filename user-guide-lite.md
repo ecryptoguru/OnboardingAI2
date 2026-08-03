@@ -30,7 +30,7 @@ This is a simple, non-technical guide for sales, ops, and onboarding teammates. 
 Go to **Settings → API Keys** and add:
 
 | Setting | Why it matters |
-|---------|----------------|
+| --------- | ---------------- |
 | Google Gemini | Powers all AI reasoning and content. |
 | Serper | Searches and discovers university websites and news. |
 | Firecrawl | Crawls websites and extracts contacts. |
@@ -68,7 +68,7 @@ Each key can be **saved, tested, and removed** independently.
 ## Outreach Pipeline
 
 | Column | Meaning |
-|--------|---------|
+| -------- | --------- |
 | Ready to Sequence | Ready for first outreach. |
 | Outreach Active | Emails are being sent. |
 | Replied | Contact responded. |

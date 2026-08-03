@@ -18,7 +18,7 @@ webhooks — all in TypeScript with zero infrastructure to manage.
 ### Final Tech Stack
 
 | Layer | Technology |
-|-------|------------|
+| ------- | ------------ |
 | Backend | Convex (TypeScript) — Queries, Mutations, Actions, HTTP Actions |
 | Database | Convex DB (Document-Relational, reactive) |
 | Task Queue | Convex Scheduled Functions + Cron Jobs |
@@ -119,7 +119,7 @@ All six original build phases are complete. The table below records the final, a
 ### PHASE 1: CONVEX FOUNDATION Done
 
 | # | Task | Details | Status |
-|---|------|---------|--------|
+| --- | ------ | --------- | -------- |
 | 1.1 | Init Convex | `npx convex dev` in project root. `/convex` directory created. | Done |
 | 1.2 | Define Schema | `convex/schema.ts` with auth, universities, stakeholders, priorityScores, universitySignals, outreachSequences, emailsSent, replyLogs, proposals, rateLimits, llmBudget, llmCache, systemSettings. Indexes + 768-dim vector index. | Done |
 | 1.3 | Convex Native Auth | `convex/auth.config.ts` with Password provider. `ConvexAuthNextjsServerProvider` in `app/layout.tsx`. `convexAuthNextjsMiddleware()` in `middleware.ts`. | Done |
@@ -131,7 +131,7 @@ All six original build phases are complete. The table below records the final, a
 ### PHASE 2: DATA INGESTION & WEBSITE DISCOVERY Done
 
 | # | Task | Details | Status |
-|---|------|---------|--------|
+| --- | ------ | --------- | -------- |
 | 2.1 | CSV Parse Action | `convex/actions/ingest.ts` — parse CSV bytes, bulk insert via `ctx.runMutation`. | Done |
 | 2.2 | UGC Sync | `convex/actions/ugcSync.ts` — strict matching, batched writes, in-memory deduplication. | Done |
 | 2.3 | Curated INI Seed | Seeded curated university list with known baseline data. | Done |
@@ -143,7 +143,7 @@ All six original build phases are complete. The table below records the final, a
 ### PHASE 3: STAKEHOLDER EXTRACTION & ENRICHMENT Done
 
 | # | Task | Details | Status |
-|---|------|---------|--------|
+| --- | ------ | --------- | -------- |
 | 3.1 | Scraper Action | `convex/actions/scraper.ts` — `fetch()` HTML parse → Jina Reader → Firecrawl fallback. | Done |
 | 3.2 | Anti-Ragging Scrape | `convex/actions/scrapeAntiRagging.ts` — extra stakeholder discovery from anti-ragging pages. | Done |
 | 3.3 | Stakeholder Extract | Upsert stakeholders with role, email, phone, LinkedIn, source attribution. | Done |
@@ -159,7 +159,7 @@ All six original build phases are complete. The table below records the final, a
 ### PHASE 4: OUTREACH AUTOMATION ENGINE Done
 
 | # | Task | Details | Status |
-|---|------|---------|--------|
+| --- | ------ | --------- | -------- |
 | 4.1 | Sequence Manager | `convex/sequences.ts` — state machine (`active`, `paused`, `completed`, `opted_out`). | Done |
 | 4.2 | Email Action | `convex/actions/email.ts` — ZeptoMail REST `POST https://api.zeptomail.in/v1.1/email` with retry. | Done |
 | 4.3 | Email Templates | `convex/lib/emailTemplates.ts` — typed intro, follow-up, auto-reply, proposal templates. | Done |
@@ -175,7 +175,7 @@ All six original build phases are complete. The table below records the final, a
 ### PHASE 5: PROPOSALS Done
 
 | # | Task | Details | Status |
-|---|------|---------|--------|
+| --- | ------ | --------- | -------- |
 | 5.1 | Google Calendar Webhook | `convex/http.ts` — Google Calendar push notifications verified with `GOOGLE_CALENDAR_WEBHOOK_TOKEN`. | Done |
 | 5.2 | Meeting Confirmation | `convex/actions/proposals.ts` — `confirmMeeting` creates calendar event + Meet link; idempotent. | Done |
 | 5.3 | Meeting Cancellation | `cancelMeeting` removes calendar event and updates proposal to `cancelled`. | Done |
@@ -187,7 +187,7 @@ All six original build phases are complete. The table below records the final, a
 ### PHASE 6: HARDENING, TESTING & MONITORING Done
 
 | # | Task | Details | Status |
-|---|------|---------|--------|
+| --- | ------ | --------- | -------- |
 | 6.1 | Sentry | `@sentry/nextjs` for frontend and `@sentry/node` for backend error/performance tracking. | Done |
 | 6.2 | Rate Limiting | Persistent rate limits and Serper budget enforcement. | Done |
 | 6.3 | LLM Budget | `llmBudget` daily spend tracking and `llmCache` 48h deterministic cache. | Done |
@@ -238,7 +238,7 @@ The following are permanently removed in v2:
 The following are grounded next steps and continuous improvements, not aspirational moonshots. Each item is small enough to ship incrementally and large enough to move the product forward.
 
 | Priority | Area | Item | Rationale |
-|----------|------|------|-----------|
+| ---------- | ------ | ------ | ----------- |
 | P2 | Data Quality | Improve demographics source attribution and add confidence scoring per field. | Higher-quality hostelite/day-scholar numbers improve targeting. |
 | P2 | Enrichment | Add fallback for blocked `.gov.in` domains and better PDF table extraction. | Government sources are high value but frequently blocked. |
 | P2 | Outreach | A/B test email templates and track open/click lift per variant. | Improve reply rates with data-driven copy. |

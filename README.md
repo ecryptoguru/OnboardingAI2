@@ -29,7 +29,7 @@ npm run dev:next     # next dev
 Set these in your Convex dashboard or with `npx convex env set <NAME> <VALUE>`:
 
 | Variable | Required | Description |
-|----------|----------|-------------|
+| ---------- | ---------- | ------------- |
 | `NEXT_PUBLIC_CONVEX_URL` | Yes | Convex API URL for the frontend: `https://<project>.convex.cloud` |
 | `NEXT_PUBLIC_CONVEX_SITE_URL` | Yes | Convex **site** URL for HTTP actions and webhooks: `https://<project>.convex.site` |
 | `SITE_URL` | Yes | Public frontend URL used for password-reset callbacks (e.g., `https://your-app.vercel.app` or `http://localhost:3000`) |
@@ -91,7 +91,7 @@ API keys and sender details are managed in **Settings → API Keys**. Values are
 HTTP actions live in `convex/http.ts` and are served from the **Convex site URL** (`NEXT_PUBLIC_CONVEX_SITE_URL`, e.g., `*.convex.site`), not the API URL (`*.convex.cloud`). Configure the following webhooks in ZeptoMail / Google Calendar:
 
 | Path | Purpose | Auth |
-|------|---------|------|
+| ------ | --------- | ------ |
 | `/webhooks/zeptomail` | Delivery, open, click, bounce events from ZeptoMail | HMAC via `ZEPTOMAIL_WEBHOOK_SECRET` |
 | `/webhooks/email-reply` | Inbound reply payloads (JSON or form-data) | Bearer token via `EMAIL_WEBHOOK_SECRET` |
 | `/webhooks/google-calendar` | Google Calendar push notifications | `x-goog-channel-token` via `GOOGLE_CALENDAR_WEBHOOK_TOKEN` |

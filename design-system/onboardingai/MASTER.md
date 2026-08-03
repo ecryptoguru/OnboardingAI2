@@ -17,7 +17,7 @@
 ### Color Palette
 
 | Role | Hex | CSS Variable |
-|------|-----|--------------|
+| ------ | ----- | -------------- |
 | Primary | `#3B82F6` | `--color-primary` |
 | Secondary | `#60A5FA` | `--color-secondary` |
 | CTA/Accent | `#F97316` | `--color-cta` |
@@ -41,7 +41,7 @@
 ### Spacing Variables
 
 | Token | Value | Usage |
-|-------|-------|-------|
+| ------- | ------- | ------- |
 | `--space-xs` | `4px` / `0.25rem` | Tight gaps |
 | `--space-sm` | `8px` / `0.5rem` | Icon gaps, inline spacing |
 | `--space-md` | `16px` / `1rem` | Standard padding |
@@ -53,7 +53,7 @@
 ### Shadow Depths
 
 | Level | Value | Usage |
-|-------|-------|-------|
+| ------- | ------- | ------- |
 | `--shadow-sm` | `0 1px 2px rgba(0,0,0,0.05)` | Subtle lift |
 | `--shadow-md` | `0 4px 6px rgba(0,0,0,0.1)` | Cards, buttons |
 | `--shadow-lg` | `0 10px 15px rgba(0,0,0,0.1)` | Modals, dropdowns |

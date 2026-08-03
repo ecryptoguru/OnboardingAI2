@@ -2,7 +2,7 @@
 
 This directory contains the `fretbox-outreach-v2` Convex backend: queries, mutations, actions, HTTP routes, crons, and shared libraries.
 
-See https://docs.convex.dev/functions for general Convex function docs.
+See [Convex function docs](https://docs.convex.dev/functions) for general Convex function docs.
 
 ## Quick start
 
@@ -37,7 +37,7 @@ Run `npx convex -h` for the full CLI. Launch the docs with `npx convex docs`.
 HTTP actions are defined in `convex/http.ts`. They are served from the **Convex site URL** (`*.convex.site`, set as `NEXT_PUBLIC_CONVEX_SITE_URL` in the frontend), not the API URL (`*.convex.cloud`).
 
 | Route | Method | Purpose | Auth |
-|-------|--------|---------|------|
+| ------- | -------- | --------- | ------ |
 | `/webhooks/zeptomail` | POST | ZeptoMail delivery, open, click, and bounce events | `producer-signature` HMAC, `ZEPTOMAIL_WEBHOOK_SECRET` |
 | `/webhooks/email-reply` | POST | Inbound email reply payloads (JSON or form-data) | `Authorization: Bearer`, `EMAIL_WEBHOOK_SECRET` |
 | `/webhooks/google-calendar` | POST | Google Calendar push/sync notifications | `x-goog-channel-token`, `GOOGLE_CALENDAR_WEBHOOK_TOKEN` |
@@ -51,7 +51,7 @@ When `REQUIRE_WEBHOOK_AUTH` is unset or `false`, missing webhook secrets are byp
 All outbound email flows through `convex/actions/email.ts` and the ZeptoMail REST API (`https://api.zeptomail.in/v1.1/email`).
 
 | Action | File | Purpose |
-|--------|------|---------|
+| -------- | ------ | --------- |
 | `sendEmail` | `actions/email.ts` | Generic internal action for transactional/outbound email; used for password reset (`convex/auth.ts`) and by other actions. |
 | `approveAndSend` | `actions/email.ts` | HITL gate: sends a drafted `pending_approval` email, records the ZeptoMail `request_id`, and resumes the sequence. |
 | `emailProposal` | `actions/proposals.ts` | Sends the generated partnership proposal as rich HTML/text to the stakeholder and CC list. |
@@ -75,7 +75,7 @@ Outreach sequence emails are inserted into `emailsSent` with `status: "pending_a
 These environment variables are read inside `convex/` functions:
 
 | Variable | Used by | Purpose |
-|----------|---------|---------|
+| ---------- | --------- | --------- |
 | `NEXT_PUBLIC_CONVEX_URL` | Auth, client actions | Convex API URL |
 | `NEXT_PUBLIC_CONVEX_SITE_URL` | Webhooks | Site URL for HTTP actions |
 | `SITE_URL` | `convex/auth.config.ts` | Password-reset callback URL |

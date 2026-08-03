@@ -87,7 +87,7 @@ Type at least two characters in the search bar. Results update automatically aft
 **Supported columns and aliases:**
 
 | Column | Required | Aliases accepted | Example |
-|--------|----------|------------------|---------|
+| -------- | ---------- | ------------------ | --------- |
 | `university_name` | Yes | `Name`, `University` | "Delhi University" |
 | `state` | No | `State` | "Delhi" |
 | `city` | No | `City` | "New Delhi" |
@@ -131,7 +131,7 @@ Enrichment is the multi-phase process of using AI to research a university and e
 For each selected university, the system runs the following phases in order:
 
 | Phase | What it does |
-|-------|--------------|
+| ------- | -------------- |
 | **Discovery** | Finds and validates the official website when one is missing or suspicious. |
 | **Scraping** | Extracts website data, including anti-ragging and contact pages. |
 | **Social & media discovery** | Searches LinkedIn, Google News, Google Images, and Serper results. |
@@ -168,7 +168,7 @@ The **Outreach** page is a Kanban-style pipeline that tracks where each universi
 The Kanban has five columns:
 
 | Column | Meaning |
-|--------|---------|
+| -------- | --------- |
 | **Ready to Sequence** | Enriched and ready for first outreach. |
 | **Outreach Active** | Emails are being sent as part of an active sequence. |
 | **Replied** | A stakeholder has replied. |
@@ -214,7 +214,7 @@ The **Approvals** page is the mandatory Human-in-the-Loop (HITL) gate. Every AI-
 3. Choose an action:
 
 | Action | Result |
-|--------|--------|
+| -------- | -------- |
 | **Approve & Send** | Dispatches the email immediately via ZeptoMail. |
 | **Edit** | Modify the subject and body, then save. You can approve after editing. |
 | **Reject** | Deletes the draft permanently and pauses the sequence for that stakeholder. |
@@ -248,7 +248,7 @@ The AI produces a structured document containing:
 ### Proposal statuses
 
 | Status | Meaning |
-|--------|---------|
+| -------- | --------- |
 | **Draft** | The proposal is being generated. |
 | **Ready** | The proposal is ready to preview and send. |
 | **Sent** | The proposal has been emailed to the stakeholder. |
@@ -296,7 +296,7 @@ If the context cannot be resolved, the webhook returns an error and the reply mu
 Once context is resolved, the system stores the raw reply and uses Gemini to classify it into one of these categories:
 
 | Classification | Follow-up action |
-|----------------|------------------|
+| ---------------- | ------------------ |
 | `meeting_request` | Creates a draft proposal; confirms meeting in the Proposals page. |
 | `positive_interest` | Continues the sequence or sends a positive follow-up. |
 | `request_info` | Sends details or FAQ. |
@@ -339,7 +339,7 @@ Four cards show:
 A table breaks down delivery metrics for each of the four sequence steps:
 
 | Metric | What it tells you |
-|--------|-------------------|
+| -------- | ------------------- |
 | **Sent** | Emails dispatched. |
 | **Opened** | Recipients opened the email. |
 | **Open Rate** | Percentage of sent emails that were opened. |
@@ -361,7 +361,7 @@ The **Settings** page is where you configure all integrations and credentials.
 Each integration has its own card with a status indicator, input field, **Save**, **Test**, and **Remove** actions:
 
 | Section | What it powers |
-|---------|----------------|
+| --------- | ---------------- |
 | **Google Gemini API Configuration** | AI reasoning, reply classification, proposal generation, and enrichment. |
 | **Serper API Configuration** | Google Search, News, and Image discovery during enrichment. |
 | **Firecrawl API Configuration** | Deep web crawling, sitemap discovery, and contact extraction. |

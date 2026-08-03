@@ -22,7 +22,7 @@ End-to-end outreach automation for university hostel management:
 ## Completed Milestones
 
 | Milestone | Delivered | Key Outcome |
-|-----------|-----------|-------------|
+| ----------- | ----------- | ------------- |
 | **M1 — Architecture** | Done | Convex + Next.js 15 backend/frontend, Convex Native Auth, reactive queries, serverless actions |
 | **M2 — Data Ingestion** | Done | CSV upload, UGC.gov.in sync, curated INI seed, batched bulk writes |
 | **M3 — AI Enrichment** | Done | Discovery, scraping, signals, government-data enrichment, demographics, contact inference, scoring |
@@ -37,7 +37,7 @@ End-to-end outreach automation for university hostel management:
 These dimensions are kept in mind for every new feature or refactor:
 
 | Dimension | Focus |
-|-----------|-------|
+| ----------- | ------- |
 | **Factual Grounding** | Hallucination risks in extraction, scoring, and proposals. Null-vs-0 handling. Source attribution. |
 | **Structured Output Reliability** | JSON schema validation, parsing fallbacks, malformed response handling. |
 | **Fallback Behavior** | Graceful degradation when Jina, Firecrawl, Serper, Gemini, or ZeptoMail fail. |
@@ -50,7 +50,7 @@ These dimensions are kept in mind for every new feature or refactor:
 ## Agent Responsibilities
 
 | Agent | Responsibility |
-|-------|----------------|
+| ------- | ---------------- |
 | `ai-engineer` | Prompt quality, structured output reliability, model routing, hallucination guardrails |
 | `security-auditor` | Prompt injection, PII leakage, API key handling, data exposure, auth/internalization |
 | `backend-specialist` | Service resilience, retry logic, timeout handling, error propagation, internal actions |
