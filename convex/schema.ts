@@ -41,7 +41,9 @@ export default defineSchema({
     vc_name: v.optional(v.string()),
     registrar_name: v.optional(v.string()),
     student_count: v.optional(v.number()),
-    type: v.optional(v.string()), // "Private" | "Public" | "Deemed" | "Central" | "State"
+    type: v.optional(v.string()), // "Private" | "Public" | "Deemed" | "Central" | "State" | "Other"
+    category: v.optional(v.string()), // "IIT" | "NIT" | "IIIT"
+    data_source: v.optional(v.string()), // "ugc" | "curated" | "csv" | "manual"
     naac_grade: v.optional(v.string()),
     established_year: v.optional(v.number()),
     notes: v.optional(v.string()),
@@ -92,6 +94,8 @@ export default defineSchema({
     .index("by_outreach_stage", ["outreach_stage"])
     .index("by_created_at", ["created_at"])
     .index("by_type", ["type"])
+    .index("by_category", ["category"])
+    .index("by_data_source", ["data_source"])
     .index("by_type_status", ["type", "website_status"])
     .index("by_type_stage", ["type", "outreach_stage"])
     .index("by_status_stage", ["website_status", "outreach_stage"])

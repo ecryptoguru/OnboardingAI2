@@ -4,6 +4,7 @@ import { useQuery, useMutation, usePaginatedQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import { UploadCsvButton } from "../../../components/UploadCsvButton";
 import { SyncUgcButton } from "../../../components/SyncUgcButton";
+import { SyncIniButton } from "../../../components/SyncIniButton";
 import dynamic from "next/dynamic";
 import { useState, useRef, useEffect } from "react";
 
@@ -163,6 +164,7 @@ export default function UniversitiesPage() {
             Validate Websites
           </button>
           <SyncUgcButton />
+          <SyncIniButton />
           <UploadCsvButton />
         </div>
       </div>

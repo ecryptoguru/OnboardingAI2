@@ -412,6 +412,8 @@ export const createInternal = internalMutation({
     website: v.optional(v.string()),
     student_count: v.optional(v.number()),
     type: v.optional(v.string()),
+    category: v.optional(v.string()),
+    data_source: v.optional(v.string()),
     naac_grade: v.optional(v.string()),
     established_year: v.optional(v.number()),
   },
@@ -435,6 +437,8 @@ export const create = mutation({
     website: v.optional(v.string()),
     student_count: v.optional(v.number()),
     type: v.optional(v.string()),
+    category: v.optional(v.string()),
+    data_source: v.optional(v.string()),
     naac_grade: v.optional(v.string()),
     established_year: v.optional(v.number()),
   },
@@ -501,6 +505,8 @@ export const bulkInsert = mutation({
         website: v.optional(v.string()),
         student_count: v.optional(v.number()),
         type: v.optional(v.string()),
+        category: v.optional(v.string()),
+        data_source: v.optional(v.string()),
         naac_grade: v.optional(v.string()),
       }),
     ),
@@ -542,6 +548,8 @@ export const bulkInsert = mutation({
         outreach_stage: "new",
         student_count: row.student_count,
         type: row.type,
+        category: row.category,
+        data_source: row.data_source,
         naac_grade: row.naac_grade,
         created_at: now,
         updated_at: now,
@@ -971,6 +979,7 @@ export const bulkSyncUgc = mutation({
         console.log(`-> No match found. Inserting new.`);
         const inserted = await ctx.db.insert("universities", {
           ...uni,
+          data_source: "ugc",
           website_status: uni.website ? "valid" : "pending",
           outreach_stage: "new",
           created_at: now,
@@ -993,6 +1002,13 @@ export const bulkSyncUgc = mutation({
           val ? String(val).trim() : undefined;
 
         for (const existingRecord of existingRecords) {
+          if (existingRecord.data_source === "curated") {
+            console.log(
+              `-> Skipping curated record: ${existingRecord.university_name}`,
+            );
+            continue;
+          }
+
           const hasUpdates =
             (uni.website &&
               normalizeStr(existingRecord.website) !==
@@ -1022,6 +1038,7 @@ export const bulkSyncUgc = mutation({
               address: uni.address || existingRecord.address,
               zip_code: uni.zip_code || existingRecord.zip_code,
               ugc_status: uni.ugc_status || existingRecord.ugc_status,
+              data_source: "ugc",
               updated_at: now,
             });
             updatedCount++;
@@ -1070,16 +1087,8 @@ export const bulkSyncUgcInternal = internalMutation({
 
     for (const uni of args.inserts) {
       await ctx.db.insert("universities", {
-        university_name: uni.university_name,
-        state: uni.state,
-        city: uni.city,
-        website: uni.website,
-        type: uni.type,
-        address: uni.address,
-        zip_code: uni.zip_code,
-        ugc_status: uni.ugc_status,
-        vc_name: uni.vc_name,
-        registrar_name: uni.registrar_name,
+        ...uni,
+        data_source: "ugc",
         website_status: uni.website ? "valid" : "pending",
         outreach_stage: "new",
         created_at: now,
@@ -1089,6 +1098,16 @@ export const bulkSyncUgcInternal = internalMutation({
     }
 
     for (const upd of args.updates) {
+      const existing = await ctx.db.get(upd.id);
+      if (!existing) {
+        console.warn(`Update target missing: ${upd.id}`);
+        continue;
+      }
+      if (existing.data_source === "curated") {
+        console.log(`Skipping curated record update: ${existing.university_name}`);
+        continue;
+      }
+
       await ctx.db.patch(upd.id, {
         website: upd.website,
         type: upd.type,
@@ -1096,6 +1115,64 @@ export const bulkSyncUgcInternal = internalMutation({
         address: upd.address,
         zip_code: upd.zip_code,
         ugc_status: upd.ugc_status,
+        data_source: "ugc",
+        updated_at: now,
+      });
+      updatedCount++;
+    }
+
+    return { addedCount, updatedCount };
+  },
+});
+
+export const bulkSyncCuratedInternal = internalMutation({
+  args: {
+    inserts: v.array(
+      v.object({
+        university_name: v.string(),
+        state: v.string(),
+        city: v.optional(v.string()),
+        website: v.optional(v.string()),
+        type: v.optional(v.string()),
+        category: v.optional(v.string()),
+        data_source: v.optional(v.string()),
+        established_year: v.optional(v.number()),
+      }),
+    ),
+    updates: v.array(
+      v.object({
+        id: v.id("universities"),
+        university_name: v.optional(v.string()),
+        state: v.optional(v.string()),
+        city: v.optional(v.string()),
+        website: v.optional(v.string()),
+        type: v.optional(v.string()),
+        category: v.optional(v.string()),
+        data_source: v.optional(v.string()),
+        established_year: v.optional(v.number()),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    let addedCount = 0;
+    let updatedCount = 0;
+
+    for (const uni of args.inserts) {
+      await ctx.db.insert("universities", {
+        ...uni,
+        website_status: uni.website ? "valid" : "pending",
+        outreach_stage: "new",
+        created_at: now,
+        updated_at: now,
+      });
+      addedCount++;
+    }
+
+    for (const upd of args.updates) {
+      const { id, ...fields } = upd;
+      await ctx.db.patch(id, {
+        ...fields,
         updated_at: now,
       });
       updatedCount++;

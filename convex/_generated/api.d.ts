@@ -16,6 +16,7 @@ import type * as actions_enrichGovernmentData from "../actions/enrichGovernmentD
 import type * as actions_enrichment from "../actions/enrichment.js";
 import type * as actions_inferContacts from "../actions/inferContacts.js";
 import type * as actions_ingest from "../actions/ingest.js";
+import type * as actions_iniSeed from "../actions/iniSeed.js";
 import type * as actions_listUniversities from "../actions/listUniversities.js";
 import type * as actions_liveTest from "../actions/liveTest.js";
 import type * as actions_migrateEmbeddings from "../actions/migrateEmbeddings.js";
@@ -44,6 +45,7 @@ import type * as lib_contactInference from "../lib/contactInference.js";
 import type * as lib_discoveryCandidates from "../lib/discoveryCandidates.js";
 import type * as lib_emailTemplates from "../lib/emailTemplates.js";
 import type * as lib_googleCalendar from "../lib/googleCalendar.js";
+import type * as lib_institutesOfNationalImportance from "../lib/institutesOfNationalImportance.js";
 import type * as lib_llm from "../lib/llm.js";
 import type * as lib_models from "../lib/models.js";
 import type * as lib_moduleRecommender from "../lib/moduleRecommender.js";
@@ -87,6 +89,7 @@ declare const fullApi: ApiFromModules<{
   "actions/enrichment": typeof actions_enrichment;
   "actions/inferContacts": typeof actions_inferContacts;
   "actions/ingest": typeof actions_ingest;
+  "actions/iniSeed": typeof actions_iniSeed;
   "actions/listUniversities": typeof actions_listUniversities;
   "actions/liveTest": typeof actions_liveTest;
   "actions/migrateEmbeddings": typeof actions_migrateEmbeddings;
@@ -115,6 +118,7 @@ declare const fullApi: ApiFromModules<{
   "lib/discoveryCandidates": typeof lib_discoveryCandidates;
   "lib/emailTemplates": typeof lib_emailTemplates;
   "lib/googleCalendar": typeof lib_googleCalendar;
+  "lib/institutesOfNationalImportance": typeof lib_institutesOfNationalImportance;
   "lib/llm": typeof lib_llm;
   "lib/models": typeof lib_models;
   "lib/moduleRecommender": typeof lib_moduleRecommender;

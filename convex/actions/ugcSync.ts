@@ -187,6 +187,14 @@ export const syncUgcData = action({
         inserts.push({ ...uni, type: normalizedType || "Other" });
       } else {
         for (const record of matched) {
+          // Never overwrite records that came from the curated INI seed.
+          if (record.data_source === "curated") {
+            console.log(
+              `Skipping curated record: ${record.university_name}`,
+            );
+            continue;
+          }
+
           const normalizeStr = (val: unknown) =>
             val ? String(val).trim() : undefined;
 

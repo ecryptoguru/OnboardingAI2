@@ -22,8 +22,10 @@ export function namesMatch(a: string, b: string): boolean {
     "public",
     "international",
     "global",
-    "institutions",
+    "institute",
+    "institutes",
     "institution",
+    "institutions",
   ]);
 
   const academicFields = new Set([
@@ -76,7 +78,9 @@ export function namesMatch(a: string, b: string): boolean {
   }
 
   const getTokens = (s: string) =>
-    s.split(/[\s,]+/).filter((t) => t.length > 2 && !stopWords.has(t));
+    s.split(/[\s,]+/).filter(
+      (t) => t.length > 2 && !stopWords.has(t) && !academicFields.has(t),
+    );
 
   const tokensA = getTokens(na);
   const tokensB = getTokens(nb);
