@@ -56,7 +56,7 @@ GOOGLE_AI_API_KEY   → Gemini 3.5 Flash (reasoning, proposals, reply classifica
 
 ### System Pipeline
 
-```
+```text
 CSV Upload / UGC Sync / Curated INI Seed
     ↓
 Website Discovery (Convex Action → Serper.dev REST API)
@@ -252,4 +252,4 @@ The following are grounded next steps and continuous improvements, not aspiratio
 
 ---
 
-*Document End — Fretbox Outreach AI v2 Roadmap*
+> *Document End — Fretbox Outreach AI v2 Roadmap*

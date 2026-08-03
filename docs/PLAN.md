@@ -65,4 +65,4 @@ These dimensions are kept in mind for every new feature or refactor:
 - UX/SEO/accessibility refinements driven by `.devin/scripts/checklist.py`
 
 ---
-*Last updated: v2.0 delivery*
+> *Last updated: v2.0 delivery*
