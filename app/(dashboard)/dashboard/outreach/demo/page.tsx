@@ -44,9 +44,9 @@ const STAGE_CONFIG: Record<
   },
   proposal_sent: {
     label: "Proposal Sent",
-    color: "text-violet-400",
-    bg: "bg-violet-500/10 border-violet-500/20",
-    dot: "bg-violet-500",
+    color: "text-cyan-400",
+    bg: "bg-cyan-500/10 border-cyan-500/20",
+    dot: "bg-cyan-500",
   },
   closed: {
     label: "Closed",
@@ -131,7 +131,7 @@ export default function DemoPage() {
     {
       label: "Proposals Sent",
       value: funnel?.proposalSent ?? 0,
-      color: "text-violet-400",
+      color: "text-cyan-400",
       icon: "📄",
     },
     {
@@ -473,7 +473,7 @@ export default function DemoPage() {
                 pct: funnel?.total
                   ? Math.round((funnel.proposalSent / funnel.total) * 100)
                   : 0,
-                color: "bg-violet-500",
+                color: "bg-cyan-500",
               },
             ].map((row) => (
               <div key={row.from}>
