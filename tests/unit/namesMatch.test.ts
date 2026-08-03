@@ -47,4 +47,28 @@ describe("namesMatch", () => {
   it("should handle extra whitespace", () => {
     assert.strictEqual(namesMatch("IIT   Delhi", "IIT Delhi"), true);
   });
+
+  it("should not match two unrelated institutes sharing only generic words", () => {
+    assert.strictEqual(
+      namesMatch(
+        "Indian Institute of Technology Bombay",
+        "Homi Bhabha National Institute, Regd. Office",
+      ),
+      false,
+    );
+    assert.strictEqual(
+      namesMatch(
+        "National Institute of Technology, Tiruchirappalli",
+        "Indian Institute of Information Technology, Design and Manufacturing, Kurnool",
+      ),
+      false,
+    );
+  });
+
+  it("should match an acronym to its expanded form", () => {
+    assert.strictEqual(
+      namesMatch("IIT Bombay", "Indian Institute of Technology Bombay"),
+      true,
+    );
+  });
 });

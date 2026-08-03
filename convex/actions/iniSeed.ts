@@ -10,7 +10,7 @@ import { validateAuth } from "../lib/auth_utils";
 import { INSTITUTES_OF_NATIONAL_IMPORTANCE } from "../lib/institutesOfNationalImportance";
 import type { Doc, Id } from "../_generated/dataModel";
 
-type InstituteOfNationalImportance =
+export type InstituteOfNationalImportance =
   (typeof INSTITUTES_OF_NATIONAL_IMPORTANCE)[number];
 
 type CuratedInstitute = InstituteOfNationalImportance & {
@@ -190,3 +190,5 @@ export const syncInstitutesOfNationalImportanceInternal = internalAction({
     return await doSync(ctx);
   },
 });
+
+export { normalizeName, normalizeUrlDomain, scoreMatch };
