@@ -1,3 +1,5 @@
+# AGENTS.md — Fretbox Outreach AI v2
+
 <!-- convex-ai-start -->
 
 This project uses [Convex](https://convex.dev) as its backend.
@@ -48,8 +50,19 @@ Convex agent skills for common tasks can be installed by running
 - Unit tests: `npm run test:unit`
 - E2E tests: `npm test` (Playwright; requires dev server on port 3000)
 
-### Recent configuration findings
+### Configuration findings
 
 - Playwright `baseURL` is `http://localhost:3000`
 - ZeptoMail webhooks live on `.convex.site`, not `.convex.cloud`
 - Email sending requires all three of: ZeptoMail API key, From Email, and From Name
+
+## Documentation update reminders
+
+When a feature, setting, or architecture boundary changes, update these project docs so they stay implementation-aligned:
+
+- `README.md` — high-level overview, quick start, env vars, features
+- `CODEBASE.md` — central navigation map, file structure, architecture patterns
+- `convex/README.md` — Convex conventions, webhooks, backend env vars
+- `user-guide.md` and `user-guide-lite.md` — end-user flows
+- `docs/PLAN.md`, `docs/Requirement.md`, `docs/roadmap.md` — planning and requirements
+- `design-system/onboardingai/MASTER.md` — design tokens and UI patterns

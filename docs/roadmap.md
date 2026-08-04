@@ -216,20 +216,20 @@ See: `convex/schema.ts`
 
 The following are permanently removed in v2:
 
-- ❌ FastAPI (Python) — replaced by Convex Functions (TypeScript)
-- ❌ Celery + Redis — replaced by Convex Cron + Scheduled Actions
-- ❌ SQLAlchemy + asyncpg — replaced by Convex DB
-- ❌ Supabase PostgreSQL — replaced by Convex DB
-- ❌ Supabase Storage — replaced by Convex File Storage
-- ❌ WeasyPrint — not used; proposals are sent as rich HTML emails
-- ❌ Jinja2 templates — replaced by TypeScript template strings
-- ❌ Docker Compose — replaced by `npx convex dev`
-- ❌ Fly.io (backend) — replaced by Convex Cloud
-- ❌ Clerk — replaced by Convex Native Auth
-- ❌ Browserbase — replaced by Firecrawl + Jina Reader + `fetch()` HTML parse
-- ❌ OpenRouter — removed; direct Google AI Gemini API used
-- ❌ OpenAI — removed; replaced by Google AI (Gemini + embeddings)
-- ❌ Anthropic Claude — removed; Gemini 3.5 Flash / Flash-Lite used for all reasoning
+- FastAPI (Python) — replaced by Convex Functions (TypeScript)
+- Celery + Redis — replaced by Convex Cron + Scheduled Actions
+- SQLAlchemy + asyncpg — replaced by Convex DB
+- Supabase PostgreSQL — replaced by Convex DB
+- Supabase Storage — replaced by Convex File Storage
+- WeasyPrint — not used; proposals are sent as rich HTML emails
+- Jinja2 templates — replaced by TypeScript template strings
+- Docker Compose — replaced by `npx convex dev`
+- Fly.io (backend) — replaced by Convex Cloud
+- Clerk — replaced by Convex Native Auth
+- Browserbase — replaced by Firecrawl + Jina Reader + `fetch()` HTML parse
+- OpenRouter — removed; direct Google AI Gemini API used
+- OpenAI — removed; replaced by Google AI (Gemini + embeddings)
+- Anthropic Claude — removed; Gemini 3.5 Flash / Flash-Lite used for all reasoning
 
 ---
 
@@ -252,4 +252,14 @@ The following are grounded next steps and continuous improvements, not aspiratio
 
 ---
 
-> *Document End — Fretbox Outreach AI v2 Roadmap*
+## More Documentation
+
+- [Project README](../README.md)
+- [Codebase map](../CODEBASE.md)
+- [Implementation plan](./PLAN.md)
+- [Requirements](./Requirement.md)
+- [User guide](../user-guide.md)
+
+---
+
+Document End — Fretbox Outreach AI v2 Roadmap

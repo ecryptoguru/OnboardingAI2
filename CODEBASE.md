@@ -1,6 +1,6 @@
-# CODEBASE MAP v3
+# Fretbox Outreach AI v2 — Codebase Map
 
-This document is the central reference for navigating the `fretbox-outreach-v2` (OnboardingAI) repository. Keep it implementation-aligned.
+This document is the central reference for navigating the `fretbox-outreach-v2` (OnboardingAI) repository. It is meant to be kept in sync with the code. See [README.md](./README.md) for a higher-level overview and [convex/README.md](./convex/README.md) for Convex-specific conventions.
 
 ## Project Overview
 
@@ -120,7 +120,7 @@ The entire backend ecosystem (queries, mutations, actions, HTTP routes, crons).
 - **Avoid circular type inference:** extract shared action logic into `do*` helper functions (`doSendEmail`, `doGenerateProposal`) called by both the internal and public wrappers.
 - `actions/outreach.ts` schedules `processSequenceStep` recursively for multi-step sequences, using `ctx.scheduler.runAfter(0, internal.actions.outreach.processSequenceStep, ...)`. Batch cap is 100 sequences per cron run with 250 ms stagger.
 
-### `/lib/` (20 files)
+### `/lib/` (21 files)
 
 Shared backend utilities:
 
@@ -252,7 +252,7 @@ Three guardrails are applied automatically when `ctx` is passed to any LLM wrapp
 
 `universitySignals` stores 768-dimensional embeddings (`gemini-embedding-001`) with a Convex `vectorIndex` (`by_embedding`). Enables semantic retrieval of news, LinkedIn, website, and image signals for personalized outreach and proposal generation.
 
-### 4. Outreach Orchestrator (HITL)
+### 4. Enrichment Pipeline
 
 `convex/actions/orchestrator.ts` runs enrichment in strict phase order to prevent write races:
 
@@ -265,6 +265,8 @@ Three guardrails are applied automatically when `ctx` is passed to any LLM wrapp
 7. **Phase 6** — scoring
 
 Government data **must** run before deep enrichment because both write to `demographics`.
+
+### 5. Outreach Orchestrator (HITL)
 
 Sequences follow a HITL-aware state machine: **Draft** (`pending_approval`) → Human Review / Edit / Reject → **Approved & Sent** (`actions/email.approveAndSend`) → Replied/Bounced. `convex/emails.ts` provides `listPending`, `pendingCount`, `updateDraft`, and `rejectDraft` for the approvals queue.
 
@@ -279,7 +281,7 @@ Auto-replies (step `99`) and proposal emails (step `100`) are sent through the s
 
 Threaded `Message-ID` headers (`<fretbox-{emailId}@reply.fretbox.in>`) enable conversation tracking and inbound reply correlation.
 
-### 5. API Key Management (DB-Backed)
+### 6. API Key Management (DB-Backed)
 
 All external API keys are stored in the `systemSettings` table with **XOR obfuscation** (not encryption) using `SETTINGS_OBFUSCATION_SECRET` (must be at least 32 characters, read at call time):
 
@@ -296,7 +298,7 @@ Each has: status query (`get*KeyStatus`), set mutation (`set*Key`), test action 
 
 Keys are validated and sanitized before storage with `sanitizeApiKey()`. `sanitizeApiKey()` only accepts printable ASCII characters (code points 33–126); control characters, whitespace, and non-ASCII characters are rejected. Display names (`zeptomailFromName`) use `.trim()` only and do **not** use `sanitizeApiKey()`.
 
-### 6. ZeptoMail Integration
+### 7. ZeptoMail Integration
 
 Email is delivered through **ZeptoMail** via `convex/actions/email.ts`:
 
@@ -307,7 +309,7 @@ Email is delivered through **ZeptoMail** via `convex/actions/email.ts`:
 
 ZeptoMail response `request_id` is stored in `emailsSent.zeptomail_message_id` and passed as `client_reference` for delivery event correlation.
 
-### 7. Webhook Hardening (HTTP Layer)
+### 8. Webhook Hardening (HTTP Layer)
 
 `convex/http.ts` exposes HTTP actions on the **Convex site URL** (`https://*.convex.site` / `NEXT_PUBLIC_CONVEX_SITE_URL`), not the `*.convex.cloud` API URL:
 
@@ -317,20 +319,20 @@ ZeptoMail response `request_id` is stored in `emailsSent.zeptomail_message_id` a
 - Convex Auth HTTP routes (sign-in, sign-out, session) are also mounted here.
 - Test endpoints (`/test/ping`, `/test/run-pipeline`) are disabled by default. Enable with `DISABLE_TEST_ENDPOINTS=false` and pass `TEST_WEBHOOK_SECRET` as a bearer token.
 
-### 8. INI Seed & UGC Sync Protection
+### 9. INI Seed & UGC Sync Protection
 
 - `convex/lib/institutesOfNationalImportance.ts` contains an 80-record curated list (23 IITs, 31 NITs, 26 IIITs).
 - `convex/actions/iniSeed.ts` ingests them with `data_source: "curated"` and `category` (`IIT` | `NIT` | `IIIT`). It uses name/domain/state scoring and `bulkSyncCuratedInternal` for batched writes.
 - The `Sync IITs / NITs / IIITs` button in `components/SyncIniButton.tsx` calls `api.actions.iniSeed.syncInstitutesOfNationalImportance`.
 - `convex/actions/ugcSync.ts` and `convex/universities.ts` (`bulkSyncUgc`) skip any record where `data_source === "curated"`, preventing the UGC dataset from overwriting curated institutes.
 
-### 9. Auth & Middleware
+### 10. Auth & Middleware
 
 - `@convex-dev/auth` with Password provider (`convex/auth.ts`). Password reset uses a custom `reset` email provider that generates a 32-character code and sends it through `internal.actions.email.sendEmail`.
 - Password reset flow: `/forgot-password` submits email → reset code is stored in `authVerificationCodes` and emailed → `/reset-password` verifies code and sets a new password.
 - `middleware.ts` protects `/dashboard` routes and redirects authenticated users away from `/sign-in` / `/sign-up`. `/forgot-password` and `/reset-password` are public.
 
-### 10. Design System
+### 11. Design System
 
 Flat design with glassmorphism accents. Fonts: Poppins (headings) + Open Sans (body). Primary `#3B82F6`, CTA/Accent `#F97316`. The brand scale in `app/globals.css` and `tailwind.config.ts` has been switched to a blue/cyan spectrum; violet references have been removed and color audit scripts now pass. See `design-system/onboardingai/MASTER.md` for full specs.
 
@@ -357,7 +359,7 @@ Flat design with glassmorphism accents. Fonts: Poppins (headings) + Open Sans (b
 3. **Internal Mutations:** Webhook handlers in `convex/http.ts` must use internal mutations (not direct DB writes) to keep logic centralized and auditable.
 4. **ZeptoMail ID Persistence:** Always store normalized `zeptomail_message_id` in `emailsSent` for delivery event correlation, and pass `client_reference` for proposal/reply tracking.
 5. **Sentry Logging:** Ensure AI failures have structured payload logs.
-6. **Environment Variables:** Only `CONVEX_*`, `NEXT_PUBLIC_*`, `SETTINGS_OBFUSCATION_SECRET`, `GOOGLE_CALENDAR_WEBHOOK_TOKEN`, `ZEPTOMAIL_WEBHOOK_SECRET`, `EMAIL_WEBHOOK_SECRET`, `DISABLE_TEST_ENDPOINTS`, and `TEST_WEBHOOK_SECRET` should live in `.env` or Convex env. All API service keys belong in the DB via the Settings page.
+6. **Environment Variables:** The following environment variables are used by the app and backend: `NEXT_PUBLIC_CONVEX_URL`, `NEXT_PUBLIC_CONVEX_SITE_URL`, `SITE_URL`, `CONVEX_DEPLOYMENT`, `SETTINGS_OBFUSCATION_SECRET`, `GOOGLE_CALENDAR_WEBHOOK_TOKEN`, `ZEPTOMAIL_WEBHOOK_SECRET`, `EMAIL_WEBHOOK_SECRET`, `DISABLE_TEST_ENDPOINTS`, `TEST_WEBHOOK_SECRET`, `LLM_DAILY_BUDGET_USD`, `ADMIN_EMAILS`, `SKIP_RATE_LIMITS`, `SENTRY_DSN`, and `NEXT_PUBLIC_SENTRY_DSN`. All API service keys (Gemini, Serper, Firecrawl, ZeptoMail, Google Calendar) belong in the DB via the Settings page.
 7. **Rate Limiting:** Use `rateLimits` table + `withConcurrencyLimit` for external API call throttling. Email dispatch is capped at **3 emails/minute per destination**.
 8. **Serper Budget:** Use `createSerperBudget` / `runWithSerperBudget` from `convex/lib/serperBudget.ts` to enforce per-university query caps and detect quota exhaustion.
 9. **Timeout Safety:** All Gemini SDK calls use `httpOptions: { timeout: 25000 }`. All `fetch()` calls use `AbortSignal.timeout(...)`. Do **not** wrap `ctx.runAction(...)` in `raceWithTimeout`.
@@ -384,3 +386,18 @@ Flat design with glassmorphism accents. Fonts: Poppins (headings) + Open Sans (b
 - **Master Checklist:** `python3 .devin/scripts/checklist.py .` — runs security, lint, schema, tests, UX, SEO in priority order.
 - **Convex Dashboard:** `npx convex dev` opens the Convex dashboard for manual review of events, logs, and cron jobs.
 - **Type Check:** `npx tsc --noEmit` — full project TypeScript check. For backend-only: `npx tsc --noEmit --project convex/tsconfig.json`.
+
+## More Documentation
+
+- [Project README](./README.md)
+- [Convex backend notes](./convex/README.md)
+- [User guide](./user-guide.md)
+- [Quick user guide](./user-guide-lite.md)
+- [Implementation plan](./docs/PLAN.md)
+- [Requirements](./docs/Requirement.md)
+- [Roadmap](./docs/roadmap.md)
+- [Design system](./design-system/onboardingai/MASTER.md)
+
+---
+
+© 2026 Fretbox. Confidential.

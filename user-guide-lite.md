@@ -94,7 +94,7 @@ Each key can be **saved, tested, and removed** independently.
 ## Proposals
 
 - **Generate Proposal** manually, or a draft is created automatically when a `meeting_request` reply arrives.
-- Statuses: **Draft**, **Ready**, **Sent**, **Meeting Confirmed**.
+- Statuses: **Draft**, **Ready**, **Sent**, **Meeting Confirmed**, **Cancelled**.
 - Click **Preview & Send** to edit content, choose recipients/CC, and send the rich HTML proposal.
 - Click **Confirm Meeting & Create Meet Link** to pick a time (15–60 min) and generate a Google Calendar event with a Meet link.
 - You can also **Reschedule** or **Cancel** a confirmed meeting.
@@ -151,3 +151,14 @@ If you do not receive a code, ask the tech team to check the **ZeptoMail** setti
 5. Check the **University detail view** — the university needs a valid website and at least one stakeholder email before outreach can start.
 
 For step-by-step instructions, see the full [user-guide.md](./user-guide.md).
+
+---
+
+## More Documentation
+
+- [Project README](../README.md)
+- [Codebase map](../CODEBASE.md)
+- [Implementation plan](../docs/PLAN.md)
+- [Requirements](../docs/Requirement.md)
+- [Roadmap](../docs/roadmap.md)
+- [Design system](../design-system/onboardingai/MASTER.md)

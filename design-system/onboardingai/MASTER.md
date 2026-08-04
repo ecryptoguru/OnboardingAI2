@@ -201,3 +201,18 @@ Before delivering any UI code, verify:
 - [ ] Responsive: 375px, 768px, 1024px, 1440px
 - [ ] No content hidden behind fixed navbars
 - [ ] No horizontal scroll on mobile
+
+---
+
+## More Documentation
+
+- [Project README](../../../README.md)
+- [Codebase map](../../../CODEBASE.md)
+- [User guide](../../../user-guide.md)
+- [Implementation plan](../../../docs/PLAN.md)
+- [Requirements](../../../docs/Requirement.md)
+- [Roadmap](../../../docs/roadmap.md)
+
+---
+
+*Design system for OnboardingAI. Keep in sync with `app/globals.css` and `tailwind.config.ts`.*

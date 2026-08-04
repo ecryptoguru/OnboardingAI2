@@ -361,7 +361,7 @@ The **Analytics** page gives a high-level view of pipeline performance.
 
 A horizontal bar chart shows how many universities are at each stage:
 
-```
+```text
 Total Universities → Enriched → Outreach Active → Replied → Meeting Booked → Proposal Sent → Closed / Won
 ```
 
@@ -480,3 +480,15 @@ If a feature is not working as expected:
 6. **Check reply/thread matching** — If a reply is not auto-processed, confirm it was sent in reply to a tracked email and that the sender address matches a known stakeholder.
 
 > **Still stuck?** Capture any error messages from the browser console and share them with your team.
+
+---
+
+## More Documentation
+
+- [Project README](../README.md)
+- [Codebase map](../CODEBASE.md)
+- [Quick user guide](../user-guide-lite.md)
+- [Implementation plan](../docs/PLAN.md)
+- [Requirements](../docs/Requirement.md)
+- [Roadmap](../docs/roadmap.md)
+- [Design system](../design-system/onboardingai/MASTER.md)
