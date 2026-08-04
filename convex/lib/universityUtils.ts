@@ -46,6 +46,10 @@ export function namesMatch(a: string, b: string): boolean {
     "business",
     "design",
     "planning",
+    "information",
+    "informatics",
+    "communication",
+    "manufacturing",
   ]);
 
   const campusKeywords = new Set([
@@ -133,4 +137,27 @@ export function namesMatch(a: string, b: string): boolean {
   }
 
   return false;
+}
+
+const stateAliases = new Map([
+  ["new delhi", "delhi"],
+  ["orissa", "odisha"],
+  ["jammu & kashmir", "jammu and kashmir"],
+  ["jammu and kashmir", "jammu and kashmir"],
+  ["daman & diu", "daman and diu"],
+  ["daman and diu", "daman and diu"],
+  ["dadra & nagar haveli", "dadra and nagar haveli"],
+  ["dadra and nagar haveli", "dadra and nagar haveli"],
+  ["dadra and nagar haveli and daman and diu", "dadra and nagar haveli and daman and diu"],
+  ["pondicherry", "puducherry"],
+  ["tamilnadu", "tamil nadu"],
+  ["andhrapradesh", "andhra pradesh"],
+]);
+
+export function normalizeState(
+  state: string | null | undefined,
+): string | undefined {
+  if (!state) return undefined;
+  const key = state.toLowerCase().replace(/\s+/g, " ").trim();
+  return stateAliases.get(key) ?? key;
 }

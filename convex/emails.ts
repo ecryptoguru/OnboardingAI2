@@ -106,7 +106,6 @@ export const getDetailedStats = query({
   handler: async (ctx) => {
     await validateAuth(ctx);
     // Use index query with a safety cap to prevent OOM at massive scale.
-    const MAX_ANALYTICS_ROWS = 5000;
     const emails = await ctx.db
       .query("emailsSent")
       .withIndex("by_step_number")
@@ -405,5 +404,20 @@ export const rejectDraft = mutation({
     if (email.sequence_id) {
       await ctx.db.patch(email.sequence_id, { status: "paused" });
     }
+  },
+});
+
+// NOTE: This is a capped count for the dashboard. Once a university has more
+// than MAX_ANALYTICS_ROWS emails, this returns the cap and `capped: true`.
+// The long-term fix is a per-university counter table or pagination.
+export const countByUniversity = query({
+  args: { university_id: v.id("universities") },
+  handler: async (ctx, args) => {
+    await validateAuth(ctx);
+    const rows = await ctx.db
+      .query("emailsSent")
+      .withIndex("by_university", (q) => q.eq("university_id", args.university_id))
+      .take(MAX_ANALYTICS_ROWS);
+    return { count: rows.length, capped: rows.length >= MAX_ANALYTICS_ROWS };
   },
 });

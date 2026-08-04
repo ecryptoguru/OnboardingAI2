@@ -3,6 +3,7 @@ import { httpAction, ActionCtx } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { Id } from "./_generated/dataModel";
 import { auth } from "./auth";
+import { getOptionalEnv } from "./lib/env";
 
 function extractEmailAddress(value?: string): string | null {
   if (!value) return null;
@@ -28,7 +29,8 @@ function getThreadMessageIdCandidate(
   const explicit = payload.email_id?.trim();
   if (explicit) return explicit;
 
-  const match = blob.match(/fretbox-([a-zA-Z0-9_-]+)@/i);
+  // Only match our own Message-ID domain to avoid extracting arbitrary tokens.
+  const match = blob.match(/fretbox-([a-zA-Z0-9_-]+)@reply\.fretbox\.in\b/i);
   return match?.[1] ?? null;
 }
 /** Constant-time string comparison to prevent timing attacks. */
@@ -82,41 +84,26 @@ http.route({
   path: "/webhooks/zeptomail",
   method: "POST",
   handler: httpAction(async (ctx, req) => {
-    const secret = process.env.ZEPTOMAIL_WEBHOOK_SECRET;
-    const requireAuth = process.env.REQUIRE_WEBHOOK_AUTH === "true";
-
-    if (requireAuth && !secret) {
-      console.error("[ZeptoMail] Missing ZEPTOMAIL_WEBHOOK_SECRET with REQUIRE_WEBHOOK_AUTH=true. Rejecting request.");
-      return new Response("Configuration Error", { status: 500 });
+    const secret = getOptionalEnv("ZEPTOMAIL_WEBHOOK_SECRET");
+    if (!secret) {
+      console.warn("[ZeptoMail] Webhook not configured — ignoring.");
+      return new Response("Webhook not configured", { status: 401 });
     }
 
-    if (secret) {
-      const rawBody = await req.text();
-      // ZeptoMail uses producer-signature header: ts=...;s=...;s-algorithm=HmacSHA256
-      const sigHeader = req.headers.get("producer-signature") ?? "";
-      // Match ;s= or s= at start, not the s= inside ts=
-      const sigMatch = sigHeader.match(/(?:^|;)s=([^;]+)/);
-      const sig = sigMatch ? decodeURIComponent(sigMatch[1]) : "";
-      if (!(await verifyHmac(secret, rawBody, sig))) {
-        console.warn("[ZeptoMail] Invalid signature. Rejecting webhook.");
-        return new Response("Unauthorized", { status: 401 });
-      }
-      // Re-parse from text since body was consumed above
-      let payload: ZeptoMailWebhookPayload;
-      try {
-        payload = JSON.parse(rawBody) as ZeptoMailWebhookPayload;
-      } catch {
-        console.error("[ZeptoMail] Failed to parse webhook JSON body");
-        return new Response("Bad Request", { status: 400 });
-      }
-      return handleZeptomailEvents(ctx, payload);
+    const rawBody = await req.text();
+    // ZeptoMail uses producer-signature header: ts=...;s=...;s-algorithm=HmacSHA256
+    const sigHeader = req.headers.get("producer-signature") ?? "";
+    // Match ;s= or s= at start, not the s= inside ts=
+    const sigMatch = sigHeader.match(/(?:^|;)s=([^;]+)/);
+    const sig = sigMatch ? decodeURIComponent(sigMatch[1]) : "";
+    if (!(await verifyHmac(secret, rawBody, sig))) {
+      console.warn("[ZeptoMail] Invalid signature. Rejecting webhook.");
+      return new Response("Unauthorized", { status: 401 });
     }
-
-    // No secret configured — accept all (dev mode only)
-    console.warn("[ZeptoMail] ⚠️ Webhook secret not configured in dev. Bypassing signature verification.");
+    // Re-parse from text since body was consumed above
     let payload: ZeptoMailWebhookPayload;
     try {
-      payload = (await req.json()) as ZeptoMailWebhookPayload;
+      payload = JSON.parse(rawBody) as ZeptoMailWebhookPayload;
     } catch {
       console.error("[ZeptoMail] Failed to parse webhook JSON body");
       return new Response("Bad Request", { status: 400 });
@@ -165,9 +152,11 @@ async function handleZeptomailEvents(
           ? "opened"
           : eventName === "email_link_click"
             ? "clicked"
-            : eventName === "hardbounce" || eventName === "softbounce"
-              ? "bounced"
-              : null;
+            : eventName === "email_delivered" || eventName === "delivered"
+              ? "delivered"
+              : eventName === "hardbounce" || eventName === "softbounce"
+                ? "bounced"
+                : null;
 
       if (status) {
         const eventTimeStr = msg.event_data?.[0]?.details?.[0]?.time
@@ -177,9 +166,9 @@ async function handleZeptomailEvents(
         await ctx.runMutation(internal.emails.updateStatusByZeptomailIdInternal, {
           zeptomail_message_id: messageId ?? "",
           client_reference: clientReference,
-          status: status as "opened" | "clicked" | "bounced",
+          status: status as "delivered" | "opened" | "clicked" | "bounced",
           opened_at:
-            eventName === "email_open" && eventTime
+            (eventName === "email_open" || eventName === "email_link_click") && eventTime
               ? eventTime
               : undefined,
         });
@@ -197,23 +186,17 @@ http.route({
   method: "POST",
   handler: httpAction(async (ctx, req) => {
     // Shared-secret verification (set EMAIL_WEBHOOK_SECRET in Convex env vars)
-    const secret = process.env.EMAIL_WEBHOOK_SECRET;
-    const requireAuth = process.env.REQUIRE_WEBHOOK_AUTH === "true";
-
-    if (requireAuth && !secret) {
-      console.error("[Inbound Reply] Missing EMAIL_WEBHOOK_SECRET with REQUIRE_WEBHOOK_AUTH=true. Rejecting request.");
-      return new Response("Configuration Error", { status: 500 });
+    const secret = getOptionalEnv("EMAIL_WEBHOOK_SECRET");
+    if (!secret) {
+      console.warn("[Inbound Reply] Webhook not configured — ignoring.");
+      return new Response("Webhook not configured", { status: 401 });
     }
 
-    if (secret) {
-      const authHeader = req.headers.get("authorization") ?? "";
-      const provided = authHeader.replace(/^Bearer\s+/i, "").trim();
-      if (!timingSafeEqual(provided, secret)) {
-        console.warn("[Inbound Reply] Invalid webhook secret. Rejecting.");
-        return new Response("Unauthorized", { status: 401 });
-      }
-    } else {
-      console.warn("[Inbound Reply] ⚠️ Webhook secret not configured in dev. Bypassing authorization.");
+    const authHeader = req.headers.get("authorization") ?? "";
+    const provided = authHeader.replace(/^Bearer\s+/i, "").trim();
+    if (!timingSafeEqual(provided, secret)) {
+      console.warn("[Inbound Reply] Invalid webhook secret. Rejecting.");
+      return new Response("Unauthorized", { status: 401 });
     }
 
     const contentType = req.headers.get("content-type") ?? "";
@@ -256,10 +239,28 @@ http.route({
     }
 
     if (!resolvedUniversityId && body.university_id) {
-      resolvedUniversityId = body.university_id as Id<"universities">;
+      try {
+        const university = await ctx.runQuery(internal.universities.getInternal, {
+          universityId: body.university_id as Id<"universities">,
+        });
+        if (university) {
+          resolvedUniversityId = university._id;
+        }
+      } catch {
+        // body.university_id is not a valid Convex ID or the record does not exist.
+      }
     }
     if (!resolvedStakeholderId && body.stakeholder_id) {
-      resolvedStakeholderId = body.stakeholder_id as Id<"stakeholders">;
+      try {
+        const stakeholder = await ctx.runQuery(internal.stakeholders.getByIdInternal, {
+          id: body.stakeholder_id as Id<"stakeholders">,
+        });
+        if (stakeholder) {
+          resolvedStakeholderId = stakeholder._id;
+        }
+      } catch {
+        // body.stakeholder_id is not a valid Convex ID or the record does not exist.
+      }
     }
 
     if (!resolvedUniversityId || !resolvedStakeholderId) {
@@ -320,21 +321,15 @@ http.route({
   handler: httpAction(async (_ctx, req) => {
     // Google Calendar push notifications include a channel token for verification
     const channelToken = req.headers.get("x-goog-channel-token") ?? "";
-    const expectedToken = process.env.GOOGLE_CALENDAR_WEBHOOK_TOKEN;
-    const requireAuth = process.env.REQUIRE_WEBHOOK_AUTH === "true";
-
-    if (requireAuth && !expectedToken) {
-      console.error("[GoogleCalendar] Missing GOOGLE_CALENDAR_WEBHOOK_TOKEN with REQUIRE_WEBHOOK_AUTH=true. Rejecting request.");
-      return new Response("Configuration Error", { status: 500 });
+    const expectedToken = getOptionalEnv("GOOGLE_CALENDAR_WEBHOOK_TOKEN");
+    if (!expectedToken) {
+      console.warn("[GoogleCalendar] Webhook not configured — ignoring.");
+      return new Response("Webhook not configured", { status: 401 });
     }
 
-    if (expectedToken) {
-      if (!timingSafeEqual(channelToken, expectedToken)) {
-        console.warn("[GoogleCalendar] Invalid channel token. Rejecting.");
-        return new Response("Unauthorized", { status: 401 });
-      }
-    } else {
-      console.warn("[GoogleCalendar] ⚠️ Webhook token not configured in dev. Bypassing token check.");
+    if (!timingSafeEqual(channelToken, expectedToken)) {
+      console.warn("[GoogleCalendar] Invalid channel token. Rejecting.");
+      return new Response("Unauthorized", { status: 401 });
     }
 
     // The notification body is empty; we use the channel ID + resource state
@@ -373,13 +368,13 @@ http.route({
   handler: httpAction(async (ctx, req) => {
     // Test endpoints are disabled by default. Set DISABLE_TEST_ENDPOINTS=false
     // and provide TEST_WEBHOOK_SECRET to enable.
-    const testEnabled = process.env.DISABLE_TEST_ENDPOINTS === "false";
+    const testEnabled = getOptionalEnv("DISABLE_TEST_ENDPOINTS") === "false";
     if (!testEnabled) {
       console.error("[Pipeline Test] Test endpoints are disabled. Forbidden.");
       return new Response("Forbidden", { status: 403 });
     }
 
-    const secret = process.env.TEST_WEBHOOK_SECRET;
+    const secret = getOptionalEnv("TEST_WEBHOOK_SECRET");
     if (!secret) {
       console.error("[Pipeline Test] TEST_WEBHOOK_SECRET not configured.");
       return new Response("Unauthorized", { status: 401 });

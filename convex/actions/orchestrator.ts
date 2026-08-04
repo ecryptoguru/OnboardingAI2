@@ -285,8 +285,9 @@ export const runEnrichmentChainInternal = internalAction({
         console.error("[Orchestrator] Scoring failed", e);
       }
 
-      const allOk: boolean =
-        results.scrape || results.antiRagging || results.governmentData;
+      // The chain is only successful if the final scoring phase completed,
+      // because that is the deliverable the rest of the pipeline consumes.
+      const allOk: boolean = results.scoring;
       console.log(
         `[Orchestrator] Enrichment chain completed for ${args.universityId}: scrape=${results.scrape} antiRagging=${results.antiRagging} govData=${results.governmentData} social=${results.socialMedia} socialPostDeep=${results.socialMediaPostDeep} infer=${results.inferContacts} deep=${results.deepEnrichment} score=${results.scoring}`,
       );

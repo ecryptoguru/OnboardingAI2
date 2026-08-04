@@ -3,6 +3,21 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 
+interface WebhookMessage {
+  email_info?: {
+    email_reference?: string;
+    client_reference?: string;
+  };
+  request_id?: string;
+  [key: string]: unknown;
+}
+
+interface WebhookPayload {
+  event_name?: string[];
+  event_message?: WebhookMessage[];
+  [key: string]: unknown;
+}
+
 /**
  * Mirror of the signature extraction regex from convex/http.ts
  * ZeptoMail producer-signature format: ts=...;s=...;s-algorithm=HmacSHA256
@@ -26,6 +41,7 @@ function emailRefToRequestId(emailRef: string): string {
 function eventToStatus(eventName: string): string | null {
   if (eventName === "email_open") return "opened";
   if (eventName === "email_link_click") return "clicked";
+  if (eventName === "email_delivered" || eventName === "delivered") return "delivered";
   if (eventName === "hardbounce" || eventName === "softbounce") return "bounced";
   return null;
 }
@@ -83,6 +99,14 @@ describe("ZeptoMail Webhook - Event Name Mapping", () => {
 
   it("should map email_link_click to clicked", () => {
     assert.strictEqual(eventToStatus("email_link_click"), "clicked");
+  });
+
+  it("should map email_delivered to delivered", () => {
+    assert.strictEqual(eventToStatus("email_delivered"), "delivered");
+  });
+
+  it("should map delivered to delivered", () => {
+    assert.strictEqual(eventToStatus("delivered"), "delivered");
   });
 
   it("should map hardbounce to bounced", () => {
@@ -180,13 +204,13 @@ describe("ZeptoMail Webhook - Payload Structure", () => {
       }],
     });
 
-    const payload = JSON.parse(rawBody);
+    const payload = JSON.parse(rawBody) as WebhookPayload;
     assert.ok(!Array.isArray(payload), "payload should be a single object, not array");
     assert.ok(Array.isArray(payload.event_name), "event_name should be an array");
     assert.ok(Array.isArray(payload.event_message), "event_message should be an array");
-    assert.strictEqual(payload.event_name[0], "email_open");
-    assert.strictEqual(payload.event_message[0].email_info.email_reference, "test-ref");
-    assert.strictEqual(payload.event_message[0].email_info.client_reference, "test-client-ref");
+    assert.strictEqual(payload.event_name?.[0], "email_open");
+    assert.strictEqual(payload.event_message?.[0].email_info?.email_reference, "test-ref");
+    assert.strictEqual(payload.event_message?.[0].email_info?.client_reference, "test-client-ref");
   });
 
   it("should handle multiple events in a single payload", () => {
@@ -196,28 +220,28 @@ describe("ZeptoMail Webhook - Payload Structure", () => {
         { email_info: { email_reference: "ref1" }, event_data: [{ details: [{ time: "2024-10-29T09:00:00Z" }] }] },
         { email_info: { email_reference: "ref2" }, event_data: [{ details: [{ time: "2024-10-29T09:05:00Z" }] }] },
       ],
-    };
+    } as WebhookPayload;
 
-    assert.strictEqual(payload.event_name.length, 2);
-    assert.strictEqual(payload.event_message.length, 2);
-    assert.strictEqual(payload.event_name[0], "email_open");
-    assert.strictEqual(payload.event_name[1], "email_link_click");
+    assert.strictEqual(payload.event_name?.length, 2);
+    assert.strictEqual(payload.event_message?.length, 2);
+    assert.strictEqual(payload.event_name?.[0], "email_open");
+    assert.strictEqual(payload.event_name?.[1], "email_link_click");
   });
 
   it("should handle empty event arrays", () => {
-    const payload = { event_name: [], event_message: [] };
-    assert.strictEqual(payload.event_name.length, 0);
-    assert.strictEqual(payload.event_message.length, 0);
+    const payload = { event_name: [], event_message: [] } as WebhookPayload;
+    assert.strictEqual(payload.event_name?.length, 0);
+    assert.strictEqual(payload.event_message?.length, 0);
   });
 
   it("should handle missing event_name gracefully", () => {
-    const payload = { event_message: [{ email_info: { email_reference: "ref1" } }] };
+    const payload = { event_message: [{ email_info: { email_reference: "ref1" } }] } as WebhookPayload;
     const eventNames = payload.event_name ?? [];
     assert.strictEqual(eventNames.length, 0);
   });
 
   it("should handle missing event_message gracefully", () => {
-    const payload = { event_name: ["email_open"] };
+    const payload = { event_name: ["email_open"] } as WebhookPayload;
     const messages = payload.event_message ?? [];
     assert.strictEqual(messages.length, 0);
   });
@@ -228,7 +252,7 @@ describe("ZeptoMail Webhook - Message ID Correlation", () => {
     const msg = {
       email_info: { email_reference: "email-ref-123" },
       request_id: "req-123",
-    };
+    } as WebhookMessage;
     const messageId = msg.email_info?.email_reference || msg.request_id;
     assert.strictEqual(messageId, "email-ref-123");
   });
@@ -237,7 +261,7 @@ describe("ZeptoMail Webhook - Message ID Correlation", () => {
     const msg = {
       email_info: {},
       request_id: "req-123",
-    };
+    } as WebhookMessage;
     const messageId = msg.email_info?.email_reference || msg.request_id;
     assert.strictEqual(messageId, "req-123");
   });
@@ -245,7 +269,7 @@ describe("ZeptoMail Webhook - Message ID Correlation", () => {
   it("should use client_reference when both email_reference and request_id missing", () => {
     const msg = {
       email_info: { client_reference: "client-ref-123" },
-    };
+    } as WebhookMessage;
     const messageId = msg.email_info?.email_reference || msg.request_id;
     const clientRef = msg.email_info?.client_reference;
     assert.ok(!messageId, "email_reference and request_id should be absent");
@@ -255,7 +279,7 @@ describe("ZeptoMail Webhook - Message ID Correlation", () => {
   it("should skip event when no correlation ID present", () => {
     const msg = {
       email_info: {},
-    };
+    } as WebhookMessage;
     const messageId = msg.email_info?.email_reference || msg.request_id;
     const clientRef = msg.email_info?.client_reference;
     assert.ok(!messageId && !clientRef, "should have no correlation ID");

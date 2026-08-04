@@ -44,6 +44,7 @@ import type * as lib_cadence from "../lib/cadence.js";
 import type * as lib_contactInference from "../lib/contactInference.js";
 import type * as lib_discoveryCandidates from "../lib/discoveryCandidates.js";
 import type * as lib_emailTemplates from "../lib/emailTemplates.js";
+import type * as lib_env from "../lib/env.js";
 import type * as lib_googleCalendar from "../lib/googleCalendar.js";
 import type * as lib_institutesOfNationalImportance from "../lib/institutesOfNationalImportance.js";
 import type * as lib_llm from "../lib/llm.js";
@@ -117,6 +118,7 @@ declare const fullApi: ApiFromModules<{
   "lib/contactInference": typeof lib_contactInference;
   "lib/discoveryCandidates": typeof lib_discoveryCandidates;
   "lib/emailTemplates": typeof lib_emailTemplates;
+  "lib/env": typeof lib_env;
   "lib/googleCalendar": typeof lib_googleCalendar;
   "lib/institutesOfNationalImportance": typeof lib_institutesOfNationalImportance;
   "lib/llm": typeof lib_llm;

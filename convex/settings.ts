@@ -3,6 +3,7 @@ import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { GoogleGenAI } from "@google/genai";
 import { validateAuth } from "./lib/auth_utils";
+import { getRequiredEnv, getOptionalEnv } from "./lib/env";
 import { MODELS } from "./lib/models";
 
 // ─── Simple reversible obfuscation for stored API keys ─────────────────────
@@ -17,7 +18,7 @@ const MIN_OBF_SECRET_LENGTH = 32;
 export const getObfuscationSecretStatus = query({
   handler: async (ctx) => {
     await validateAuth(ctx);
-    const secret = process.env.SETTINGS_OBFUSCATION_SECRET;
+    const secret = getOptionalEnv("SETTINGS_OBFUSCATION_SECRET");
     return {
       isSet: !!secret && secret.length >= MIN_OBF_SECRET_LENGTH,
       isTooShort: !!secret && secret.length < MIN_OBF_SECRET_LENGTH,
@@ -26,12 +27,7 @@ export const getObfuscationSecretStatus = query({
 });
 
 function getObfSecret(): string {
-  const secret = process.env.SETTINGS_OBFUSCATION_SECRET;
-  if (!secret) {
-    throw new Error(
-      "SETTINGS_OBFUSCATION_SECRET is not set. Run: npx convex env set SETTINGS_OBFUSCATION_SECRET <value>",
-    );
-  }
+  const secret = getRequiredEnv("SETTINGS_OBFUSCATION_SECRET");
   if (secret.length < MIN_OBF_SECRET_LENGTH) {
     throw new Error(
       `SETTINGS_OBFUSCATION_SECRET must be at least ${MIN_OBF_SECRET_LENGTH} characters long (currently ${secret.length}).`,

@@ -3,6 +3,29 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 
+interface ServiceAccountKey {
+  type: string;
+  project_id: string;
+  private_key_id: string;
+  private_key: string;
+  client_email: string;
+  client_id: string;
+  auth_uri: string;
+  token_uri: string;
+}
+
+interface CalendarEvent {
+  id?: string;
+  summary?: string;
+  start?: { dateTime: string };
+  end?: { dateTime: string };
+  status?: string;
+  hangoutLink?: string;
+  conferenceData?: {
+    entryPoints?: Array<{ entryPointType: string; uri: string }>;
+  };
+}
+
 /**
  * Mirror of base64UrlEncode from convex/lib/googleCalendar.ts
  */
@@ -201,8 +224,9 @@ describe("Google Calendar - Event Creation Body Structure", () => {
   });
 
   it("should handle empty attendees list when no email provided", () => {
+    const attendeeEmail: string | undefined = undefined;
     const body = {
-      attendees: undefined ? [{ email: "test@example.com" }] : [],
+      attendees: attendeeEmail ? [{ email: "test@example.com" }] : [],
     };
     assert.strictEqual(body.attendees.length, 0);
   });
@@ -254,7 +278,7 @@ describe("Google Calendar - API URL Construction", () => {
 
 describe("Google Calendar - Meet Link Extraction", () => {
   it("should extract meet link from hangoutLink", () => {
-    const event = {
+    const event: CalendarEvent = {
       id: "evt1",
       summary: "Test",
       start: { dateTime: "2024-12-01T10:00:00Z" },
@@ -267,7 +291,7 @@ describe("Google Calendar - Meet Link Extraction", () => {
   });
 
   it("should extract meet link from conferenceData.entryPoints when hangoutLink missing", () => {
-    const event = {
+    const event: CalendarEvent = {
       id: "evt1",
       summary: "Test",
       start: { dateTime: "2024-12-01T10:00:00Z" },
@@ -286,7 +310,7 @@ describe("Google Calendar - Meet Link Extraction", () => {
   });
 
   it("should prefer hangoutLink over conferenceData.entryPoints", () => {
-    const event = {
+    const event: CalendarEvent = {
       hangoutLink: "https://meet.google.com/primary-link",
       conferenceData: {
         entryPoints: [
@@ -301,7 +325,7 @@ describe("Google Calendar - Meet Link Extraction", () => {
   });
 
   it("should return undefined when no meet link present", () => {
-    const event = {
+    const event: CalendarEvent = {
       id: "evt1",
       summary: "Test",
       start: { dateTime: "2024-12-01T10:00:00Z" },
@@ -315,7 +339,7 @@ describe("Google Calendar - Meet Link Extraction", () => {
   });
 
   it("should filter for video entry point type only", () => {
-    const event = {
+    const event: CalendarEvent = {
       conferenceData: {
         entryPoints: [
           { entryPointType: "phone", uri: "tel:+1234567890" },
@@ -366,8 +390,8 @@ describe("Google Calendar - Token Caching Logic", () => {
   it("should not reuse cached token when service account changes", () => {
     const email1 = "sa1@project.iam.gserviceaccount.com";
     const email2 = "sa2@project.iam.gserviceaccount.com";
-    const cachedTokenKey = email1;
-    const tokenKey = email2;
+    const cachedTokenKey: string = email1;
+    const tokenKey: string = email2;
 
     // Token should NOT be reused when key differs
     const shouldReuse = cachedTokenKey === tokenKey;
@@ -386,8 +410,11 @@ describe("Google Calendar - Token Caching Logic", () => {
   });
 
   it("should invalidate token cache on 401 and retry with fresh token", () => {
-    let cachedToken = { token: "stale-token", expiresAt: Date.now() + 3600_000 };
-    let cachedTokenKey = "sa@project.iam.gserviceaccount.com";
+    let cachedToken: { token: string; expiresAt: number } | null = {
+      token: "stale-token",
+      expiresAt: Date.now() + 3600_000,
+    };
+    let cachedTokenKey: string | null = "sa@project.iam.gserviceaccount.com";
 
     // Simulate 401 response
     const got401 = true;
@@ -412,7 +439,7 @@ describe("Google Calendar - Token Caching Logic", () => {
 
 describe("Google Calendar - Service Account Key Validation", () => {
   it("should validate required fields in service account JSON", () => {
-    const sa = {
+    const sa: ServiceAccountKey = {
       type: "service_account",
       project_id: "test-project",
       private_key_id: "key-id-123",
@@ -429,32 +456,41 @@ describe("Google Calendar - Service Account Key Validation", () => {
   });
 
   it("should reject service account without client_email", () => {
-    const sa = { private_key: "key", token_uri: "https://oauth2.googleapis.com/token" };
+    const sa: Partial<ServiceAccountKey> = {
+      private_key: "key",
+      token_uri: "https://oauth2.googleapis.com/token",
+    };
     assert.ok(!sa.client_email, "should detect missing client_email");
   });
 
   it("should reject service account without private_key", () => {
-    const sa = { client_email: "test@test.com", token_uri: "https://oauth2.googleapis.com/token" };
+    const sa: Partial<ServiceAccountKey> = {
+      client_email: "test@test.com",
+      token_uri: "https://oauth2.googleapis.com/token",
+    };
     assert.ok(!sa.private_key, "should detect missing private_key");
   });
 });
 
 describe("Google Calendar - Calendar ID Fallback", () => {
   it("should use provided calendarId when given", () => {
-    const calendarId = "custom@group.calendar.google.com" ?? process.env.GOOGLE_CALENDAR_ID ?? "primary";
+    const provided: string | undefined = "custom@group.calendar.google.com";
+    const calendarId = provided ?? process.env.GOOGLE_CALENDAR_ID ?? "primary";
     assert.strictEqual(calendarId, "custom@group.calendar.google.com");
   });
 
   it("should fall back to env var when calendarId not provided", () => {
     process.env.GOOGLE_CALENDAR_ID = "env@group.calendar.google.com";
-    const calendarId = undefined ?? process.env.GOOGLE_CALENDAR_ID ?? "primary";
+    const provided: string | undefined = undefined;
+    const calendarId = provided ?? process.env.GOOGLE_CALENDAR_ID ?? "primary";
     assert.strictEqual(calendarId, "env@group.calendar.google.com");
     delete process.env.GOOGLE_CALENDAR_ID;
   });
 
   it("should fall back to primary when neither provided", () => {
     delete process.env.GOOGLE_CALENDAR_ID;
-    const calendarId = undefined ?? process.env.GOOGLE_CALENDAR_ID ?? "primary";
+    const provided: string | undefined = undefined;
+    const calendarId = provided ?? process.env.GOOGLE_CALENDAR_ID ?? "primary";
     assert.strictEqual(calendarId, "primary");
   });
 });
@@ -536,14 +572,14 @@ describe("Google Calendar - testCalendarConnection", () => {
 
   it("should construct correct calendar metadata URL with 'primary' fallback", () => {
     delete process.env.GOOGLE_CALENDAR_ID;
-    const calendarId = undefined ?? process.env.GOOGLE_CALENDAR_ID ?? "primary";
+    const provided: string | undefined = undefined;
+    const calendarId = provided ?? process.env.GOOGLE_CALENDAR_ID ?? "primary";
     const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendarId)}`;
     assert.ok(url.endsWith("/calendars/primary"), "must fall back to primary");
   });
 
   it("should return 404 error with calendar ID in message", () => {
     const calendarId = "missing@group.calendar.google.com";
-    const status = 404;
     const error = `Calendar "${calendarId}" not found. Verify the calendar ID and that the service account has access.`;
     assert.ok(error.includes(calendarId), "404 error must include calendar ID");
     assert.ok(error.includes("not found"), "404 error must mention 'not found'");
@@ -551,7 +587,6 @@ describe("Google Calendar - testCalendarConnection", () => {
 
   it("should return 403 error with calendar ID in message", () => {
     const calendarId = "restricted@group.calendar.google.com";
-    const status = 403;
     const error = `Service account lacks permission to access calendar "${calendarId}". Share the calendar with the service account email.`;
     assert.ok(error.includes(calendarId), "403 error must include calendar ID");
     assert.ok(error.includes("permission"), "403 error must mention permission");

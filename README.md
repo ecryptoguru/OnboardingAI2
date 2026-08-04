@@ -38,7 +38,6 @@ Set these in your Convex dashboard or with `npx convex env set <NAME> <VALUE>`:
 | `LLM_DAILY_BUDGET_USD` | Recommended | Daily LLM spend soft cap (default $50) |
 | `DISABLE_TEST_ENDPOINTS` | Yes for tests | Set `false` to enable HTTP test endpoints in `convex/http.ts` |
 | `TEST_WEBHOOK_SECRET` | Recommended | Bearer token required for HTTP test endpoints |
-| `REQUIRE_WEBHOOK_AUTH` | Recommended | Set `true` to require shared-secret auth on inbound webhooks |
 | `ADMIN_EMAILS` | Optional | Comma-separated admin emails for `validateAdmin` (leave empty in dev to allow all authenticated users) |
 | `SKIP_RATE_LIMITS` | Optional | Set `true` **only** for local testing; must be unset in production |
 | `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` | Optional | Sentry server/client error tracking DSN |
@@ -96,7 +95,7 @@ HTTP actions live in `convex/http.ts` and are served from the **Convex site URL*
 | `/webhooks/email-reply` | Inbound reply payloads (JSON or form-data) | Bearer token via `EMAIL_WEBHOOK_SECRET` |
 | `/webhooks/google-calendar` | Google Calendar push notifications | `x-goog-channel-token` via `GOOGLE_CALENDAR_WEBHOOK_TOKEN` |
 
-When `REQUIRE_WEBHOOK_AUTH` is unset or `false`, missing secrets are bypassed with console warnings for local dev only.
+Webhook endpoints are disabled until their specific secret is configured; unconfigured webhooks return `401 Unauthorized`.
 
 ## 🛡 Hardening
 

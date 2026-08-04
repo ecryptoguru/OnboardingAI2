@@ -117,3 +117,20 @@ export const getInternal = internalQuery({
     return await ctx.db.get(args.id);
   },
 });
+
+// NOTE: This is a capped count for the dashboard. Once a university has more
+// than 5000 replies, this returns the cap and `capped: true`.
+// The long-term fix is a per-university counter table or pagination.
+const MAX_REPLY_COUNT = 5000;
+
+export const countByUniversity = query({
+  args: { university_id: v.id("universities") },
+  handler: async (ctx, args) => {
+    await validateAuth(ctx);
+    const rows = await ctx.db
+      .query("replyLogs")
+      .withIndex("by_university", (q) => q.eq("university_id", args.university_id))
+      .take(MAX_REPLY_COUNT);
+    return { count: rows.length, capped: rows.length >= MAX_REPLY_COUNT };
+  },
+});

@@ -125,7 +125,7 @@ All six original build phases are complete. The table below records the final, a
 | 1.3 | Convex Native Auth | `convex/auth.config.ts` with Password provider. `ConvexAuthNextjsServerProvider` in `app/layout.tsx`. `convexAuthNextjsMiddleware()` in `middleware.ts`. | Done |
 | 1.4 | CRUD Functions | `convex/universities.ts`, `convex/stakeholders.ts`, `convex/signals.ts`, `convex/proposals.ts`, `convex/sequences.ts`, `convex/emails.ts`, `convex/replies.ts`, `convex/settings.ts`, etc. | Done |
 | 1.5 | Next.js 15 Shell | App Router with `/(dashboard)/layout.tsx`, glassmorphism sidebar, pages: Universities, Enrichment, Outreach, Approvals, Proposals, Analytics, Settings. | Done |
-| 1.6 | Env Vars | Secrets set via `npx convex env set`: `NEXT_PUBLIC_CONVEX_URL`, `NEXT_PUBLIC_CONVEX_SITE_URL`, `SITE_URL`, `SETTINGS_OBFUSCATION_SECRET`, `GOOGLE_CALENDAR_WEBHOOK_TOKEN`, `LLM_DAILY_BUDGET_USD`, `DISABLE_TEST_ENDPOINTS`, `TEST_WEBHOOK_SECRET`, `REQUIRE_WEBHOOK_AUTH`, `ADMIN_EMAILS`, `SENTRY_DSN`. | Done |
+| 1.6 | Env Vars | Secrets set via `npx convex env set`: `NEXT_PUBLIC_CONVEX_URL`, `NEXT_PUBLIC_CONVEX_SITE_URL`, `SITE_URL`, `SETTINGS_OBFUSCATION_SECRET`, `GOOGLE_CALENDAR_WEBHOOK_TOKEN`, `LLM_DAILY_BUDGET_USD`, `DISABLE_TEST_ENDPOINTS`, `TEST_WEBHOOK_SECRET`, `ADMIN_EMAILS`, `SENTRY_DSN`. | Done |
 | 1.7 | Verify | Convex dashboard shows tables. Auth works. Frontend connects and shows live university list. | Done |
 
 ### PHASE 2: DATA INGESTION & WEBSITE DISCOVERY Done

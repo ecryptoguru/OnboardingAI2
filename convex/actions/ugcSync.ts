@@ -4,6 +4,7 @@ import { action } from "../_generated/server";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { validateAuth } from "../lib/auth_utils";
+import { normalizeState } from "../lib/universityUtils";
 import type { Doc, Id } from "../_generated/dataModel";
 
 /**
@@ -111,7 +112,7 @@ export const syncUgcData = action({
     // Build state-indexed map for O(1) candidate lookup
     const stateMap = new Map<string, Doc<"universities">[]>();
     for (const record of existingUniversities) {
-      const key = (record.state || "unknown").toLowerCase().trim();
+      const key = normalizeState(record.state) ?? "unknown";
       const list = stateMap.get(key) ?? [];
       list.push(record);
       stateMap.set(key, list);
@@ -145,7 +146,7 @@ export const syncUgcData = action({
     // richest record per (name, state) prevents creating DB duplicates.
     const ugcDedupMap = new Map<string, typeof args.universities[0]>();
     for (const uni of args.universities) {
-      const key = (uni.university_name.trim().toLowerCase() + "|" + uni.state.trim().toLowerCase());
+      const key = (uni.university_name.trim().toLowerCase() + "|" + (normalizeState(uni.state) ?? "unknown"));
       const existing = ugcDedupMap.get(key);
       if (!existing) {
         ugcDedupMap.set(key, uni);
@@ -172,7 +173,7 @@ export const syncUgcData = action({
       // NOTE: we intentionally do NOT mutate uni.type here to avoid a side
       // effect on the caller's input array. We use normalizedType below.
 
-      const stateKey = (uni.state || "unknown").toLowerCase().trim();
+      const stateKey = normalizeState(uni.state) ?? "unknown";
       const candidates = stateMap.get(stateKey) ?? [];
       const matched: Doc<"universities">[] = [];
 

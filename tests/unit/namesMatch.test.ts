@@ -71,4 +71,21 @@ describe("namesMatch", () => {
       true,
     );
   });
+
+  it("should not match two IIITs that only share 'Information'", () => {
+    assert.strictEqual(
+      namesMatch(
+        "Indian Institute of Information Technology, Sri City",
+        "Indian Institute of Information Technology, Guwahati",
+      ),
+      false,
+    );
+    assert.strictEqual(
+      namesMatch(
+        "Indian Institute of Information Technology, Design and Manufacturing, Jabalpur",
+        "Indian Institute of Information Technology, Design and Manufacturing, Kurnool",
+      ),
+      false,
+    );
+  });
 });

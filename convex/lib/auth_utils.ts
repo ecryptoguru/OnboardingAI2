@@ -1,3 +1,5 @@
+import { getOptionalEnv } from "./env";
+
 /**
  * Helper to check authentication with a development-only bypass.
  * This file must NOT have "use node" as it is imported by mutations.
@@ -32,7 +34,7 @@ export async function validateAdmin(ctx: {
   // Handle tokenIdentifier format like "password|user@example.com"
   const cleanEmail = email.includes("|") ? email.split("|").pop()?.trim() || "" : email;
 
-  const adminEmails = (process.env.ADMIN_EMAILS || "")
+  const adminEmails = (getOptionalEnv("ADMIN_EMAILS") || "")
     .split(",")
     .map((e) => e.trim().toLowerCase())
     .filter(Boolean);

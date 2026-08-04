@@ -5,6 +5,7 @@ import {
   isValidIndianPhone as isValidIndianPhoneShared,
   normalizeIndianPhone as normalizeIndianPhoneShared,
 } from "./phone";
+import { getOptionalBoolean } from "./env";
 
 /**
  * Strip adversarial / prompt-injection patterns from any text before it reaches an LLM.
@@ -169,7 +170,7 @@ export async function withRetry<T>(
         `[Retry] Attempt ${i + 1} failed. Retrying in ${delay}ms...`,
         error instanceof Error ? error.message : String(error),
       );
-      if (process.env.SKIP_RATE_LIMITS !== "true") {
+      if (!getOptionalBoolean("SKIP_RATE_LIMITS")) {
         await new Promise((resolve) => setTimeout(resolve, delay));
       }
       delay = Math.min(delay * factor, maxDelay);

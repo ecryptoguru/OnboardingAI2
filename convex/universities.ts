@@ -7,7 +7,7 @@ import {
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { validateAuth } from "./lib/auth_utils";
-import { namesMatch } from "./lib/universityUtils";
+import { namesMatch, normalizeState } from "./lib/universityUtils";
 
 function isDuplicateOfExisting(
   row: { university_name: string; state?: string | null },
@@ -16,7 +16,11 @@ function isDuplicateOfExisting(
   for (const record of existing) {
     if (namesMatch(row.university_name, record.university_name)) {
       // Optional: also compare state to reduce false positives
-      if (!row.state || !record.state || row.state === record.state) {
+      if (
+        !row.state ||
+        !record.state ||
+        normalizeState(row.state) === normalizeState(record.state)
+      ) {
         return true;
       }
     }
@@ -1146,6 +1150,7 @@ export const bulkSyncCuratedInternal = internalMutation({
         state: v.optional(v.string()),
         city: v.optional(v.string()),
         website: v.optional(v.string()),
+        website_status: websiteStatusValidator,
         type: v.optional(v.string()),
         category: v.optional(v.string()),
         data_source: v.optional(v.string()),
@@ -1171,8 +1176,12 @@ export const bulkSyncCuratedInternal = internalMutation({
 
     for (const upd of args.updates) {
       const { id, ...fields } = upd;
+      const websiteStatus =
+        fields.website_status ??
+        (fields.website ? "valid" : undefined);
       await ctx.db.patch(id, {
         ...fields,
+        ...(websiteStatus ? { website_status: websiteStatus } : {}),
         updated_at: now,
       });
       updatedCount++;

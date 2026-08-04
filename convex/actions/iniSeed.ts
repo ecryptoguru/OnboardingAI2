@@ -8,6 +8,7 @@ import {
 import { internal } from "../_generated/api";
 import { validateAuth } from "../lib/auth_utils";
 import { INSTITUTES_OF_NATIONAL_IMPORTANCE } from "../lib/institutesOfNationalImportance";
+import { normalizeState } from "../lib/universityUtils";
 import type { Doc, Id } from "../_generated/dataModel";
 
 export type InstituteOfNationalImportance =
@@ -18,7 +19,10 @@ type CuratedInstitute = InstituteOfNationalImportance & {
   data_source: "curated";
 };
 
-type CuratedUpdate = CuratedInstitute & { id: Id<"universities"> };
+type CuratedUpdate = CuratedInstitute & {
+  id: Id<"universities">;
+  website_status: "valid" | "pending";
+};
 
 type SyncResult = {
   addedCount: number;
@@ -63,7 +67,10 @@ function scoreMatch(
     }
   }
 
-  if (record.state && record.state !== institute.state) {
+  if (
+    record.state &&
+    normalizeState(record.state) !== normalizeState(institute.state)
+  ) {
     return 0;
   }
 
@@ -112,14 +119,26 @@ async function doSync(ctx: ActionCtx): Promise<SyncResult> {
 
     if (best && best.score >= 80) {
       const record = best.record;
+      const expectedWebsiteStatus = institute.website ? "valid" : "pending";
+      const needsWebsiteStatusFix =
+        institute.website &&
+        record.website_status !== "valid" &&
+        (record.website_status === "pending" ||
+          record.website_status === "discovered_weak" ||
+          record.website_status === undefined);
       const hasDifferences =
-        record.university_name !== institute.university_name ||
-        record.state !== institute.state ||
-        record.city !== institute.city ||
-        record.website !== institute.website ||
+        normalizeName(record.university_name) !==
+          normalizeName(institute.university_name) ||
+        normalizeState(record.state) !== normalizeState(institute.state) ||
+        record.city?.trim().toLowerCase() !==
+          institute.city?.trim().toLowerCase() ||
+        normalizeUrlDomain(record.website) !==
+          normalizeUrlDomain(institute.website) ||
+        record.established_year !== institute.established_year ||
         record.type !== "Other" ||
         record.category !== institute.category ||
-        record.data_source !== "curated";
+        record.data_source !== "curated" ||
+        needsWebsiteStatusFix;
 
       if (record.data_source === "curated" && !hasDifferences) {
         console.log(`Already curated: ${institute.university_name}`);
@@ -132,6 +151,7 @@ async function doSync(ctx: ActionCtx): Promise<SyncResult> {
         ...institute,
         type: "Other",
         data_source: "curated",
+        website_status: expectedWebsiteStatus,
       });
     } else {
       inserts.push({

@@ -15,6 +15,42 @@ import {
 import { useState } from "react";
 import { useRequireGeminiKey } from "./ApiKeyModal";
 
+// ─── Safe link helpers to prevent javascript:/data: URLs from rendering ─────────
+function safeWebUrl(raw: string | undefined | null): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const withProtocol = /^(https?):\/\//i.test(trimmed)
+    ? trimmed
+    : `https://${trimmed}`;
+  try {
+    const parsed = new URL(withProtocol);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return withProtocol;
+  } catch {
+    return null;
+  }
+}
+
+function safeMailto(email: string | undefined | null): string | null {
+  if (!email) return null;
+  const trimmed = email.trim();
+  if (!trimmed || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return null;
+  return `mailto:${encodeURIComponent(trimmed)}`;
+}
+
+function safeTel(phone: string | undefined | null): string | null {
+  if (!phone) return null;
+  const digits = phone.replace(/[^\d+]/g, "");
+  if (!digits) return null;
+  // Keep an international plus only at the start; drop stray plus signs.
+  const normalized = digits.startsWith("+")
+    ? `+${digits.slice(1).replace(/\+/g, "")}`
+    : digits.replace(/\+/g, "");
+  if (!normalized || normalized === "+") return null;
+  return `tel:${normalized}`;
+}
+
 interface UniversityDetailProps {
   universityId: Id<"universities"> | null;
   onClose: () => void;
@@ -103,25 +139,25 @@ export function UniversityDetail({
               {university?.city ? `${university.city}, ` : ""}
               {university?.state} {university?.zip_code}
             </p>
-            {university?.website && (
-              <a
-                href={
-                  university.website.startsWith("http")
-                    ? university.website
-                    : `https://${university.website}`
-                }
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 w-fit mt-0.5"
-              >
-                <span className="font-medium">
-                  {university.website
-                    .replace(/^https?:\/\/(www\.)?/, "")
-                    .replace(/\/$/, "")}
-                </span>
-                <span className="text-xs">↗</span>
-              </a>
-            )}
+            {(() => {
+              const rawWebsite = university?.website;
+              const websiteUrl = safeWebUrl(rawWebsite);
+              return websiteUrl && rawWebsite ? (
+                <a
+                  href={websiteUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-sm text-blue-400 hover:text-blue-300 transition-colors flex items-center gap-1 w-fit mt-0.5"
+                >
+                  <span className="font-medium">
+                    {rawWebsite
+                      .replace(/^https?:\/\/(www\.)?/, "")
+                      .replace(/\/$/, "")}
+                  </span>
+                  <span className="text-xs">↗</span>
+                </a>
+              ) : null;
+            })()}
 
             <button
               onClick={withKeyCheck(handleDeepEnrich)}
@@ -603,26 +639,26 @@ export function UniversityDetail({
                       </p>
                     </div>
                     <div className="flex flex-col items-end gap-2 shrink-0">
-                      {s.email && (
+                      {s.email && safeMailto(s.email) && (
                         <a
-                          href={`mailto:${s.email}`}
+                          href={safeMailto(s.email)!}
                           className="text-xs text-blue-400 bg-blue-500/10 border border-blue-500/20 px-2.5 py-1 rounded-md hover:bg-blue-500/20 transition-colors max-w-[200px] truncate font-medium"
                           title={s.email}
                         >
                           {s.email}
                         </a>
                       )}
-                      {s.phone && (
+                      {s.phone && safeTel(s.phone) && (
                         <a
-                          href={`tel:${s.phone}`}
+                          href={safeTel(s.phone)!}
                           className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-md hover:bg-emerald-500/20 transition-colors font-medium"
                         >
                           {s.phone}
                         </a>
                       )}
-                      {s.linkedin_url && (
+                      {s.linkedin_url && safeWebUrl(s.linkedin_url) && (
                         <a
-                          href={s.linkedin_url}
+                          href={safeWebUrl(s.linkedin_url)!}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="flex items-center gap-1.5 text-xs text-sky-400 bg-sky-500/10 px-2.5 py-1 rounded-md hover:bg-sky-500/20 transition-colors border border-sky-500/20 font-medium"
@@ -673,12 +709,10 @@ export function UniversityDetail({
               <></>
             ) : (
               signals.map((sig: Doc<"universitySignals">) => {
-                let host = "Source";
-                try {
-                  if (sig.source_url) {
-                    host = new URL(sig.source_url).hostname.replace("www.", "");
-                  }
-                } catch {}
+                const sourceUrl = safeWebUrl(sig.source_url);
+                const host = sourceUrl
+                  ? new URL(sourceUrl).hostname.replace("www.", "")
+                  : "Source";
 
                 return (
                   <div
@@ -696,9 +730,9 @@ export function UniversityDetail({
                     <p className="text-foreground text-sm leading-relaxed line-clamp-3">
                       {sig.content}
                     </p>
-                    {sig.source_url && (
+                    {sourceUrl && (
                       <a
-                        href={sig.source_url}
+                        href={sourceUrl}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="flex items-center gap-1.5 mt-1 text-blue-400 hover:text-blue-300 w-fit transition-colors group"

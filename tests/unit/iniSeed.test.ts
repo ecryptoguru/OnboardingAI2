@@ -16,7 +16,6 @@ function makeRecord(
   return {
     _id: "test-id" as Doc<"universities">["_id"],
     _creationTime: Date.now(),
-    university_name: overrides.university_name,
     state: overrides.state ?? undefined,
     city: overrides.city ?? undefined,
     website: overrides.website ?? undefined,

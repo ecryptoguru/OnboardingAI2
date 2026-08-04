@@ -3,6 +3,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { createHash } from "crypto";
 import { withRetry } from "./utils";
+import { getOptionalNumber, getOptionalBoolean } from "./env";
 import { internal } from "../_generated/api";
 import { ActionCtx } from "../_generated/server";
 
@@ -17,8 +18,7 @@ async function checkDailyBudget(ctx: ActionCtx): Promise<void> {
   // value before any has been incremented, so the actual spend can slightly
   // exceed the cap under burst load. This is acceptable for cost guardrails;
   // tighten the cap or add queueing if stricter control is needed.
-  const envBudget = process.env.LLM_DAILY_BUDGET_USD;
-  const maxBudgetUsd = envBudget ? parseFloat(envBudget) : undefined;
+  const maxBudgetUsd = getOptionalNumber("LLM_DAILY_BUDGET_USD", { min: 0 });
   const budget = await ctx.runQuery(internal.llmBudget.getBudgetInternal, {
     maxBudgetUsd,
   });
@@ -88,7 +88,7 @@ export function getGoogleAI(apiKey?: string | null): GoogleGenAI {
 
 // ─── Model constants (imported from models.ts for V8 runtime compatibility) ──
 import { MODELS, TEMP, THINKING } from "./models";
-export { MODELS, TEMP, THINKING } from "./models";
+export { MODELS, TEMP, THINKING };
 
 const MODEL_PRICING_USD_PER_MILLION: Record<
   string,
@@ -737,21 +737,15 @@ export async function callFlash(
  * Note: Uses the same API key as Gemini chat (getInternalGeminiKey).
  */
 
-// Track embedding API availability within the current process. A 401/403 means
-// the key is invalid, so we avoid burning retries/credits on every signal.
-let embeddingApiAvailable = true;
-
 export async function embed(
   text: string,
   apiKey?: string | null,
 ): Promise<number[]> {
-  if (!apiKey || process.env.DISABLE_EMBEDDINGS === "true" || !embeddingApiAvailable) {
+  if (!apiKey || getOptionalBoolean("DISABLE_EMBEDDINGS")) {
     if (!apiKey) {
       console.warn("[LLM:Embed] No API key — returning zero vector");
-    } else if (process.env.DISABLE_EMBEDDINGS === "true") {
-      console.log("[LLM:Embed] DISABLE_EMBEDDINGS is set — returning zero vector");
     } else {
-      console.log("[LLM:Embed] Embedding API marked unavailable — returning zero vector");
+      console.log("[LLM:Embed] DISABLE_EMBEDDINGS is set — returning zero vector");
     }
     return new Array(768).fill(0);
   }
@@ -782,11 +776,8 @@ export async function embed(
 
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
-          // Auth failures will never succeed on retry — mark unavailable to
-          // stop burning credits across multiple embed() calls in one run.
-          if (res.status === 401 || res.status === 403) {
-            embeddingApiAvailable = false;
-          }
+          // withRetry already treats 401/403 as non-transient, so this fails
+          // fast for this call without poisoning the module state for others.
           throw new Error(JSON.stringify(err));
         }
 

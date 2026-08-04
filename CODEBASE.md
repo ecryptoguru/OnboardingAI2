@@ -312,7 +312,7 @@ ZeptoMail response `request_id` is stored in `emailsSent.zeptomail_message_id` a
 `convex/http.ts` exposes HTTP actions on the **Convex site URL** (`https://*.convex.site` / `NEXT_PUBLIC_CONVEX_SITE_URL`), not the `*.convex.cloud` API URL:
 
 - `POST /webhooks/zeptomail`: HMAC-SHA256 signature verification using `ZEPTOMAIL_WEBHOOK_SECRET`. Maps delivery events (`email_open` → `opened`, `email_link_click` → `clicked`, `hardbounce` / `softbounce` → `bounced`) to `emailsSent` status updates. Correlates by `email_reference`, `request_id`, or `client_reference`.
-- `POST /webhooks/email-reply`: Shared-secret (`EMAIL_WEBHOOK_SECRET`) or `REQUIRE_WEBHOOK_AUTH` bypass in dev. Resolves thread context from `Message-ID` / `References` / `In-Reply-To`, then from email address, inserts a `replies` record, and schedules `internal.actions.replyClassifier.classifyReplyInternal`.
+- `POST /webhooks/email-reply`: Shared-secret (`EMAIL_WEBHOOK_SECRET`). Resolves thread context from `Message-ID` / `References` / `In-Reply-To`, then from email address, inserts a `replies` record, and schedules `internal.actions.replyClassifier.classifyReplyInternal`.
 - `POST /webhooks/google-calendar`: Channel token verification via `GOOGLE_CALENDAR_WEBHOOK_TOKEN` for Google Calendar push sync notifications.
 - Convex Auth HTTP routes (sign-in, sign-out, session) are also mounted here.
 - Test endpoints (`/test/ping`, `/test/run-pipeline`) are disabled by default. Enable with `DISABLE_TEST_ENDPOINTS=false` and pass `TEST_WEBHOOK_SECRET` as a bearer token.
@@ -357,7 +357,7 @@ Flat design with glassmorphism accents. Fonts: Poppins (headings) + Open Sans (b
 3. **Internal Mutations:** Webhook handlers in `convex/http.ts` must use internal mutations (not direct DB writes) to keep logic centralized and auditable.
 4. **ZeptoMail ID Persistence:** Always store normalized `zeptomail_message_id` in `emailsSent` for delivery event correlation, and pass `client_reference` for proposal/reply tracking.
 5. **Sentry Logging:** Ensure AI failures have structured payload logs.
-6. **Environment Variables:** Only `CONVEX_*`, `NEXT_PUBLIC_*`, `SETTINGS_OBFUSCATION_SECRET`, `GOOGLE_CALENDAR_WEBHOOK_TOKEN`, `ZEPTOMAIL_WEBHOOK_SECRET`, `EMAIL_WEBHOOK_SECRET`, `REQUIRE_WEBHOOK_AUTH`, `DISABLE_TEST_ENDPOINTS`, and `TEST_WEBHOOK_SECRET` should live in `.env` or Convex env. All API service keys belong in the DB via the Settings page.
+6. **Environment Variables:** Only `CONVEX_*`, `NEXT_PUBLIC_*`, `SETTINGS_OBFUSCATION_SECRET`, `GOOGLE_CALENDAR_WEBHOOK_TOKEN`, `ZEPTOMAIL_WEBHOOK_SECRET`, `EMAIL_WEBHOOK_SECRET`, `DISABLE_TEST_ENDPOINTS`, and `TEST_WEBHOOK_SECRET` should live in `.env` or Convex env. All API service keys belong in the DB via the Settings page.
 7. **Rate Limiting:** Use `rateLimits` table + `withConcurrencyLimit` for external API call throttling. Email dispatch is capped at **3 emails/minute per destination**.
 8. **Serper Budget:** Use `createSerperBudget` / `runWithSerperBudget` from `convex/lib/serperBudget.ts` to enforce per-university query caps and detect quota exhaustion.
 9. **Timeout Safety:** All Gemini SDK calls use `httpOptions: { timeout: 25000 }`. All `fetch()` calls use `AbortSignal.timeout(...)`. Do **not** wrap `ctx.runAction(...)` in `raceWithTimeout`.

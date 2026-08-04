@@ -44,7 +44,7 @@ HTTP actions are defined in `convex/http.ts`. They are served from the **Convex 
 | `/test/ping` | GET | Health check | None |
 | `/test/run-pipeline` | POST | Real-world integration test trigger | Bearer token, `TEST_WEBHOOK_SECRET` |
 
-When `REQUIRE_WEBHOOK_AUTH` is unset or `false`, missing webhook secrets are bypassed with warnings for local dev only.
+Webhook endpoints are disabled until their specific secret is configured; unconfigured webhooks return `401 Unauthorized`.
 
 ## Email pipeline
 
@@ -84,7 +84,6 @@ These environment variables are read inside `convex/` functions:
 | `GOOGLE_CALENDAR_WEBHOOK_TOKEN` | `http.ts` | Google Calendar channel token verification |
 | `ZEPTOMAIL_WEBHOOK_SECRET` | `http.ts` | ZeptoMail webhook HMAC secret |
 | `EMAIL_WEBHOOK_SECRET` | `http.ts` | Inbound reply webhook bearer token |
-| `REQUIRE_WEBHOOK_AUTH` | `http.ts` | When `true`, reject webhooks with missing/invalid secrets |
 | `DISABLE_TEST_ENDPOINTS` | `http.ts` | Set `false` to enable `/test/*` HTTP actions |
 | `TEST_WEBHOOK_SECRET` | `http.ts` | Bearer token for `/test/run-pipeline` |
 | `ADMIN_EMAILS` | `lib/auth_utils.ts` | Comma-separated admin emails |

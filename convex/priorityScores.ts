@@ -137,3 +137,73 @@ export const completeScoringInternal = internalMutation({
     });
   },
 });
+
+// ─── Migration: remove legacy scoring factor fields from old records ──────────
+// Legacy fields (student_count_score, digital_presence_score, news_activity_score,
+// location_score) are no longer written, but old documents may still contain them.
+// Run this mutation in batches from the Convex dashboard or CLI until `done` is true.
+
+export const CURRENT_SCORING_FACTOR_KEYS = [
+  "hostelite_score",
+  "student_scale_score",
+  "naac_score",
+  "agility_score",
+  "stakeholder_score",
+  "digital_signals_score",
+  "hostelites_inferred",
+] as const;
+
+type CleanedScoringFactors = {
+  hostelite_score?: number;
+  student_scale_score?: number;
+  naac_score?: number;
+  agility_score?: number;
+  stakeholder_score?: number;
+  digital_signals_score?: number;
+  hostelites_inferred?: boolean;
+};
+
+export function cleanScoringFactors(input: Record<string, unknown>): CleanedScoringFactors {
+  const out: CleanedScoringFactors = {};
+  for (const key of CURRENT_SCORING_FACTOR_KEYS) {
+    const value = input[key];
+    if (value === undefined || value === null) continue;
+    if (key === "hostelites_inferred") {
+      if (typeof value === "boolean") out[key] = value;
+    } else if (typeof value === "number") {
+      (out as Record<string, number | boolean | undefined>)[key] = value;
+    }
+  }
+  return out;
+}
+
+export const cleanupLegacyScoringFactors = internalMutation({
+  args: {
+    cursor: v.optional(v.string()),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = Math.min(Math.max(args.limit ?? 100, 1), 500);
+    const page = await ctx.db
+      .query("priorityScores")
+      .paginate({ numItems: limit, cursor: args.cursor ?? null });
+
+    let cleaned = 0;
+    for (const score of page.page) {
+      const factors = score.scoring_factors as Record<string, unknown>;
+      const hasLegacyField = Object.keys(factors).some(
+        (key) => !(CURRENT_SCORING_FACTOR_KEYS as readonly string[]).includes(key),
+      );
+      if (hasLegacyField) {
+        await ctx.db.patch(score._id, { scoring_factors: cleanScoringFactors(factors) });
+        cleaned++;
+      }
+    }
+
+    return {
+      done: page.isDone,
+      continueCursor: page.continueCursor,
+      cleaned,
+    };
+  },
+});

@@ -4,6 +4,7 @@ import { internalAction } from "../_generated/server";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { Id } from "../_generated/dataModel";
+import { getOptionalEnv } from "../lib/env";
 
 /**
  * Comprehensive real-world end-to-end pipeline verification.
@@ -29,7 +30,7 @@ export const runFullPipeline = internalAction({
     cleanup: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    if (process.env.NODE_ENV === "production") {
+    if (getOptionalEnv("NODE_ENV") === "production") {
       throw new Error("runFullPipeline is disabled in production");
     }
 
