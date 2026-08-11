@@ -88,9 +88,13 @@ const TARGET_ROLES = [
   "Associate Director",
 ];
 
-async function fetchJinaText(targetUrl: string, timeoutMs = 15000) {
+async function fetchJinaText(targetUrl: string, timeoutMs = 20000) {
   const response = await fetch(`https://r.jina.ai/${encodeURIComponent(targetUrl)}`, {
-    headers: { Accept: "text/plain" },
+    headers: {
+      Accept: "text/plain",
+      "X-Remove-Selector":
+        "nav, header, footer, .menu, .navbar, #menu, .main-navigation, .site-nav, .topbar, .sidebar, aside, .widget, .footer-content, .site-header, .masthead, .main-menu",
+    },
     signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) {

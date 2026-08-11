@@ -260,6 +260,8 @@ Target roles to find: ${targetRoles.join(", ")}
       - 0XXX-XXXXXXX landline (STD code + number)
       - Anti-ragging pages ALWAYS have mobile numbers — prioritise scanning them
     
+    EMAIL OBFUSCATION: Some sites write emails as "name[at]domain[dot]edu" or "name(at)domain(dot)edu". Decode these to "name@domain.edu" in the final JSON.
+
   LINKEDIN: scan for "linkedin.com/in/" URLs, match to person by name + role proximity.
 
   STRICT EXCLUSIONS (NON-NEGOTIABLE):
@@ -274,7 +276,7 @@ Target roles to find: ${targetRoles.join(", ")}
   MERGE RULE: If same person appears in multiple sources (website + anti-ragging + LinkedIn),
     merge into ONE record with ALL contact fields combined. Keep the most complete version.
 
-  RANKING & LIMIT: Return max 10 stakeholders.
+  RANKING: Return as many stakeholders as found, ranked by completeness.
     Priority: records with email+phone+linkedin > email+phone > email only > name only.
 
 ═══════════════════════════════════════════════════════════

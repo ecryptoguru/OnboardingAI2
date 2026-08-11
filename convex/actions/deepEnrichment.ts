@@ -92,14 +92,15 @@ const TARGET_ROLES = [
 ];
 
 // ─── Constants ─────────────────────────────────────────────────────────────
-const MAX_CONTEXT_CHARS = 50_000; // Cap context to keep Gemini calls fast
-const MAX_URLS_TO_SCRAPE = 6; // Limit Firecrawl API calls per enrichment
-const MAX_CHARS_PER_SOURCE = 8_000; // Truncate each scraped source
+const MAX_CONTEXT_CHARS = 70_000; // Cap context to keep Gemini calls fast
+const MAX_URLS_TO_SCRAPE = 9; // Limit first-pass Firecrawl API calls per enrichment
+const MAX_FOLLOWUP_URLS = 8; // Free Jina-based recursive follow-up from menu pages
+const MAX_CHARS_PER_SOURCE = 6_000; // Truncate each scraped source
 const MIN_BLOCK_LENGTH = 200; // Minimum length for a block to be considered valid
-const MAX_REGEX_CONTACTS = 20; // Cap to avoid bloating the prompt
-const MAX_COST_ESTIMATE = 15000; // Firecrawl credits * 100 + Gemini input tokens.
-// A typical run: 1 map + 3 scrapes = 4 * 100 = 400.
-// Plus ~25k chars prompt / 4 = 6.25k tokens. Total ~6,650.
+const MAX_REGEX_CONTACTS = 30; // Cap to avoid bloating the prompt
+const MAX_COST_ESTIMATE = 30_000; // Firecrawl credits * 100 + Gemini input tokens.
+// A typical run: 1 map + 6 scrapes = 7 * 100 = 700.
+// Plus ~55k chars prompt / 4 = ~13.7k tokens. Total ~14.4k.
 
 // ─── External Source Search Helpers ────────────────────────────────────────────
 // Indian university demographics live on government portals, NOT university websites.
@@ -135,7 +136,7 @@ async function discoverExternalSources(
   uniName: string,
   domain: string,
   serperKey: string,
-  serperBudget = createSerperBudget({ maxQueries: 2 }),
+  serperBudget = createSerperBudget({ maxQueries: 6 }),
   options: {
     city?: string;
     state?: string;
@@ -151,20 +152,24 @@ async function discoverExternalSources(
     .split("/")
     .map((token) => token.replace(/[^a-z0-9]/g, ""))
     .filter((token) => token.length >= 4);
-  // Use simple keyword queries — Serper works best with natural language, not complex operators
+  // Use simple keyword queries — Serper works best with natural language, not complex operators.
+  // Put high-probability leadership-leaf queries first because they are the most common failure point.
   const queries = [
+    // Leadership leaf pages (officers, deans, registrar, VC, telephone directory)
+    `${uniName} ${locationTerms} site:${domain} officers deans registrar directory`,
+    `${uniName} ${locationTerms} site:${domain} administration contact directory`,
+    `${uniName} ${locationTerms} site:${domain} vice chancellor director finance officer`,
     // NIRF data — highest value for demographics
     `${uniName} ${locationTerms} NIRF student strength enrollment`,
-    `${uniName} ${locationTerms} site:${domain} administration`,
-    `${uniName} ${locationTerms} site:${domain} registrar`,
-    `${uniName} ${locationTerms} site:${domain} vice chancellor director`,
-    // NAAC / IQAC / SSR
-    `${uniName} ${locationTerms} NAAC SSR hostelite student data`,
+    `${uniName} ${locationTerms} site:${domain} NIRF`,
+    `${uniName} ${locationTerms} site:${domain} NIRF report`,
+    `${uniName} ${locationTerms} site:${domain} NIRF filetype:pdf`,
     // Anti-ragging — mandatory page with contacts + hostel numbers
     `${uniName} ${locationTerms} anti-ragging committee contact`,
+    // NAAC / IQAC / SSR
+    `${uniName} ${locationTerms} NAAC SSR hostelite student data`,
     // Administration / Contact
-    `${uniName} ${locationTerms} administration contact directory`,
-    `${uniName} ${locationTerms} dean office contact`,
+    `${uniName} ${locationTerms} administration contact dean office`,
     // LinkedIn for officials
     `${uniName} ${locationTerms} vice chancellor registrar linkedin`,
     `${uniName} ${locationTerms} director dean linkedin`,
@@ -199,7 +204,7 @@ async function discoverExternalSources(
         const combined = title + " " + snippet;
 
         // Boost university's own domain for contact/admin pages
-        if (url.includes(domain.toLowerCase())) score += 6;
+        if (url.includes(domain.toLowerCase())) score += 8;
         if (
           locationTerms &&
           `${url} ${combined}`.includes(locationTerms.toLowerCase())
@@ -231,11 +236,19 @@ async function discoverExternalSources(
         )
           score += 4;
         if (
-          /\b(vice.chancellor|registrar|dean|principal|director)\b/i.test(
+          /\b(vice.?chancellor|registrar|dean|principal|director|officer)\b/i.test(
             combined,
           )
         )
           score += 4;
+
+        // NIRF and data source URL signals
+        if (/(?<![a-zA-Z])(nirf|nirf.ranking|nirf.report|nirf.data)(?![a-zA-Z])/i.test(url))
+          score += 8;
+
+        // Leadership leaf page URL signals
+        if (/(?<![a-zA-Z])(officer|officers|dean|deans|registrar|director|directors|chancellor|vice[-\s]?chancellor|chairman|chairperson)(?![a-zA-Z])/i.test(url))
+          score += 6;
         if (
           /\b(anti.ragging|committee|iqac|mandatory.disclosure)\b/i.test(
             combined,
@@ -262,7 +275,7 @@ async function discoverExternalSources(
 
   return allUrls
     .sort((a, b) => b.score - a.score)
-    .slice(0, 3)
+    .slice(0, 5)
     .map((u) => u.url);
 }
 
@@ -274,6 +287,8 @@ function normalizeContent(raw: string): string {
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
+    .replace(/\[at\]/gi, "@")
+    .replace(/\[dot\]/gi, ".")
     .replace(/!\[.*?\]\(data:.*?\)/g, "")
     .replace(
       /\[(?:Home|About|Contact|Menu|Login|Register|Apply|Skip to|Back to top|Toggle navigation|Search|Read more|Click here|Download|View all)\]/gi,
@@ -296,6 +311,30 @@ function normalizeContent(raw: string): string {
     })
     .join("\n")
     .trim();
+}
+
+// ─── Jina Reader helper with navigation stripping ─────────────────────────────
+const JINA_REMOVE_SELECTOR =
+  "nav, header, footer, .menu, .navbar, #menu, .main-navigation, .site-nav, .topbar, .sidebar, aside, .widget, .footer-content, .site-header, .masthead, .main-menu";
+
+async function fetchJinaText(
+  url: string,
+  timeoutMs = 20000,
+): Promise<string> {
+  const res = await fetch(
+    `https://r.jina.ai/${encodeURIComponent(url)}`,
+    {
+      headers: {
+        Accept: "text/plain",
+        "X-Remove-Selector": JINA_REMOVE_SELECTOR,
+      },
+      signal: AbortSignal.timeout(timeoutMs),
+    },
+  );
+  if (!res.ok) {
+    throw new Error(`Jina failed for ${url}: ${res.status}`);
+  }
+  return res.text();
 }
 
 // ─── Context deduplicator ─────────────────────────────────────────────────────
@@ -327,27 +366,35 @@ function deduplicateContext(sources: string[]): string {
 }
 
 const LEADERSHIP_URL_PATTERNS = [
-  /(chancellor|vice[-\s]?chancellor|pro[-\s]?vice[-\s]?chancellor|vc|provc)/i,
-  /(registrar|controller|finance|librarian|warden|rector|secretary|treasurer)/i,
-  /(dean|director|principal|head|hod|chairman|chairperson|president|owner)/i,
-  /(administration|leadership|governance|management|executive|team|directory)/i,
-  /(about[-\s]?us|about)/i,
-  /(contact|contact[-\s]?us)/i,
-  /(anti[-\s]?ragging|committee)/i,
+  { re: /(?<![a-zA-Z])(chancellor|vice[-\s]?chancellor|pro[-\s]?vice[-\s]?chancellor|vc|provc)(?![a-zA-Z])/i, weight: 10 },
+  { re: /(?<![a-zA-Z])(registrar|controller|finance|librarian|warden|rector|secretary|treasurer)(?![a-zA-Z])/i, weight: 8 },
+  { re: /(?<![a-zA-Z])(dean|deans|director|directors|principal|head|hod|chairman|chairpersons?|president|owner)(?![a-zA-Z])/i, weight: 7 },
+  { re: /(?<![a-zA-Z])(officer|officers)(?![a-zA-Z])/i, weight: 6 },
+  { re: /(?<![a-zA-Z])(staff)(?![a-zA-Z])/i, weight: 4 },
+  { re: /(?<![a-zA-Z])(administration|leadership|governance|management|executive|team)(?![a-zA-Z])/i, weight: 3 },
+  { re: /(?<![a-zA-Z])(about[-\s]?us|about)(?![a-zA-Z])/i, weight: 2 },
+  { re: /(?<![a-zA-Z])(contact|contact[-\s]?us|contactus)(?![a-zA-Z])/i, weight: 2 },
+  { re: /(?<![a-zA-Z])(telephone[-_\s]?directory|phone[-_\s]?directory|directory)(?![a-zA-Z])/i, weight: 1 },
+  { re: /(?<![a-zA-Z])(anti[-\s]?ragging|committee)(?![a-zA-Z])/i, weight: 1 },
+  // NIRF data pages feed demographics; keep them in the scrape list.
+  { re: /(?<![a-zA-Z])(nirf|nirf.ranking|nirf.report|nirf.data)(?![a-zA-Z])/i, weight: 8 },
 ];
 
 function scoreLeadershipUrl(url: string): number {
   const lower = url.toLowerCase();
   let score = 0;
-  for (let i = 0; i < LEADERSHIP_URL_PATTERNS.length; i++) {
-    if (LEADERSHIP_URL_PATTERNS[i].test(lower)) {
-      score += LEADERSHIP_URL_PATTERNS.length - i;
+  for (const pattern of LEADERSHIP_URL_PATTERNS) {
+    if (pattern.re.test(lower)) {
+      score += pattern.weight;
     }
   }
-  // Penalise very long URLs, query strings and PDFs which are usually not leadership pages.
+  // Penalise very long URLs, query strings, binary/PDF links and ephemeral pages.
   if (/\?/.test(url)) score -= 2;
-  if (/\.pdf$/i.test(url)) score -= 3;
+  if (/\.(pdf|docx?|xlsx?|pptx?|zip|mp4|mp3)$/i.test(url)) score -= 5;
   if (url.length > 120) score -= 1;
+  // Drop news / event / meeting / circular / notification pages that rarely list stable decision makers.
+  if (/(meeting|minutes|circular|notification|proud|news|event|blog|press[-_]?release|announcement|tender)/i.test(url))
+    score -= 6;
   return score;
 }
 
@@ -362,76 +409,333 @@ function buildBranchScopedPriorityUrls(
     const hostname = parsed.hostname.toLowerCase();
 
     // Handle BOTH subpath and subdomain branches
-    const branchScopedLinks = discoveredLinks.filter((link) => {
-      try {
-        const candidate = new URL(link);
-        const candidateHost = candidate.hostname.toLowerCase();
+    const branchScopedLinks = discoveredLinks
+      .filter((link) => {
+        try {
+          const candidate = new URL(link);
+          const candidateHost = candidate.hostname.toLowerCase();
 
-        // Subpath match: /jaipur/contact
-        if (
-          pathPrefix &&
-          candidate.pathname.startsWith(`${pathPrefix}/`) &&
-          candidate.origin === parsed.origin
-        ) {
-          return true;
+          // Subpath match: /jaipur/contact
+          if (
+            pathPrefix &&
+            candidate.pathname.startsWith(`${pathPrefix}/`) &&
+            candidate.origin === parsed.origin
+          ) {
+            return true;
+          }
+
+          // Exact hostname match
+          if (candidateHost === hostname) {
+            return true;
+          }
+
+          // Subdomain match: jaipur.bits-pilani.ac.in is a subdomain of bits-pilani.ac.in
+          if (
+            candidateHost.endsWith(`.${hostname}`) ||
+            hostname.endsWith(`.${candidateHost}`)
+          ) {
+            return true;
+          }
+
+          return false;
+        } catch {
+          return false;
         }
+      })
+      // Prioritise pages that are most likely to list named decision makers.
+      .sort((a, b) => scoreLeadershipUrl(b) - scoreLeadershipUrl(a));
 
-        // Exact hostname match
-        if (candidateHost === hostname) {
-          return true;
-        }
-
-        // Subdomain match: jaipur.bits-pilani.ac.in is a subdomain of bits-pilani.ac.in
-        // Check if candidate hostname ends with the working hostname
-        if (
-          candidateHost.endsWith(`.${hostname}`) ||
-          hostname.endsWith(`.${candidateHost}`)
-        ) {
-          return true;
-        }
-
-        return false;
-      } catch {
-        return false;
-      }
-    });
-
-    // Prioritise pages that are most likely to list named decision makers.
-    branchScopedLinks.sort((a, b) => scoreLeadershipUrl(b) - scoreLeadershipUrl(a));
-
-    const guessed: string[] = [];
     const root = workingUrl.replace(/\/$/, "");
     const base = pathPrefix && pathPrefix !== "" ? `${parsed.origin}${pathPrefix}` : root;
-    guessed.push(
-      workingUrl,
-      // Multi-person leadership pages first — highest yield for stakeholder count
-      `${base}/about/principal-officers`,
-      `${base}/administration`,
-      `${base}/leadership`,
-      `${base}/governance`,
-      `${base}/team`,
-      `${base}/directory`,
-      // Specific leadership roles
-      `${base}/about/chancellor`,
-      `${base}/chancellor`,
-      `${base}/about/vice-chancellor`,
-      `${base}/vice-chancellor`,
-      `${base}/about/pro-vice-chancellor`,
-      `${base}/pro-vice-chancellor`,
-      // General about/contact pages
-      `${base}/about`,
-      `${base}/contact`,
-      `${base}/contact-us`,
-      `${base}/faculty`,
-      `${base}/anti-ragging`,
-    );
 
-    // Use guessed leadership URLs first (they are generic and prioritise multi-person
-    // officer pages), then backfill with highest-scoring discovered map links.
-    return [...new Set([...guessed, ...branchScopedLinks])].slice(0, maxUrls);
+    // Fallback guesses — many Indian university CMSs use .php or bare paths.
+    // We only use these if the discovered map does not already surface better links.
+    const guessPaths = [
+      "/administration",
+      "/admin",
+      "/officers",
+      "/officer",
+      "/deans",
+      "/dean",
+      "/registrar",
+      "/director",
+      "/leadership",
+      "/governance",
+      "/team",
+      "/directory",
+      "/telephone-directory",
+      "/telephone_directory",
+      "/telephone",
+      "/contact",
+      "/contact-us",
+      "/contactus",
+      "/about",
+      "/about-us",
+      "/nirf",
+      "/nirf-2",
+      "/nirf-3",
+      "/nirf-rankings",
+      "/anti-ragging",
+      "/antiragging",
+      "/anti_ragging",
+    ];
+    const cmsExts = detectCmsExtensions(discoveredLinks).length
+      ? detectCmsExtensions(discoveredLinks)
+      : ["", ".php", ".html"];
+    const guessed: string[] = [];
+    for (const p of guessPaths) {
+      for (const ext of cmsExts) {
+        if (p.endsWith(ext) || (p.endsWith(".php") || p.endsWith(".html"))) {
+          guessed.push(`${base}${p}`);
+        } else {
+          guessed.push(`${base}${p}${ext}`);
+        }
+      }
+    }
+
+    // Combine discovered links and fallback guesses, deduplicate by semantic URL
+    // key, then sort by leadership relevance. Prepend the working URL.
+    const candidateMap = new Map<string, string>();
+    for (const link of [...branchScopedLinks, ...guessed]) {
+      const key = normalizeUrlKey(link);
+      const existing = candidateMap.get(key);
+      if (!existing || scoreLeadershipUrl(link) > scoreLeadershipUrl(existing)) {
+        candidateMap.set(key, link);
+      }
+    }
+    const allCandidates = [...candidateMap.values()].sort(
+      (a, b) => scoreLeadershipUrl(b) - scoreLeadershipUrl(a),
+    );
+    return [workingUrl, ...allCandidates].slice(0, maxUrls);
   } catch {
     return [];
   }
+}
+
+// ─── URL extraction helpers for recursive follow-up ───────────────────────────
+const NON_SCRAPABLE_EXTENSIONS =
+  /\.(pdf|docx?|xlsx?|pptx?|zip|jpg|jpeg|png|gif|svg|webp|mp4|mp3|avi|mov)$/i;
+
+function cleanUrl(url: string): string {
+  // Strip trailing punctuation that markdown extraction often captures
+  return url.replace(/[\),.;'"\s]+$/, "");
+}
+
+function extractUrlsFromMarkdown(
+  markdown: string,
+  baseUrl: string,
+): string[] {
+  const found = new Set<string>();
+
+  // Markdown [text](url) links (relative or absolute)
+  const mdLinkRegex = /\[.*?\]\(([^\s)]+)\)/g;
+  let match;
+  while ((match = mdLinkRegex.exec(markdown)) !== null) {
+    found.add(cleanUrl(match[1].trim()));
+  }
+
+  // Autolinks <url>
+  const autoLinkRegex = /<(https?:\/\/[^\s>]+)>/g;
+  while ((match = autoLinkRegex.exec(markdown)) !== null) {
+    found.add(cleanUrl(match[1].trim()));
+  }
+
+  // Bare URLs
+  const bareRegex = /https?:\/\/[^\s<>"{}|\\^`\[\]]+/g;
+  while ((match = bareRegex.exec(markdown)) !== null) {
+    found.add(cleanUrl(match[0].trim()));
+  }
+
+  const resolved: string[] = [];
+  for (const raw of found) {
+    try {
+      const abs = new URL(raw, baseUrl).href;
+      resolved.push(abs);
+    } catch {
+      // Ignore malformed URLs
+    }
+  }
+  return resolved;
+}
+
+function normalizeUrlKey(url: string): string {
+  try {
+    const u = new URL(url);
+    // Strip www, trailing slash, and common CMS extensions; collapse punctuation.
+    let key = u.hostname.replace(/^www\./i, "");
+    let path = u.pathname
+      .toLowerCase()
+      .replace(/\.(php|html?)$/i, "")
+      .replace(/\/$/, "")
+      .replace(/[-_]/g, "");
+    // Treat plural role pages as singular for dedup (officers ↔ officer, deans ↔ dean).
+    path = path.replace(/s$/, "");
+    key += path;
+    return key;
+  } catch {
+    return url.toLowerCase();
+  }
+}
+
+function extractNirfPdfUrls(blocks: string[], baseUrl: string): string[] {
+  const found = new Set<string>();
+  for (const block of blocks) {
+    const links = extractUrlsFromMarkdown(block, baseUrl);
+    for (const link of links) {
+      if (/\.(pdf|docx?)$/i.test(link) && /nirf/i.test(link)) {
+        found.add(link.replace(/\s/g, "%20"));
+      }
+    }
+  }
+  const scored = [...found].map((url) => {
+    let score = 0;
+    const yearMatch = url.match(/(20\d{2})/);
+    const year = yearMatch ? parseInt(yearMatch[1], 10) : 0;
+    score += year * 10;
+    if (/\boverall/i.test(url)) score += 5;
+    if (/\b(engg|engineering)\b/i.test(url)) score += 4;
+    if (/\bmanagement\b/i.test(url)) score += 1;
+    if (/\b(university|institute|college)\b/i.test(url)) score += 2;
+    return { url, score };
+  });
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 2)
+    .map((s) => s.url);
+}
+
+function isSamePageAnchor(link: string, sourceUrl: string): boolean {
+  try {
+    const source = new URL(sourceUrl);
+    const candidate = new URL(link, sourceUrl);
+    return (
+      candidate.hash !== "" &&
+      candidate.origin === source.origin &&
+      candidate.pathname === source.pathname
+    );
+  } catch {
+    return false;
+  }
+}
+
+function detectCmsExtensions(discoveredLinks: string[]): string[] {
+  const exts = new Set<string>();
+  for (const l of discoveredLinks) {
+    const match = l.match(/\.(php|html?|aspx?)$/i);
+    if (match) exts.add(`.${match[1].toLowerCase()}`);
+  }
+  return exts.size > 0 ? [...exts] : [""];
+}
+
+function getLeadershipGuesses(baseUrl: string, discoveredLinks: string[] = []): string[] {
+  const root = baseUrl.replace(/\/$/, "");
+  const exts = detectCmsExtensions(discoveredLinks);
+  const roles = [
+    "officers",
+    "officer",
+    "deans",
+    "dean",
+    "registrar",
+    "director",
+    "director-message",
+    "director-profile",
+    "chairman",
+    "chairperson",
+    "chancellor",
+    "vice-chancellor",
+    "vicechancellor",
+    "vice_chancellor",
+    "vc",
+    "finance-officer",
+    "finance-officers",
+    "finance_officer",
+    "nirf",
+    "nirf-2",
+    "nirf-3",
+    "nirf-rankings",
+    "contact-us",
+    "contactus",
+    "contact",
+    "telephone-directory",
+    "telephone_directory",
+  ];
+  const guesses: string[] = [];
+  for (const role of roles) {
+    for (const ext of exts) {
+      guesses.push(`${root}/${role}${ext}`);
+      // For PHP sites, also try underscore variants used by some CMSs.
+      if (ext === ".php" && role.includes("-")) {
+        guesses.push(`${root}/${role.replace(/-/g, "_")}${ext}`);
+      }
+    }
+  }
+  return guesses;
+}
+
+function selectFollowupUrls(
+  blocks: string[],
+  baseUrl: string,
+  alreadyScraped: Set<string>,
+  maxUrls: number,
+  discoveredLinks: string[] = [],
+): string[] {
+  const workingDomain = normalizeInstitutionDomain(baseUrl);
+  // Deduplicate by origin+pathname, keep the best URL (no hash, no trailing junk)
+  const candidates = new Map<string, { url: string; score: number }>();
+
+  const addCandidate = (link: string, sourceUrl?: string) => {
+    if (sourceUrl && isSamePageAnchor(link, sourceUrl)) return;
+    const normalizedKey = normalizeUrlKey(link);
+    if (alreadyScraped.has(link) || alreadyScraped.has(normalizedKey)) return;
+    try {
+      const candidate = new URL(link);
+      const host = candidate.hostname.toLowerCase();
+      if (host !== workingDomain && !host.endsWith(`.${workingDomain}`)) {
+        return;
+      }
+      // Skip non-scrapable binary assets and image-serving paths
+      if (NON_SCRAPABLE_EXTENSIONS.test(candidate.pathname)) return;
+      if (candidate.pathname.includes("/_next/image")) return;
+      const score = scoreLeadershipUrl(link);
+      if (score <= 0) return;
+      // Deduplicate by semantic URL key (ignore hash, trailing slash, extensions)
+      const existing = candidates.get(normalizedKey);
+      if (!existing || existing.score < score) {
+        const url = `${candidate.origin}${candidate.pathname.replace(/\/$/, "")}${candidate.search}`;
+        candidates.set(normalizedKey, { url, score });
+      }
+    } catch {
+      // Ignore unparseable URLs
+    }
+  };
+
+  // Add links found inside scraped page blocks
+  for (const block of blocks) {
+    const sourceMatch = block.match(/=== (?:EXTERNAL )?SOURCE: ([^=\n]+) ===/);
+    const sourceUrl = (sourceMatch?.[1] || "").trim() || baseUrl;
+    const links = extractUrlsFromMarkdown(block, sourceUrl);
+    for (const link of links) {
+      addCandidate(link, sourceUrl);
+    }
+  }
+
+  // Also consider leadership-looking URLs discovered by Firecrawl map/Serper
+  // that were not scraped at first level.
+  for (const link of discoveredLinks) {
+    addCandidate(link);
+  }
+
+  // Add standard leadership path guesses; many Indian university CMSs use .php or
+  // bare slugs, and these pages are often not linked from the main nav that
+  // Firecrawl/Jina extract.
+  for (const guess of getLeadershipGuesses(baseUrl, discoveredLinks)) {
+    addCandidate(guess);
+  }
+
+  return [...candidates.values()]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, maxUrls)
+    .map((c) => c.url);
 }
 
 export const runDeepEnrichment = internalAction({
@@ -491,7 +795,7 @@ export const runDeepEnrichment = internalAction({
         internal.settings.getInternalSerperKey,
       );
       const serperKey = rawSerperKey ? rawSerperKey.trim() : null;
-      const serperBudget = createSerperBudget({ maxQueries: 2 });
+      const serperBudget = createSerperBudget({ maxQueries: 4 });
 
       // ─── Domain extraction ────────────────────────────────────────────────
       const rawDomain = normalizedUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
@@ -535,7 +839,7 @@ export const runDeepEnrichment = internalAction({
                 .slice(0, MAX_URLS_TO_SCRAPE);
             }
             console.log(
-              `[DeepEnrichment] Firecrawl map success with ${tryUrl}: ${mapResult.links.length} URLs; selected ${highYieldUrls.length} high-yield targets.`,
+              `[DeepEnrichment] Firecrawl map success with ${tryUrl}: ${mapResult.links.length} URLs; selected ${highYieldUrls.length} high-yield targets: ${highYieldUrls.join(", ")}`,
             );
             break;
           }
@@ -551,13 +855,29 @@ export const runDeepEnrichment = internalAction({
         console.error(
           "[DeepEnrichment] Firecrawl map failed for all URL variants.",
         );
-        // Fallback: guess common subpages using the original URL
+        // Fallback: guess common subpages using the original URL (bare + .php)
+        const guessPaths = [
+          "/contact",
+          "/contact-us",
+          "/contactus",
+          "/administration",
+          "/admin",
+          "/officers",
+          "/deans",
+          "/about",
+          "/anti-ragging",
+          "/antiragging",
+          "/mandatory-disclosure",
+          "/telephone-directory",
+        ];
         highYieldUrls = [
-          `${workingUrl}/contact`,
-          `${workingUrl}/administration`,
-          `${workingUrl}/about`,
-          `${workingUrl}/anti-ragging`,
-          `${workingUrl}/mandatory-disclosure`,
+          ...new Set(
+            guessPaths.flatMap((p) => [
+              `${workingUrl}${p}`,
+              `${workingUrl}${p}.php`,
+              `${workingUrl}${p}.html`,
+            ]),
+          ),
         ];
       }
 
@@ -565,9 +885,10 @@ export const runDeepEnrichment = internalAction({
       // Indian university demographics live on government portals, not university websites.
       // We search for these external sources and scrape them via Jina Reader (free).
       let externalBlocks: string[] = [];
+      let externalUrls: string[] = [];
       if (serperKey) {
         try {
-          const externalUrls = await discoverExternalSources(
+          externalUrls = await discoverExternalSources(
             uniName,
             domain,
             serperKey,
@@ -584,19 +905,18 @@ export const runDeepEnrichment = internalAction({
             );
             const jinaPromises = externalUrls.map(async (extUrl) => {
               try {
-                const jinaRes = await fetch(`https://r.jina.ai/${encodeURIComponent(extUrl)}`, {
-                  headers: { Accept: "text/plain" },
-                  signal: AbortSignal.timeout(8000),
-                });
-                if (!jinaRes.ok) return "";
-                const text = await jinaRes.text();
+                const text = await fetchJinaText(extUrl, 25000);
                 const normalized = normalizeContent(text).substring(
                   0,
                   MAX_CHARS_PER_SOURCE,
                 );
                 if (normalized.length < MIN_BLOCK_LENGTH) return "";
                 return `\n=== EXTERNAL SOURCE: ${extUrl} ===\n${normalized}\n`;
-              } catch {
+              } catch (e) {
+                console.warn(
+                    `[DeepEnrichment] Jina Reader failed for ${extUrl}:`,
+                    e instanceof Error ? e.message : String(e),
+                  );
                 return "";
               }
             });
@@ -634,22 +954,16 @@ export const runDeepEnrichment = internalAction({
             e instanceof Error ? e.message : String(e),
           );
           try {
-            const jinaRes = await fetch(`https://r.jina.ai/${encodeURIComponent(targetUrl)}`, {
-              headers: { Accept: "text/plain" },
-              signal: AbortSignal.timeout(12000),
-            });
-            if (jinaRes.ok) {
-              const text = await jinaRes.text();
-              const normalized = normalizeContent(text).substring(
-                0,
-                MAX_CHARS_PER_SOURCE,
+            const text = await fetchJinaText(targetUrl, 25000);
+            const normalized = normalizeContent(text).substring(
+              0,
+              MAX_CHARS_PER_SOURCE,
+            );
+            if (normalized.length >= MIN_BLOCK_LENGTH) {
+              console.log(
+                `[DeepEnrichment] Jina Reader fallback succeeded for ${targetUrl}`,
               );
-              if (normalized.length >= MIN_BLOCK_LENGTH) {
-                console.log(
-                  `[DeepEnrichment] Jina Reader fallback succeeded for ${targetUrl}`,
-                );
-                return `\n=== SOURCE: ${targetUrl} ===\n${normalized}\n`;
-              }
+              return `\n=== SOURCE: ${targetUrl} ===\n${normalized}\n`;
             }
           } catch (jinaErr) {
             console.warn(
@@ -671,6 +985,108 @@ export const runDeepEnrichment = internalAction({
         validBlocks = validBlocks.concat(externalBlocks);
         console.log(
           `[DeepEnrichment] Merged ${externalBlocks.length} external blocks into context (total: ${validBlocks.length}).`,
+        );
+      }
+
+      // ─── Phase 2b-2: NIRF PDF follow-up ──────────────────────────────────────
+      // University NIRF pages are link lists to PDF data reports. Extract the most
+      // recent Engineering / Overall PDFs and scrape them with Firecrawl.
+      const nirfPdfUrls = extractNirfPdfUrls(validBlocks, workingUrl);
+      if (nirfPdfUrls.length > 0) {
+        console.log(
+          `[DeepEnrichment] NIRF PDF follow-up: ${nirfPdfUrls.join(", ")}`,
+        );
+        const nirfBlocks = await Promise.all(
+          nirfPdfUrls.map(async (pdfUrl) => {
+            try {
+              const result = await withRetry(
+                async () => firecrawlScrape(pdfUrl, firecrawlKey),
+                { maxRetries: 1 },
+              );
+              const markdown = result.data?.markdown || "";
+              const normalized = normalizeContent(markdown).substring(
+                0,
+                MAX_CHARS_PER_SOURCE,
+              );
+              if (normalized.length < MIN_BLOCK_LENGTH) return "";
+              return `\n=== NIRF SOURCE: ${pdfUrl} ===\n${normalized}\n`;
+            } catch (e) {
+              console.warn(
+                `[DeepEnrichment] Firecrawl failed for NIRF PDF ${pdfUrl}:`,
+                e instanceof Error ? e.message : String(e),
+              );
+              return "";
+            }
+          }),
+        );
+        validBlocks = validBlocks.concat(nirfBlocks.filter((b) => b.length > 0));
+        console.log(
+          `[DeepEnrichment] Merged NIRF PDF blocks (total: ${validBlocks.length}).`,
+        );
+      }
+
+      // ─── Phase 2c: Recursive follow-up to leadership leaf pages ────────────
+      // University admin pages are often menus linking to separate officer/dean/registrar
+      // pages. Follow the most promising in-page links using free Jina Reader.
+      try {
+        const alreadyScraped = new Set<string>();
+        const addScraped = (url: string) => {
+          try {
+            const u = new URL(url);
+            alreadyScraped.add(url);
+            alreadyScraped.add(`${u.origin}${u.pathname}`);
+            alreadyScraped.add(normalizeUrlKey(url));
+          } catch {
+            alreadyScraped.add(url);
+          }
+        };
+        [workingUrl, ...highYieldUrls, ...externalUrls].forEach(addScraped);
+
+        const discoveredLinks = mapResult
+          ? (mapResult.links || []).map((l) => l.url)
+          : [];
+        const followupUrls = selectFollowupUrls(
+          validBlocks,
+          workingUrl,
+          alreadyScraped,
+          MAX_FOLLOWUP_URLS,
+          [...discoveredLinks, ...externalUrls],
+        );
+        if (followupUrls.length > 0) {
+          console.log(
+            `[DeepEnrichment] Following ${followupUrls.length} leadership leaf links from scraped pages: ${followupUrls.join(", ")}`,
+          );
+          const followupPromises = followupUrls.map(async (fu) => {
+            try {
+              const text = await fetchJinaText(fu, 25000);
+              const normalized = normalizeContent(text).substring(
+                0,
+                MAX_CHARS_PER_SOURCE,
+              );
+              if (normalized.length < MIN_BLOCK_LENGTH) return "";
+              return `\n=== FOLLOWUP SOURCE: ${fu} ===\n${normalized}\n`;
+            } catch (e) {
+              console.warn(
+                `[DeepEnrichment] Follow-up Jina failed for ${fu}:`,
+                e instanceof Error ? e.message : String(e),
+              );
+              return "";
+            }
+          });
+          const followupBlocks = (await Promise.all(followupPromises)).filter(
+            (b) => b.length > MIN_BLOCK_LENGTH,
+          );
+          if (followupBlocks.length > 0) {
+            validBlocks = validBlocks.concat(followupBlocks);
+            console.log(
+              `[DeepEnrichment] Follow-up added ${followupBlocks.length} leaf-page blocks (total: ${validBlocks.length}).`,
+            );
+          }
+        }
+      } catch (e) {
+        console.warn(
+          `[DeepEnrichment] Recursive follow-up failed:`,
+          e instanceof Error ? e.message : String(e),
         );
       }
 
@@ -703,24 +1119,21 @@ export const runDeepEnrichment = internalAction({
       };
       for (const arUrl of antiRaggingUrls) {
         try {
-          const arRes = await fetch(`https://r.jina.ai/${encodeURIComponent(arUrl)}`, {
-            headers: { Accept: "text/plain" },
-            signal: AbortSignal.timeout(8000),
-          });
-          if (arRes.ok) {
-            const arText = await arRes.text();
-            const contacts = extractContactsFromMarkdown(arText);
-            contacts.emails.forEach((e) => antiRaggingContacts.emails.add(e));
-            contacts.phones.forEach((p) => antiRaggingContacts.phones.add(p));
-            // Also extract with context for downstream name→phone matching
-            const withCtx = extractContactsWithContext(arText);
-            withCtx.phones.forEach((p) => antiRaggingContacts.phoneContexts.push(p));
-            console.log(
-              `[DeepEnrichment] Anti-ragging page ${arUrl}: ${contacts.emails.length} emails, ${contacts.phones.length} phones.`,
-            );
-          }
-        } catch {
-          // Ignore anti-ragging page failures
+          const arText = await fetchJinaText(arUrl, 20000);
+          const contacts = extractContactsFromMarkdown(arText);
+          contacts.emails.forEach((e) => antiRaggingContacts.emails.add(e));
+          contacts.phones.forEach((p) => antiRaggingContacts.phones.add(p));
+          // Also extract with context for downstream name→phone matching
+          const withCtx = extractContactsWithContext(arText);
+          withCtx.phones.forEach((p) => antiRaggingContacts.phoneContexts.push(p));
+          console.log(
+            `[DeepEnrichment] Anti-ragging page ${arUrl}: ${contacts.emails.length} emails, ${contacts.phones.length} phones.`,
+          );
+        } catch (e) {
+          console.warn(
+            `[DeepEnrichment] Anti-ragging Jina failed for ${arUrl}:`,
+            e instanceof Error ? e.message : String(e),
+          );
         }
       }
 
@@ -849,7 +1262,8 @@ ${safeContext}
       // Rough estimate: Firecrawl credits * 100 + Gemini input tokens. Abort if too high.
       // External sources use Jina Reader (free) — only count Firecrawl-based blocks.
       const firecrawlBasedBlocks = validBlocks.filter(
-        (b) => !b.includes("EXTERNAL SOURCE:"),
+        (b) =>
+          !b.includes("EXTERNAL SOURCE:") && !b.includes("FOLLOWUP SOURCE:"),
       );
       const firecrawlCreditsConsumed = 1 + firecrawlBasedBlocks.length;
       const estimatedGeminiTokens = Math.round(extractionPrompt.length / 4);
@@ -1674,7 +2088,7 @@ export const debugDeepEnrichment = internalAction({
           uniName,
           domain,
           serperKey as string,
-          createSerperBudget({ maxQueries: 2 }),
+          createSerperBudget({ maxQueries: 4 }),
           {
             city: university.city,
             state: university.state,

@@ -78,6 +78,17 @@ export function cosineSimilarity(a: number[], b: number[]): number {
   return dot / (Math.sqrt(normA) * Math.sqrt(normB));
 }
 
+function getRateLimitResetDelay(error: unknown): number | null {
+  const msg = error instanceof Error ? error.message : String(error);
+  const resetMatch = msg.match(/resets at ([^\s,]+ [^\s,]+(?:\s[+-]\d{4})?)/i);
+  if (!resetMatch) return null;
+  const resetTs = new Date(resetMatch[1]);
+  if (Number.isNaN(resetTs.getTime())) return null;
+  const waitMs = resetTs.getTime() - Date.now() + 1000; // 1s buffer
+  if (waitMs <= 0 || waitMs > 120_000) return null;
+  return waitMs;
+}
+
 /**
  * Utility for exponential backoff retry logic.
  */
@@ -124,7 +135,6 @@ export async function withRetry<T>(
         msgLower.includes("not enough credits") ||
         msgLower.includes("insufficient credits") ||
         msgLower.includes("quota") ||
-        msgLower.includes("rate limit") ||
         msgLower.includes("billing")
       ) {
         return false;
@@ -166,12 +176,14 @@ export async function withRetry<T>(
         throw error;
       }
 
+      const rateLimitDelay = getRateLimitResetDelay(error);
+      const waitMs = rateLimitDelay ?? delay;
       console.warn(
-        `[Retry] Attempt ${i + 1} failed. Retrying in ${delay}ms...`,
+        `[Retry] Attempt ${i + 1} failed. Retrying in ${waitMs}ms...`,
         error instanceof Error ? error.message : String(error),
       );
       if (!getOptionalBoolean("SKIP_RATE_LIMITS")) {
-        await new Promise((resolve) => setTimeout(resolve, delay));
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
       }
       delay = Math.min(delay * factor, maxDelay);
     }

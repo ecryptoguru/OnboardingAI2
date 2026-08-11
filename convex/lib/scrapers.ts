@@ -78,7 +78,7 @@ export async function firecrawlScrape(
       formats: ["markdown"],
       onlyMainContent: true,
     }),
-    signal: AbortSignal.timeout(20000),
+    signal: AbortSignal.timeout(35000),
   });
 
   if (!res.ok) {
@@ -95,12 +95,12 @@ export async function firecrawlScrape(
 // subpages for stakeholder / demographic extraction.
 
 export const HIGH_YIELD_PATTERNS = [
-  /(contact|feedback|reach[\s-]?us|enquiry|support|help)/i,
-  /(admin|administration|governance|board|director|executive|leadership|management|principal|registrar|vice[\s-]?chancellor|chancellor|dean|head|coordinator|hod)/i,
-  /(anti[\s-]?ragging|statutory|committee|grievance|cell|welfare|student[\s-]?affairs)/i,
-  /(mandatory[\s-]?disclosure|iqac|naac|naac-ssr|aqar|audit|accreditation|ssr)/i,
-  /(about[\s-]?us|profile|overview|facts|figures|campus|at[\s-]?a[\s-]?glance)/i,
-  /(phone|telephone|mobile|fax|email)/i,
+  /(?<![a-zA-Z])(contact|feedback|reach[\s-]?us|enquiry|support|help)(?![a-zA-Z])/i,
+  /(?<![a-zA-Z])(admin|administration|governance|board|director|directors|executive|leadership|management|principal|registrar|vice[\s-]?chancellor|chancellor|dean|deans|head|coordinator|hod|officer|officers)(?![a-zA-Z])/i,
+  /(?<![a-zA-Z])(anti[\s-]?ragging|statutory|committee|grievance|cell|welfare|student[\s-]?affairs)(?![a-zA-Z])/i,
+  /(?<![a-zA-Z])(mandatory[\s-]?disclosure|iqac|naac|naac-ssr|aqar|audit|accreditation|ssr)(?![a-zA-Z])/i,
+  /(?<![a-zA-Z])(about[\s-]?us|profile|overview|facts|figures|campus|at[\s-]?a[\s-]?glance)(?![a-zA-Z])/i,
+  /(?<![a-zA-Z])(phone|telephone|mobile|fax|email)(?![a-zA-Z])/i,
 ] as const;
 
 /**
@@ -325,6 +325,13 @@ export interface ContactWithContext {
 export function extractContactsFromMarkdown(
   markdown: string,
 ): RegexExtractionResult {
+  // Decode common email obfuscation patterns (e.g. name[at]domain[dot]edu)
+  const decoded = markdown
+    .replace(/\[at\]/gi, "@")
+    .replace(/\[dot\]/gi, ".")
+    .replace(/\(dot\)/gi, ".")
+    .replace(/\(at\)/gi, "@");
+
   // Email regex (basic but effective for institutional emails)
   const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
   // Indian phone regex: matches mobiles and landlines with optional separators
@@ -332,8 +339,8 @@ export function extractContactsFromMarkdown(
   const phoneRegex =
     /(?<!\d)(?:\+91[-\s]?[6-9]\d{4}[-\s]?\d{5}|0[6-9]\d{9}|[6-9]\d{9}|0\d{2,4}(?:[-\s]?\d{3,4}){2})(?!\d)/g;
 
-  const emails = new Set(markdown.match(emailRegex) || []);
-  const rawPhones = new Set(markdown.match(phoneRegex) || []);
+  const emails = new Set(decoded.match(emailRegex) || []);
+  const rawPhones = new Set(decoded.match(phoneRegex) || []);
 
   // Normalize Indian phone numbers and drop malformed long numeric strings.
   const validPhones = new Set<string>();
@@ -358,6 +365,12 @@ export function extractContactsFromMarkdown(
 export function extractContactsWithContext(
   markdown: string,
 ): { emails: ContactWithContext[]; phones: ContactWithContext[] } {
+  const decoded = markdown
+    .replace(/\[at\]/gi, "@")
+    .replace(/\[dot\]/gi, ".")
+    .replace(/\(dot\)/gi, ".")
+    .replace(/\(at\)/gi, "@");
+
   const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
   const phoneRegex =
     /(?<!\d)(?:\+91[-\s]?[6-9]\d{4}[-\s]?\d{5}|0[6-9]\d{9}|[6-9]\d{9}|0\d{2,4}(?:[-\s]?\d{3,4}){2})(?!\d)/g;
@@ -368,26 +381,26 @@ export function extractContactsWithContext(
   // Extract emails with context
   let match;
   const emailRegexClone = new RegExp(emailRegex.source, emailRegex.flags);
-  while ((match = emailRegexClone.exec(markdown)) !== null) {
+  while ((match = emailRegexClone.exec(decoded)) !== null) {
     const start = Math.max(0, match.index - 200);
-    const end = Math.min(markdown.length, match.index + match[0].length + 200);
+    const end = Math.min(decoded.length, match.index + match[0].length + 200);
     emails.push({
       value: match[0],
-      context: markdown.substring(start, end).toLowerCase(),
+      context: decoded.substring(start, end).toLowerCase(),
     });
   }
 
   // Extract phones with context
   const phoneRegexClone = new RegExp(phoneRegex.source, phoneRegex.flags);
-  while ((match = phoneRegexClone.exec(markdown)) !== null) {
+  while ((match = phoneRegexClone.exec(decoded)) !== null) {
     const normalizedPhone = normalizeIndianPhone(match[0]);
     if (!normalizedPhone) continue;
 
     const start = Math.max(0, match.index - 200);
-    const end = Math.min(markdown.length, match.index + match[0].length + 200);
+    const end = Math.min(decoded.length, match.index + match[0].length + 200);
     phones.push({
       value: normalizedPhone,
-      context: markdown.substring(start, end).toLowerCase(),
+      context: decoded.substring(start, end).toLowerCase(),
     });
   }
 
