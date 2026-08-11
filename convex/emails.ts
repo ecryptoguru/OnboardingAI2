@@ -89,11 +89,11 @@ export const listByUniversity = query({
       .take(MAX_ANALYTICS_ROWS);
     return await Promise.all(
       emails.map(async (e) => {
-        const st = await ctx.db.get(e.stakeholder_id);
+        const st = e.stakeholder_id ? await ctx.db.get(e.stakeholder_id) : null;
         return {
           ...e,
           stakeholder_name: st?.name,
-          stakeholder_email: st?.email,
+          stakeholder_email: st?.email ?? e.recipient_email,
           stakeholder_role: st?.role,
         };
       }),
@@ -151,10 +151,22 @@ export const create = mutation({
   args: {
     sequence_id: v.optional(v.id("outreachSequences")),
     university_id: v.id("universities"),
-    stakeholder_id: v.id("stakeholders"),
+    stakeholder_id: v.optional(v.id("stakeholders")),
+    recipient_email: v.optional(v.string()),
     step_number: v.number(),
     subject: v.string(),
     body: v.string(),
+    html_body: v.optional(v.string()),
+    document_storage_id: v.optional(v.id("_storage")),
+    attachments: v.optional(
+      v.array(
+        v.object({
+          storage_id: v.id("_storage"),
+          filename: v.string(),
+          mime_type: v.string(),
+        }),
+      ),
+    ),
   },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
@@ -276,10 +288,21 @@ export const insertInternal = internalMutation({
   args: {
     sequence_id: v.optional(v.id("outreachSequences")),
     university_id: v.id("universities"),
-    stakeholder_id: v.id("stakeholders"),
+    stakeholder_id: v.optional(v.id("stakeholders")),
+    recipient_email: v.optional(v.string()),
     subject: v.string(),
     body: v.string(),
     html_body: v.optional(v.string()),
+    document_storage_id: v.optional(v.id("_storage")),
+    attachments: v.optional(
+      v.array(
+        v.object({
+          storage_id: v.id("_storage"),
+          filename: v.string(),
+          mime_type: v.string(),
+        }),
+      ),
+    ),
     status: v.union(
       v.literal("pending_approval"),
       v.literal("queued"),
@@ -366,11 +389,13 @@ export const listPending = query({
     return await Promise.all(
       pendingEmails.map(async (email) => {
         const uni = await ctx.db.get(email.university_id);
-        const st = await ctx.db.get(email.stakeholder_id);
+        const st = email.stakeholder_id
+          ? await ctx.db.get(email.stakeholder_id)
+          : null;
         return {
           ...email,
           university_name: uni?.university_name,
-          stakeholder_email: st?.email,
+          stakeholder_email: st?.email ?? email.recipient_email,
           stakeholder_name: st?.name,
         };
       }),

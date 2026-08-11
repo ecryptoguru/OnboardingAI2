@@ -302,9 +302,12 @@ Keys are validated and sanitized before storage with `sanitizeApiKey()`. `saniti
 
 Email is delivered through **ZeptoMail** via `convex/actions/email.ts`:
 
-- `doSendEmail`: shared helper that fetches the ZeptoMail key, from-email, and from-name from `systemSettings`, builds MIME headers (`Message-ID`, `In-Reply-To`, `References`), and posts to `https://api.zeptomail.in/v1.1/email`.
+- `doSendEmail`: shared helper that fetches the ZeptoMail key, from-email, and from-name from `systemSettings`, builds MIME headers (`Message-ID`, `In-Reply-To`, `References`), and posts to `https://api.zeptomail.in/v1.1/email`. Supports base64 `attachments`.
 - `sendEmail` (`internalAction`): used by `autoReply.sendAutoReply`, `proposals.emailProposal`, and `auth.ts` password reset.
-- `approveAndSend` (`action`): HITL gate that sends drafted outreach emails.
+- `approveAndSend` (`action`): HITL gate that sends drafted outreach emails, including fetching and base64-encoding stored attachments.
+- `convex/actions/document.ts` (`parseDocx`, `createDocumentDrafts`): parses an uploaded `.docx` to plain text and creates one `pending_approval` draft per recipient. Recipients can be a stakeholder or a custom email address.
+- `components/DocumentMailerModal.tsx`: upload a `.docx`, optionally attach extra files, choose a stakeholder or custom email per university, and draft to the HITL queue.
+- `convex/files.ts`: generic `generateUploadUrl` for Convex Storage uploads.
 - Rate limit: **3 emails per minute per destination** (`send_email:${to}` key) enforced before every send via `rateLimits.checkRateLimitInternal`.
 
 ZeptoMail response `request_id` is stored in `emailsSent.zeptomail_message_id` and passed as `client_reference` for delivery event correlation.

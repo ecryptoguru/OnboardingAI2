@@ -6,12 +6,19 @@ import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import { validateAuth } from "../lib/auth_utils";
 
+export type EmailAttachment = {
+  name: string;
+  mime_type: string;
+  content: string; // base64
+};
+
 type SendEmailArgs = {
   to: string | string[];
   cc?: string[];
   subject: string;
   text: string;
   html?: string;
+  attachments?: EmailAttachment[];
   messageIdHeader?: string;
   inReplyTo?: string;
   references?: string;
@@ -87,6 +94,15 @@ async function doSendEmail(ctx: ActionCtx, args: SendEmailArgs): Promise<SendEma
       subject: args.subject,
       textbody: args.text,
       ...(args.html ? { htmlbody: args.html } : {}),
+      ...(args.attachments && args.attachments.length > 0
+        ? {
+            attachments: args.attachments.map((a) => ({
+              name: a.name,
+              mime_type: a.mime_type,
+              content: a.content,
+            })),
+          }
+        : {}),
       ...(Object.keys(mimeHeaders).length > 0 ? { mime_headers: mimeHeaders } : {}),
       ...(args.clientReference ? { client_reference: args.clientReference } : {}),
     }),
@@ -117,6 +133,15 @@ export const sendEmail = internalAction({
     subject: v.string(),
     text: v.string(),
     html: v.optional(v.string()),
+    attachments: v.optional(
+      v.array(
+        v.object({
+          name: v.string(),
+          mime_type: v.string(),
+          content: v.string(),
+        }),
+      ),
+    ),
     messageIdHeader: v.optional(v.string()),
     inReplyTo: v.optional(v.string()),
     references: v.optional(v.string()),
@@ -143,19 +168,55 @@ export const approveAndSend = action({
     if (email.status !== "pending_approval")
       throw new Error("Email is not pending approval");
 
-    // Fetch stakeholder to get email address
-    const st = await ctx.runQuery(internal.stakeholders.getByIdInternal, {
-      id: email.stakeholder_id,
-    });
-    if (!st || !st.email) throw new Error("Stakeholder missing email");
+    // Resolve recipient email: explicit custom address takes priority
+    let toAddress = email.recipient_email;
+    if (!toAddress && email.stakeholder_id) {
+      const st = await ctx.runQuery(internal.stakeholders.getByIdInternal, {
+        id: email.stakeholder_id,
+      });
+      if (!st || !st.email) throw new Error("Stakeholder missing email");
+      toAddress = st.email;
+    }
+    if (!toAddress) throw new Error("No recipient email for this draft");
+
+    // Load and base64-encode any attachments
+    const MAX_ATTACHMENT_BYTES = 12_000_000;
+    const emailAttachments = email.attachments ?? [];
+    const attachmentPayloads: EmailAttachment[] = [];
+    let totalAttachmentSize = 0;
+    for (const a of emailAttachments) {
+      const fileUrl = await ctx.storage.getUrl(a.storage_id);
+      if (!fileUrl) throw new Error(`Attachment not found: ${a.filename}`);
+      const response = await fetch(fileUrl, {
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!response.ok) {
+        throw new Error(`Failed to fetch attachment: ${a.filename}`);
+      }
+      const buffer = Buffer.from(await response.arrayBuffer());
+      const content = buffer.toString("base64");
+      totalAttachmentSize += content.length;
+      if (totalAttachmentSize > MAX_ATTACHMENT_BYTES) {
+        throw new Error(
+          `Attachments exceed the ${MAX_ATTACHMENT_BYTES / 1_000_000} MB encoded size limit`,
+        );
+      }
+      attachmentPayloads.push({
+        name: a.filename,
+        mime_type: a.mime_type || "application/octet-stream",
+        content,
+      });
+    }
 
     // 2. Send via ZeptoMail
     const customMessageId = `<fretbox-${email._id}@reply.fretbox.in>`;
     const sendResult = await doSendEmail(ctx, {
-      to: st.email,
+      to: toAddress,
       subject: email.subject,
       text: email.body,
       html: email.html_body ?? undefined,
+      attachments:
+        attachmentPayloads.length > 0 ? attachmentPayloads : undefined,
       messageIdHeader: customMessageId,
       clientReference: args.emailId,
     });

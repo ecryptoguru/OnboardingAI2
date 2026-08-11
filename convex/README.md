@@ -52,8 +52,10 @@ All outbound email flows through `convex/actions/email.ts` and the ZeptoMail RES
 
 | Action | File | Purpose |
 | --- | --- | --- |
-| `sendEmail` | `actions/email.ts` | Generic internal action for transactional/outbound email; used for password reset and by other actions. |
-| `approveAndSend` | `actions/email.ts` | HITL gate: sends a drafted `pending_approval` email, records the ZeptoMail `request_id`, and resumes the sequence. |
+| `sendEmail` | `actions/email.ts` | Generic internal action for transactional/outbound email; used by password reset and other actions. Now supports base64 `attachments`. |
+| `approveAndSend` | `actions/email.ts` | HITL gate: sends a drafted `pending_approval` email, records the ZeptoMail `request_id`, resumes the sequence, and fetches/encodes any stored attachments. |
+| `parseDocx` | `actions/document.ts` | Parses an uploaded `.docx` into plain text and HTML. |
+| `createDocumentDrafts` | `actions/document.ts` | Creates one `pending_approval` email draft per recipient from a parsed `.docx`; recipients can be stakeholders or custom emails. |
 | `emailProposal` | `actions/proposals.ts` | Sends the generated partnership proposal as rich HTML to the stakeholder and CC list. |
 | `sendAutoReply` | `actions/autoReply.ts` | Sends threaded auto-replies via ZeptoMail with `Message-ID`, `In-Reply-To`, and `References` headers. |
 

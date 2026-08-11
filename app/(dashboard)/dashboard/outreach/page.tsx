@@ -16,9 +16,11 @@ import {
   ExclamationCircleIcon,
   PlayIcon,
   ArrowUturnLeftIcon,
+  DocumentTextIcon,
 } from "@heroicons/react/24/outline";
 import { useRequireGeminiKey } from "../../../../components/ApiKeyModal";
 import { useToast } from "../../../../components/Toast";
+import { DocumentMailerModal } from "../../../../components/DocumentMailerModal";
 
 const COLUMNS = [
   { id: "enriched", label: "Ready to Sequence", color: "sky" },
@@ -69,6 +71,7 @@ export default function OutreachPage() {
   const [simulateUni, setSimulateUni] = useState<Doc<"universities"> | null>(
     null,
   );
+  const [showDocumentMailer, setShowDocumentMailer] = useState(false);
 
   if (!universities) {
     return (
@@ -109,11 +112,19 @@ export default function OutreachPage() {
           </p>
         </div>
         <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => setShowDocumentMailer(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold transition-all duration-200 shadow-sm"
+          >
+            <DocumentTextIcon className="h-4 w-4" />
+            Document Mailer
+          </button>
           <a
             href="/dashboard/outreach/demo"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-semibold transition-all duration-200 shadow-sm"
+            className="flex items-center gap-2 px-4 py-2 bg-card border border-card-border hover:border-zinc-600 text-foreground rounded-lg text-sm font-medium transition-all duration-200"
           >
             <PlayIcon className="h-4 w-4" />
             Client Demo View
@@ -294,6 +305,12 @@ export default function OutreachPage() {
       </div>
 
       {/* Modals */}
+      {showDocumentMailer && universities && (
+        <DocumentMailerModal
+          universities={universities}
+          onClose={() => setShowDocumentMailer(false)}
+        />
+      )}
       {showSkipModal && (
         <SkipUniversityModal onClose={() => setShowSkipModal(false)} />
       )}

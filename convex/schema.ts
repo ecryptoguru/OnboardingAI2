@@ -213,11 +213,22 @@ export default defineSchema({
   emailsSent: defineTable({
     sequence_id: v.optional(v.id("outreachSequences")),
     university_id: v.id("universities"),
-    stakeholder_id: v.id("stakeholders"),
+    stakeholder_id: v.optional(v.id("stakeholders")),
+    recipient_email: v.optional(v.string()),
     step_number: v.number(),
     subject: v.string(),
     body: v.string(),
     html_body: v.optional(v.string()), // HTML version of body for rich email clients
+    document_storage_id: v.optional(v.id("_storage")),
+    attachments: v.optional(
+      v.array(
+        v.object({
+          storage_id: v.id("_storage"),
+          filename: v.string(),
+          mime_type: v.string(),
+        }),
+      ),
+    ),
     sendgrid_message_id: v.optional(v.string()),
     zeptomail_message_id: v.optional(v.string()),
     status: v.union(

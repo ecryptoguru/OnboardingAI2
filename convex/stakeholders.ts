@@ -98,6 +98,31 @@ export const listByUniversity = query({
   },
 });
 
+export const listByUniversities = query({
+  args: { university_ids: v.array(v.id("universities")) },
+  handler: async (ctx, args) => {
+    await validateAuth(ctx);
+    const results = await Promise.all(
+      args.university_ids.map(async (university_id) => {
+        const all = await ctx.db
+          .query("stakeholders")
+          .withIndex("by_university", (q) => q.eq("university_id", university_id))
+          .collect();
+        return all.filter((s) => {
+          const isUGC = (s.source ?? "").toLowerCase().includes("ugc");
+          const hasEmail = s.email && s.email !== "null";
+          const hasPhone = s.phone && s.phone !== "null";
+          if (isUGC && !hasEmail && !hasPhone) return false;
+          return true;
+        });
+      }),
+    );
+    return Object.fromEntries(
+      args.university_ids.map((id, i) => [id, results[i]]),
+    ) as Record<string, (typeof results)[number]>;
+  },
+});
+
 export const getPrimary = query({
   args: { university_id: v.id("universities") },
   handler: async (ctx, args) => {

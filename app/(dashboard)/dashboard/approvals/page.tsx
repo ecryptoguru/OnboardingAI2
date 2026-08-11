@@ -8,6 +8,7 @@ import {
   XCircleIcon,
   PencilIcon,
   CheckBadgeIcon,
+  PaperClipIcon,
 } from "@heroicons/react/24/outline";
 import { Id, Doc } from "../../../../convex/_generated/dataModel";
 import { useToast } from "../../../../components/Toast";
@@ -204,7 +205,7 @@ export default function ApprovalsPage() {
                         </h3>
                         <p className="text-xs text-muted-foreground truncate">
                           To: {email.stakeholder_name ?? "—"} ·{" "}
-                          {email.stakeholder_email ?? "No email"}
+                          {email.stakeholder_email ?? email.recipient_email ?? "No email"}
                         </p>
                       </div>
                     </div>
@@ -331,6 +332,25 @@ export default function ApprovalsPage() {
                               )}
                           </div>
                         </div>
+                        {email.attachments && email.attachments.length > 0 && (
+                          <div className="mt-4">
+                            <div className="flex items-center gap-1.5 text-xs text-muted-foreground font-medium mb-2">
+                              <PaperClipIcon className="h-3.5 w-3.5" />
+                              Attachments ({email.attachments.length})
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              {email.attachments.map((a, i) => (
+                                <span
+                                  key={`${a.storage_id}-${i}`}
+                                  className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium text-foreground bg-muted border border-card-border/60 rounded-lg"
+                                >
+                                  <PaperClipIcon className="h-3 w-3 text-muted-foreground" />
+                                  {a.filename}
+                                </span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     )}
                   </div>

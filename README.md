@@ -80,6 +80,7 @@ API keys and sender details are managed in **Settings → API Keys**. Values are
 - **Automated Discovery**: AI finds and validates university websites, then enriches signals.
 - **Outreach Orchestrator**: Multi-step, personalized email sequences with Gemini.
 - **HITL Approval**: Outreach emails are drafted with `status: "pending_approval"`. A human must approve each draft via the dashboard before it is sent.
+- **Document Mailer**: Upload a `.docx` on the Outreach page, extract its text as the email body, optionally attach the original and additional files, choose a stakeholder or enter a custom email per university, and send via the HITL approvals queue.
 - **Reply Classification**: Inbound replies are classified and high-confidence auto-replies are sent via `actions/autoReply.ts`.
 - **Proposal Automation**: Calendar bookings trigger AI-generated rich HTML proposals with Google Meet links. The `pdf_storage_id` schema field is legacy and unused.
 - **Real-time Dashboard**: Dashboard for tracking pipeline, analytics, and approvals.

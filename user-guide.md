@@ -18,6 +18,7 @@
 3. **Seed Universities** — Go to **Universities** and click **Sync All UGC Universities** to import the latest government-recognized dataset.
 4. **Enrich** — Go to **Enrichment**, select a batch of universities, and click **Run Deep Enrichment**.
 5. **Start Outreach** — Go to **Outreach**, pick a university in **Ready to Sequence**, and click **Begin Sequence**. The first email is drafted and placed in **Approvals** for human review.
+6. **Send Document Emails** — On **Outreach**, click **Document Mailer**, upload a `.docx`, choose recipients (stakeholders or custom emails), optionally attach the original and extra files, and create drafts. Review and approve them in **Approvals**.
 
 > **Tip:** Each API key, sender setting, and calendar credential can be saved, tested, and removed independently from the Settings page.
 
@@ -59,7 +60,7 @@ The left sidebar is organized into three sections:
   - **Enrichment** — Run AI enrichment on universities.
 - **PIPELINE**
   - **Analytics** — View funnel metrics and email performance.
-  - **Outreach** — Manage sequences and monitor replies.
+  - **Outreach** — Manage sequences, monitor replies, and send document-based emails via **Document Mailer**.
   - **Proposals** — Generate and send rich HTML proposals.
   - **Approvals** — Review and approve pending emails before they are sent.
 - **SYSTEM**

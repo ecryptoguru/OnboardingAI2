@@ -11,6 +11,7 @@
 import type * as actions_autoReply from "../actions/autoReply.js";
 import type * as actions_deepEnrichment from "../actions/deepEnrichment.js";
 import type * as actions_discovery from "../actions/discovery.js";
+import type * as actions_document from "../actions/document.js";
 import type * as actions_email from "../actions/email.js";
 import type * as actions_enrichGovernmentData from "../actions/enrichGovernmentData.js";
 import type * as actions_enrichment from "../actions/enrichment.js";
@@ -37,6 +38,7 @@ import type * as crons from "../crons.js";
 import type * as dbReset from "../dbReset.js";
 import type * as dispatcher from "../dispatcher.js";
 import type * as emails from "../emails.js";
+import type * as files from "../files.js";
 import type * as http from "../http.js";
 import type * as lib_async from "../lib/async.js";
 import type * as lib_auth_utils from "../lib/auth_utils.js";
@@ -85,6 +87,7 @@ declare const fullApi: ApiFromModules<{
   "actions/autoReply": typeof actions_autoReply;
   "actions/deepEnrichment": typeof actions_deepEnrichment;
   "actions/discovery": typeof actions_discovery;
+  "actions/document": typeof actions_document;
   "actions/email": typeof actions_email;
   "actions/enrichGovernmentData": typeof actions_enrichGovernmentData;
   "actions/enrichment": typeof actions_enrichment;
@@ -111,6 +114,7 @@ declare const fullApi: ApiFromModules<{
   dbReset: typeof dbReset;
   dispatcher: typeof dispatcher;
   emails: typeof emails;
+  files: typeof files;
   http: typeof http;
   "lib/async": typeof lib_async;
   "lib/auth_utils": typeof lib_auth_utils;
