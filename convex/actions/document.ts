@@ -82,6 +82,20 @@ export const createDocumentDrafts = action({
       throw new ConvexError("At least one recipient is required");
     }
 
+    if (args.bodyStorageId) {
+      const bodyUrl = await ctx.storage.getUrl(args.bodyStorageId);
+      if (!bodyUrl) throw new ConvexError("Body document not found in storage");
+    }
+
+    if (args.attachments) {
+      for (const a of args.attachments) {
+        const url = await ctx.storage.getUrl(a.storage_id);
+        if (!url) {
+          throw new ConvexError(`Attachment not found in storage: ${a.filename}`);
+        }
+      }
+    }
+
     const now = Date.now();
     const createdIds: string[] = [];
 

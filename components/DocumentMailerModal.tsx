@@ -116,11 +116,26 @@ export function DocumentMailerModal({
     });
   }, [selectedUniIds, stakeholdersByUni]);
 
+  function extensionToMimeType(filename: string): string {
+    const ext = filename.split(".").pop()?.toLowerCase();
+    if (ext === "docx") {
+      return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    }
+    if (ext === "pdf") {
+      return "application/pdf";
+    }
+    return "application/octet-stream";
+  }
+
   async function uploadFile(file: File): Promise<UploadedFile> {
     const postUrl = await generateUploadUrl();
+    const mimeType =
+      file.type && file.type !== "application/octet-stream"
+        ? file.type
+        : extensionToMimeType(file.name);
     const response = await fetch(postUrl, {
       method: "POST",
-      headers: { "Content-Type": file.type || "application/octet-stream" },
+      headers: { "Content-Type": mimeType },
       body: file,
     });
     if (!response.ok) {
@@ -130,8 +145,13 @@ export function DocumentMailerModal({
     return {
       storageId: storageId as Id<"_storage">,
       filename: file.name,
-      mime_type: file.type || "application/octet-stream",
+      mime_type: mimeType,
     };
+  }
+
+  function isDocx(file: File): boolean {
+    const ext = file.name.split(".").pop()?.toLowerCase();
+    return ext === "docx";
   }
 
   async function handleBodyFileChange(
@@ -139,6 +159,11 @@ export function DocumentMailerModal({
   ) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!isDocx(file)) {
+      show("Please upload a .docx file", "error");
+      if (bodyInputRef.current) bodyInputRef.current.value = "";
+      return;
+    }
     setIsParsingBody(true);
     try {
       const uploaded = await uploadFile(file);
@@ -165,6 +190,12 @@ export function DocumentMailerModal({
   ) {
     const files = e.target.files;
     if (!files || files.length === 0) return;
+    const invalid = Array.from(files).filter((f) => !isDocx(f));
+    if (invalid.length > 0) {
+      show("Only .docx files are supported", "error");
+      if (attachmentInputRef.current) attachmentInputRef.current.value = "";
+      return;
+    }
     setIsUploadingAttachment(true);
     try {
       const uploads = await Promise.all(Array.from(files).map(uploadFile));
@@ -438,7 +469,7 @@ export function DocumentMailerModal({
               ref={attachmentInputRef}
               type="file"
               multiple
-              accept=".docx,.pdf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+              accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
               onChange={handleAttachmentFileChange}
               className="hidden"
             />
