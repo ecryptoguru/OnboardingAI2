@@ -16,6 +16,7 @@ End-to-end outreach automation for university hostel management:
 - ZeptoMail email delivery, inbound reply handling, and auto-replies
 - AI proposal generation (rich HTML) with Google Calendar / Meet integration
 - Real-time dashboard (Universities, Enrichment, Outreach, Approvals, Proposals, Analytics, Settings)
+- Document Mailer: `.docx` upload, per-university stakeholder/custom-email selection, optional extra attachments, and HITL approval
 - Authentication, including password reset
 - Security, UX, and SEO hardening with audit scripts and test coverage
 
@@ -29,8 +30,9 @@ End-to-end outreach automation for university hostel management:
 | **M4 — Outreach Engine** | Done | Scheduled sequences, HITL approvals, ZeptoMail dispatch, reply classification, auto-replies |
 | **M5 — Proposals** | Done | AI-generated rich HTML proposals, Google Calendar events, Meet links, confirmation/cancellation flows |
 | **M6 — Dashboard** | Done | Universities, Enrichment, Outreach, Approvals, Proposals, Analytics, Settings pages |
-| **M7 — Security & Hardening** | Done | Action internalization, API key sanitization, webhook auth, test-endpoint lockdown, audit scripts |
-| **M8 — Testing** | Done | Unit tests (`tests/unit`), Playwright E2E (`tests/e2e`), master checklist runner |
+| **M7 — Document Mailer** | Done | `.docx` upload, Mammoth text extraction, per-university stakeholder/custom recipient, attachments, HITL approval queue |
+| **M8 — Security & Hardening** | Done | Action internalization, API key sanitization, webhook auth, test-endpoint lockdown, audit scripts |
+| **M9 — Testing** | Done | Unit tests (`tests/unit`), Playwright E2E (`tests/e2e`), master checklist runner |
 
 ## Audit Dimensions
 

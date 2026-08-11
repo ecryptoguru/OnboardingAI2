@@ -19,9 +19,10 @@ This is a simple, non-technical guide for sales, ops, and onboarding teammates. 
 1. Open **Universities** and click **Sync All UGC Universities** or **Sync IITs / NITs / IIITs** if you need fresh leads.
 2. Go to **Enrichment**, select a small batch, and click **Run Deep Enrichment**.
 3. Go to **Outreach**, find universities in **Ready to Sequence**, and click **Begin Sequence**.
-4. Go to **Approvals** and review AI-drafted emails.
-5. Use **Approve & Send** (or **Edit** first) to send outreach.
-6. Check **Analytics** for opens, clicks, bounces, replies, and funnel movement.
+4. (Optional) Click **Document Mailer** to upload a `.docx`, choose recipients (stakeholder or custom email per university), attach the original and/or extra `.docx` files, and create drafts for approval.
+5. Go to **Approvals** and review AI-drafted emails.
+6. Use **Approve & Send** (or **Edit** first) to send outreach.
+7. Check **Analytics** for opens, clicks, bounces, replies, and funnel movement.
 
 ---
 
@@ -78,6 +79,19 @@ Each key can be **saved, tested, and removed** independently.
 - Click **Begin Sequence** to start a 4-step email sequence.
 - The first email is drafted and placed in **Approvals**.
 - You can move a card back a step or skip it entirely.
+
+---
+
+## Document Mailer
+
+Use this when you want to send a `.docx` document to one or more universities instead of (or alongside) the automated sequence:
+
+1. On **Outreach**, click **Document Mailer**.
+2. Upload the main `.docx`. Its text is extracted and shown as the editable email body.
+3. Choose whether to also attach the original `.docx`.
+4. Add extra `.docx` attachments if needed.
+5. Select one or more universities and, for each, pick a stakeholder or enter a custom email.
+6. Click **Create drafts**. Each draft goes to **Approvals** for review before it is sent.
 
 ---
 

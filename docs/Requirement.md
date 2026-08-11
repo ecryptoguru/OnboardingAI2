@@ -34,6 +34,7 @@
 - **Inbound Replies**: Receive replies via the ZeptoMail inbound webhook on `*.convex.site`, store raw replies, and classify them.
 - **Reply Classification**: Classify replies into `meeting_request`, `positive_interest`, `request_info`, `not_interested`, `opt_out`, `out_of_office`, `other`. Low-confidence high-stakes classifications (`meeting_request`, `positive_interest` with confidence < 0.85) require human review.
 - **Auto-Replies**: Automatically send configured replies for positive interest and meeting requests when confidence is high.
+- **Document Mailer** (manual): Upload a `.docx` file, extract its text as the email body, optionally attach the original and additional `.docx` files, select one or more universities, choose a stakeholder or enter a custom email per university, and create `pending_approval` drafts that are queued for HITL review.
 
 ### Proposals
 

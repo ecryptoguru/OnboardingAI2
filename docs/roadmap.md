@@ -112,6 +112,17 @@ The following security and maintainability improvements are implemented and in p
 
 ---
 
+## PART 1.7: DOCUMENT MAILER — Completed
+
+1. **Upload & Parse** — `components/DocumentMailerModal.tsx` uploads `.docx` files to Convex Storage and calls `convex/actions/document.ts:parseDocx` to extract plain text with Mammoth.
+2. **Recipient Selection** — For each selected university, the user can pick an existing stakeholder or enter a custom email address. `convex/stakeholders.ts:listByUniversities` populates per-university stakeholders.
+3. **Draft Creation** — `convex/actions/document.ts:createDocumentDrafts` creates one `emailsSent` record per recipient with `status: "pending_approval"`, preserving the HITL gate.
+4. **Attachments** — The original `.docx` and any additional `.docx` files can be attached. `convex/actions/email.ts:approveAndSend` fetches attachment bytes from Convex Storage, base64-encodes them, and sends them through ZeptoMail.
+5. **Schema Updates** — `emailsSent` now has optional `stakeholder_id`, `recipient_email`, `document_storage_id`, and an `attachments` array.
+6. **Approvals UI** — `app/(dashboard)/dashboard/approvals/page.tsx` shows the recipient (stakeholder or custom) and lists attached file names.
+
+---
+
 ## PART 2: BUILD ROADMAP — Delivered
 
 All six original build phases are complete. The table below records the final, as-built state.
