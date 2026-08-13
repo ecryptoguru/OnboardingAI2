@@ -18,25 +18,25 @@ export default function SignInPage() {
     const formData = new FormData(e.currentTarget);
     const emailValue = (formData.get("email") as string).trim().toLowerCase();
 
-    signIn("password", {
-      email: emailValue,
-      password: formData.get("password") as string,
-      flow: formData.get("flow") as string,
-    })
-      .catch((err: Error) => {
-        console.error(err);
-        const message = err.message || "";
-        if (message.includes("Server Error")) {
-          setError("Incorrect email or password. Please try again.");
-        } else if (message.toLowerCase().includes("invalidsecret") || message.toLowerCase().includes("password")) {
-          setError("Incorrect password. Please try again.");
-        } else {
-          setError("Invalid email or password.");
-        }
-      })
-      .finally(() => {
-        setLoading(false);
+    try {
+      await signIn("password", {
+        email: emailValue,
+        password: formData.get("password") as string,
+        flow: formData.get("flow") as string,
       });
+      window.location.href = "/dashboard";
+    } catch (err: unknown) {
+      console.error(err);
+      const message = (err as Error).message || "";
+      if (message.includes("Server Error")) {
+        setError("Incorrect email or password. Please try again.");
+      } else if (message.toLowerCase().includes("invalidsecret") || message.toLowerCase().includes("password")) {
+        setError("Incorrect password. Please try again.");
+      } else {
+        setError("Invalid email or password.");
+      }
+      setLoading(false);
+    }
   };
 
   return (

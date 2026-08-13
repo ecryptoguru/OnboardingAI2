@@ -18,29 +18,29 @@ export default function SignUpPage() {
     const formData = new FormData(e.currentTarget);
     const emailValue = (formData.get("email") as string).trim().toLowerCase();
 
-    signIn("password", {
-      email: emailValue,
-      password: formData.get("password") as string,
-      flow: formData.get("flow") as string,
-    })
-      .catch((err: Error) => {
-        console.error(err);
-        const message = err.message || "";
-        if (message.includes("Server Error")) {
-          setError("Could not create account. This email may already be registered. Try signing in instead.");
-        } else if (message.toLowerCase().includes("already") || message.toLowerCase().includes("exist")) {
-          setError("An account with this email already exists. Please sign in instead.");
-        } else if (message.toLowerCase().includes("password")) {
-          setError("Password must be at least 8 characters.");
-        } else if (message) {
-          setError(message);
-        } else {
-          setError("Could not create account. Try a different email.");
-        }
-      })
-      .finally(() => {
-        setLoading(false);
+    try {
+      await signIn("password", {
+        email: emailValue,
+        password: formData.get("password") as string,
+        flow: formData.get("flow") as string,
       });
+      window.location.href = "/dashboard";
+    } catch (err: unknown) {
+      console.error(err);
+      const message = (err as Error).message || "";
+      if (message.includes("Server Error")) {
+        setError("Could not create account. This email may already be registered. Try signing in instead.");
+      } else if (message.toLowerCase().includes("already") || message.toLowerCase().includes("exist")) {
+        setError("An account with this email already exists. Please sign in instead.");
+      } else if (message.toLowerCase().includes("password")) {
+        setError("Password must be at least 8 characters.");
+      } else if (message) {
+        setError(message);
+      } else {
+        setError("Could not create account. Try a different email.");
+      }
+      setLoading(false);
+    }
   };
 
   return (

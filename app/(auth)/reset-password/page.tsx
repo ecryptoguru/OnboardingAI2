@@ -3,12 +3,11 @@
 import { useAuthActions } from "@convex-dev/auth/react";
 import { RedirectIfAuthenticated } from "@/components/RedirectIfAuthenticated";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { useState, useEffect, Suspense } from "react";
 
 function ResetPasswordForm() {
   const { signIn } = useAuthActions();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [code, setCode] = useState("");
@@ -62,7 +61,7 @@ function ResetPasswordForm() {
         newPassword: password,
       });
       setSuccess(true);
-      router.push("/dashboard");
+      window.location.href = "/dashboard";
     } catch (err: unknown) {
       console.error(err);
       const message = err instanceof Error ? err.message.toLowerCase() : "";

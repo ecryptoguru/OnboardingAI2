@@ -12,15 +12,28 @@ function normalizeName(name: string) {
   return name.toLowerCase().replace(/[^a-z0-9]/g, "").trim();
 }
 
+function scoreRecordQuality(u: Doc<"universities">) {
+  let score = 0;
+  if (u.state) score += 2;
+  if (u.city) score += 1;
+  return score;
+}
+
 function dedupeUniversities(unis: Doc<"universities">[] | undefined) {
   if (!unis) return unis;
-  const seen = new Set<string>();
-  return unis.filter((u) => {
-    const key = `${normalizeName(u.university_name)}|${(u.state || "").toLowerCase().trim()}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  const groups = new Map<string, Doc<"universities">[]>();
+  for (const u of unis) {
+    const key = normalizeName(u.university_name);
+    const existing = groups.get(key);
+    if (existing) existing.push(u);
+    else groups.set(key, [u]);
+  }
+  const result: Doc<"universities">[] = [];
+  for (const group of groups.values()) {
+    group.sort((a, b) => scoreRecordQuality(b) - scoreRecordQuality(a));
+    result.push(group[0]);
+  }
+  return result;
 }
 
 const UniversityDetail = dynamic(

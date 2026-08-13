@@ -4,7 +4,12 @@ import {
   nextjsMiddlewareRedirect,
 } from "@convex-dev/auth/nextjs/server";
 
-const isSignInPage = createRouteMatcher(["/sign-in", "/sign-up"]);
+const isSignInPage = createRouteMatcher([
+  "/sign-in",
+  "/sign-up",
+  "/forgot-password",
+  "/reset-password",
+]);
 const isProtectedRoute = createRouteMatcher(["/dashboard(.*)"]);
 
 export default convexAuthNextjsMiddleware(

@@ -1,20 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 import { useConvexAuth } from "convex/react";
 import { ArrowRightIcon } from "@heroicons/react/24/outline";
 
 export default function Home() {
   const { isLoading, isAuthenticated } = useConvexAuth();
-  const router = useRouter();
 
   useEffect(() => {
     if (!isLoading && isAuthenticated) {
-      router.push("/dashboard");
+      window.location.href = "/dashboard";
     }
-  }, [isLoading, isAuthenticated, router]);
+  }, [isLoading, isAuthenticated]);
 
   if (isLoading) {
     return (
