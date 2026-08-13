@@ -118,180 +118,57 @@ Output VALID JSON ONLY matching the provided schema. Do not include markdown for
 //   3. Regex-style contact extraction patterns — pattern-matches across the full context
 //   4. Explicit deduplication rules — prevents same person appearing multiple times
 
-export const DEEP_ENRICHMENT_SYNTHESIS_PROMPT = (targetRoles: string[]) =>
+export const STAKEHOLDERS_SYNTHESIS_PROMPT = (targetRoles: string[]) =>
   `
-You are a world-class Indian higher education data analyst with access to data sources including NIRF, AISHE, NAAC SSR, Anti-Ragging Statutory Disclosures, and university websites. You have been given raw scraped text from MULTIPLE web sources about one specific university.
+You are an Indian higher education contact researcher. Extract university decision-makers from the provided source text. Use ONLY information present in the source. Never hallucinate.
 
-Your mission: extract the most complete, accurate JSON profile possible — using ONLY information present in the context. Never hallucinate, never invent numbers. Think step by step.
-
-═══════════════════════════════════════════════════════════
-STEP 0: SOURCE INVENTORY (internal check — do this mentally first)
-═══════════════════════════════════════════════════════════
-Before extracting any data, scan the context and identify which data sources are present:
-  □ NIRF data (look for: "nirfindia.org", "Student Strength", "UG (4 Years)", program-wise rows)
-  □ AISHE data (look for: "AISHE 20XX-XX", "aishe.gov.in", enrollment tables with M/F columns)
-  □ NAAC SSR (look for: "Criterion 2", "hostelites", "day scholars", "enrolled students")
-  □ Anti-Ragging page (look for: committee member names + mobile numbers + "hostelites enrolled")
-  □ Mandatory Disclosure (look for: enrollment, hostel, student count tables)
-  □ University website / contact pages (for names, roles, emails)
-  □ LinkedIn results (for profile URLs matching role + name)
-
-Use only the sources actually present. Do not fabricate from missing sources.
-
-═══════════════════════════════════════════════════════════
-STEP 1A: EXTRACT NIRF STUDENT DATA  →  nirf_* fields
-═══════════════════════════════════════════════════════════
-NIRF tables appear in TWO formats:
-
-  FORMAT A — single-row summary (common in smaller/mid-size universities):
-    Column pattern: Total | Male | Female | Hostellers | Day Scholars
-    Example row:    6100  | 2430  | 3670  | 4250        | 1850
-    → Use Total/Male/Female for nirf_* block.
-    → CRITICAL: Put Hostellers value into AISHE block \`hostelites\` field.
-    → CRITICAL: Put Day Scholars value into AISHE block \`day_scholars\` field.
-
-  FORMAT B — program-wise rows (large universities: VIT, BITS, Manipal, Amity, SRM, LPU, Chandigarh):
-    Each row = one academic program. Example:
-      Program          | Male  | Female
-      UG (4 Years)     | 27684 | 8273
-      UG (5 Years)     |  1240 |  380
-      PG (2 Years)     |  2270 |  798
-      PG Integrated    |   430 |  195
-      Ph.D             |   330 |  562
-    
-    ► REQUIRED: SUM every Male column value = nirf_male
-    ► REQUIRED: SUM every Female column value = nirf_female
-    ► REQUIRED: nirf_total = nirf_male + nirf_female
-    
-    WORKED EXAMPLE: 27684+1240+2270+430+330 = 31954 male
-                    8273+380+798+195+562  =  10208 female
-                    nirf_total = 31954+10208 = 42162
-    
-    ► Extract EVERY program row into nirf_programs array — do not skip any row.
-    ► Set name exactly as it appears (e.g. "UG (4 Years)", "Ph.D", "PG Integrated")
-    ► For each row: total = male + female
-
-  YEAR PREFERENCE: NIRF 2023-24 (latest available in most tables) > NIRF 2022-23.
-  Set nirf_source to the year string (e.g. "NIRF 2023-24").
-
-  ⚠ NIRF FORMAT NOTE: NIRF columns are often: S.No | Academic Year | No. of Male Students | No. of Female Students | Total Students | No. of students within State | No. of students outside State | No. of students outside Country | No. of students Economically Backward | No. of students Socially Challenged | No. of students receiving full tuition fee reimbursement from the State and Central Government | No. of students receiving full tuition fee reimbursement from Institution Funds | No. of students receiving full tuition fee reimbursement from the Private Bodies | No. of students who are not receiving full tuition fee reimbursement.
-  
-  ⚠️ THE "Hostellers" AND "Day Scholars" COLUMNS ARE OFTEN AT THE END OF THE NIRF TABLE. LOOK FOR THEM CAREFULLY.
-
-  ⚠ If you cannot find NIRF data in the context: set nirf_total, nirf_male, nirf_female, nirf_programs all to null. Do NOT guess.
-
-═══════════════════════════════════════════════════════════
-STEP 1B: EXTRACT HOSTELITE / DAY SCHOLAR DATA  →  AISHE/NAAC block
-═══════════════════════════════════════════════════════════
-This block uses a DIFFERENT source than NIRF. Search systematically:
-
-  SOURCE PRIORITY (use the highest available):
-  1. NAAC SSR Criterion 2.1 — look for a table with columns: Year | Total Enrolled | Hostelites | Day Scholars
-  2. Anti-Ragging Statutory Disclosure — look for "No. of Hostelites: XXXX" or "hostelites enrolled: XXXX"
-  3. Mandatory Disclosure / IQAC / NAAC AQAR tables
-  4. AISHE data (aishe.gov.in tables or pages reproducing AISHE data)
-  5. University website "About" or "Facts & Figures" page
-
-  KEYWORD SCAN — search the ENTIRE context for ALL of these:
-    "hostelites", "hosteliers", "hostellers", "hostel students", "residential students",
-    "on-campus students", "day scholars", "day students", "day boarders",
-    "Boys Hostel", "Girls Hostel", "Gents Hostel", "Ladies Hostel",
-    "hostel capacity", "hostel inmates", "hostel occupancy",
-    "Criterion 2.1", "student enrollment", "enrolled students", "Criterion 4.1.1",
-    "Total Students on Roll", "AISHE Code", "Number of rooms", "accommodation"
-
-  IMPORTANT NOTES:
-    - "Hostellers" in NIRF Format A IS the same as hostelites → populate this block from it if no better source
-    - Hostel CAPACITY ≠ actual hostelite count (use capacity only when no other data available, but mark clearly if possible)
-    - Male hostelites field: "Boys Hostel inmates", "Male Hostelites", "Gents Hostel students", "accommodation for boys"
-    - Female hostelites field: "Girls Hostel inmates", "Female Hostelites", "Ladies Hostel students", "accommodation for girls"
-    - Source year: if NAAC SSR 2024, AISHE 2022-23 — use "NAAC SSR 2024" or "AISHE 2022-23" etc.
-
-  EXAMPLE extraction from NAAC SSR:
-    "2022-23 | 8,450 | 5,890 | 2,560"  (Total | Hostelites | Day Scholars)
-    → total_students=8450, hostelites=5890, day_scholars=2560
-
-  For AISHE block total_students: use the AISHE/NAAC total — NOT the NIRF total (they may differ by year)
-
-═══════════════════════════════════════════════════════════
-STEP 1C: INFERENCES (fill gaps using arithmetic)
-═══════════════════════════════════════════════════════════
-Apply these ONLY if the source data is available — do not guess from thin air:
-
-  total = male + female                    (if both splits exist but total missing)
-  hostelites = hostelites_male + hostelites_female  (if splits exist)
-  day_scholars = total_students - hostelites        (if both total and hostelites known)
-  hostelites = total_students - day_scholars        (if both total and day_scholars known)
-  day_scholars_male   = total_students_male   - hostelites_male    (if both known)
-  day_scholars_female = total_students_female - hostelites_female  (if both known)
-
-  HALLUCINATION PROTECTION (Student Numbers):
-    - ⚠️ SANITY CHECK: Hostelites + Day Scholars MUST EQUAL Total Students.
-    - ⚠️ SCALE MISMATCH: If Total=720 but Hostelites=3000, "720" is likely a single program (MBA), while "3000" is the whole university.
-    - PREFER the LARGER number as the University's "Total Students".
-    - ALWAYS ensure Hostelites <= Total Students. If Hostelites > Total, discard the smaller "Total" and re-infer.
-
-  NULL RULE (non-negotiable):
-    - If you did NOT find a value in the context → output null
-    - NEVER output 0 for a field unless you literally found the digit 0 in the source data
-    - 0 means "found and it is zero". null means "not found in any source"
-
-═══════════════════════════════════════════════════════════
-STEP 2: EXTRACT ALL STAKEHOLDER CONTACTS  (two-pass method)
-═══════════════════════════════════════════════════════════
 Target roles to find: ${targetRoles.join(", ")}
 
-  PASS 1 — Build the ROSTER (scan for people):
-    Scan for names with titles: Dr., Prof., Mr., Mrs., Shri, Smt., Er.
-    For each person found: record name + role + section they appeared in.
-    Match loosely — "Controller of Examinations" matches "CoE", "Exam Controller".
-    Include: Vice Chancellor, Pro Vice Chancellor, Registrar, Dy Registrar, Dean (all Deans),
-             Controller of Examinations, Chief Warden, Finance Officer, Director, Rector.
+PASS 1 — Build the ROSTER (scan for people):
+  Scan for names with titles: Dr., Prof., Mr., Mrs., Shri, Smt., Er.
+  For each person found: record name + role + section they appeared in.
+  Match loosely — "Controller of Examinations" matches "CoE", "Exam Controller".
+  Include: Vice Chancellor, Pro Vice Chancellor, Registrar, Dy Registrar, Dean (all Deans),
+           Controller of Examinations, Chief Warden, Finance Officer, Director, Rector.
 
-  PASS 2 — Cross-reference CONTACTS onto the roster:
-    EMAIL patterns (scan ENTIRE context, not just the person's section):
-      - Role-based:  vc@, registrar@, registrar1@, dean@, coe@, chiefwarden@, provc@, dyregistrar@, finance@
-      - Name-based:  firstname.lastname@, firstinitiallastname@, lastname@
-      - Generic uni: admin@, office@, helpdesk@ (only if found near a person's name)
-    
-    PHONE patterns (scan ENTIRE context for all of these):
-      - 10-digit Indian mobile: starts with 6, 7, 8, or 9, no spaces needed
-      - +91-XXXXXXXXXX or 91-XXXXXXXXXX
-      - 0XXX-XXXXXXX landline (STD code + number)
-      - Anti-ragging pages ALWAYS have mobile numbers — prioritise scanning them
-    
-    EMAIL OBFUSCATION: Some sites write emails as "name[at]domain[dot]edu" or "name(at)domain(dot)edu". Decode these to "name@domain.edu" in the final JSON.
+PASS 2 — Cross-reference CONTACTS onto the roster:
+  EMAIL patterns (scan ENTIRE context, not just the person's section):
+    - Role-based:  vc@, registrar@, registrar1@, dean@, coe@, chiefwarden@, provc@, dyregistrar@, finance@
+    - Name-based:  firstname.lastname@, firstinitiallastname@, lastname@
+    - Generic uni: admin@, office@, helpdesk@ (only if found near a person's name)
 
-  LINKEDIN: scan for "linkedin.com/in/" URLs, match to person by name + role proximity.
+  PHONE patterns (scan ENTIRE context):
+    - 10-digit Indian mobile: starts with 6, 7, 8, or 9
+    - +91-XXXXXXXXXX or 91-XXXXXXXXXX
+    - 0XXX-XXXXXXX landline (STD code + number)
+    - Anti-ragging pages usually have mobile numbers — prioritise scanning them
 
-  STRICT EXCLUSIONS (NON-NEGOTIABLE):
-    - Do NOT extract government officials, ministry representatives, or regulatory body directors.
-    - BLOCK anyone associated with: UGC (University Grants Commission), AICTE, Ministry of Education (MoE), NAAC, NBA, NIRF, or any state govt department.
-    - ⚠️ DOMAIN MATCHING: Only extract emails that match the university's known domain (e.g., @xim.edu.in, @xub.edu.in).
-    - If you see emails like @iitbbs.ac.in while enriching XIM University, DISCARD THEM. They are from search results for neighboring institutions.
-    - NO PLACEHOLDERS: Never include "N/A", "Unknown", or "Dean Student Welfare" as a name if the actual name isn't found.
-    - NEVER use a role title as a name. "Vice Chancellor", "Registrar", "Dean Student Affairs" are ROLES, not names. If you cannot find the actual person's name, set name to null. Do NOT invent a name.
-    - A stakeholder MUST have either (a) a real person's name, or (b) a verified role-based email with the corresponding role. Do not include generic contacts with neither name nor role.
+  EMAIL OBFUSCATION: Decode "name[at]domain[dot]edu" and "name(at)domain(dot)edu" to real emails.
 
-  MERGE RULE: If same person appears in multiple sources (website + anti-ragging + LinkedIn),
-    merge into ONE record with ALL contact fields combined. Keep the most complete version.
+  LINKEDIN:
+    - Only include a linkedin_url if it is a real "https://linkedin.com/in/<slug>" URL and the slug clearly contains the person's name (full surname or at least two name tokens).
+    - Do NOT include search result URLs like "linkedin.com/pub/dir" or company pages.
+    - Do NOT include a LinkedIn URL if the slug does not contain the surname.
 
-  RANKING: Return as many stakeholders as found, ranked by completeness.
-    Priority: records with email+phone+linkedin > email+phone > email only > name only.
+STRICT EXCLUSIONS (NON-NEGOTIABLE):
+  - Do NOT extract government officials, ministry representatives, or regulatory body directors.
+  - BLOCK anyone associated with: UGC, AICTE, Ministry of Education, NAAC, NBA, NIRF, or any state govt department.
+  - Only extract emails that match the university's known domain (e.g., @xim.edu.in).
+  - If you see emails like @iitbbs.ac.in while enriching another university, DISCARD THEM.
+  - NO PLACEHOLDERS: Never include "N/A", "Unknown", or a role title like "Dean Student Welfare" as a name.
+  - A stakeholder MUST have either (a) a real person's name, or (b) a verified role-based email with the corresponding role.
 
-═══════════════════════════════════════════════════════════
-STEP 3: VERIFICATION (sanity check before output)
-═══════════════════════════════════════════════════════════
-Before producing the final JSON, mentally verify:
-  ✓ nirf_total = sum of all nirf_programs rows' (male+female) — does your math add up?
-  ✓ nirf_male = sum of all male values in nirf_programs?
-  ✓ If day_scholars + hostelites ≠ total_students → warn yourself and re-check (they must add up)
-  ✓ No field is 0 unless the source literally showed a zero value
-  ✓ All emails contain "@" and a valid domain
-  ✓ All phones are at least 10 digits
-  ✓ No two stakeholders have the same name
+MERGE RULE: If the same person appears in multiple sources, merge into ONE record with all contact fields combined.
 
-Only after passing these checks, output the final JSON.
+RANKING: Return stakeholders ranked by completeness: email+phone+linkedin > email+phone > email only > name only.
+
+VERIFICATION:
+  - Every linkedin_url is a /in/ URL and its slug matches the name.
+  - Emails contain "@" and a real domain matching the university.
+  - Phones are at least 10 digits.
+  - No two records share the same name+role pair unless they are duplicates to merge.
+
+Output ONLY the JSON matching the schema.
 `.trim();
 
 export const GOVERNMENT_DATA_SCHEMA: Schema = {
@@ -406,106 +283,13 @@ RULES:
 - Do not invent, infer or round numbers.
 `.trim();
 
-export const DEEP_ENRICHMENT_SCHEMA: Schema = {
+export const STAKEHOLDERS_SCHEMA: Schema = {
   type: Type.OBJECT,
   properties: {
-    demographics: {
-      type: Type.OBJECT,
-      description:
-        "Student population data extracted from NIRF and AISHE/NAAC sources. Two independent blocks: nirf_* fields from NIRF program-wise tables, and the remaining fields from AISHE/NAAC SSR. All numeric fields are integers. Use null when data not found — NEVER use 0 for a missing field.",
-      properties: {
-        // ── NIRF Block: program-wise student strength ───────────────────────
-        nirf_source: {
-          type: Type.STRING,
-          nullable: true,
-          description: "NIRF data year, e.g. 'NIRF 2023-24' or 'NIRF 2024-25'",
-        },
-        nirf_total: {
-          type: Type.NUMBER,
-          nullable: true,
-          description:
-            "Sum of all program rows Male+Female. Compute this by adding every row.",
-        },
-        nirf_male: {
-          type: Type.NUMBER,
-          nullable: true,
-          description: "Sum of all Male values across all program rows.",
-        },
-        nirf_female: {
-          type: Type.NUMBER,
-          nullable: true,
-          description: "Sum of all Female values across all program rows.",
-        },
-        nirf_programs: {
-          type: Type.ARRAY,
-          nullable: true,
-          description:
-            "One entry per NIRF program row. Extract every row — UG (4 Years), UG (5 Years), PG (2 Years), PG-Integrated, PhD, etc.",
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              name: {
-                type: Type.STRING,
-                description:
-                  "Program name exactly as in NIRF table, e.g. UG (4 Years), PG (2 Years), PhD",
-              },
-              male: { type: Type.NUMBER, nullable: true },
-              female: { type: Type.NUMBER, nullable: true },
-              total: {
-                type: Type.NUMBER,
-                nullable: true,
-                description: "male + female for this row",
-              },
-            },
-          },
-        },
-        // ── AISHE / NAAC SSR Block: hostelite breakdown ──────────────────────
-        total_students: {
-          type: Type.NUMBER,
-          nullable: true,
-          description: "Total enrolled students from AISHE or NAAC SSR data.",
-        },
-        total_students_male: { type: Type.NUMBER, nullable: true },
-        total_students_female: { type: Type.NUMBER, nullable: true },
-        day_scholars: {
-          type: Type.NUMBER,
-          nullable: true,
-          description:
-            "Day scholars from NAAC SSR Criterion 2.1, anti-ragging page, or Mandatory Disclosure. Do NOT output 0 if not found.",
-        },
-        day_scholars_male: { type: Type.NUMBER, nullable: true },
-        day_scholars_female: { type: Type.NUMBER, nullable: true },
-        hostelites: {
-          type: Type.NUMBER,
-          nullable: true,
-          description:
-            "Hostelites from NAAC SSR Criterion 2.1 or AISHE. Do NOT output 0 if not found.",
-        },
-        hostelites_male: { type: Type.NUMBER, nullable: true },
-        hostelites_female: { type: Type.NUMBER, nullable: true },
-        source: {
-          type: Type.STRING,
-          nullable: true,
-          description:
-            "AISHE/NAAC data provenance, e.g. 'AISHE 2022-23' or 'NAAC SSR 2023'",
-        },
-        data_quality: {
-          type: Type.STRING,
-          nullable: true,
-          description: "One of: verified, partial, inferred",
-        },
-        source_urls: {
-          type: Type.ARRAY,
-          nullable: true,
-          description: "URLs that contributed the demographic values",
-          items: { type: Type.STRING },
-        },
-      },
-    },
     stakeholders: {
       type: Type.ARRAY,
       description:
-        "All university officials found for target roles. Include every person found - do not limit count.",
+        "University officials matching the target roles. Return every relevant decision-maker found in the source.",
       items: {
         type: Type.OBJECT,
         properties: {
@@ -537,7 +321,7 @@ export const DEEP_ENRICHMENT_SCHEMA: Schema = {
             type: Type.STRING,
             nullable: true,
             description:
-              "Full LinkedIn URL from search results e.g. https://linkedin.com/in/username",
+              "Full LinkedIn URL from search results e.g. https://linkedin.com/in/username. Only include if the URL slug clearly matches the person's name.",
           },
           source_url: {
             type: Type.STRING,
@@ -549,12 +333,12 @@ export const DEEP_ENRICHMENT_SCHEMA: Schema = {
       },
     },
   },
-  required: ["demographics", "stakeholders"],
+  required: ["stakeholders"],
 };
 
-export const MERGE_PARTIALS_PROMPT = (targetRoles: string[]) =>
+export const STAKEHOLDERS_MERGE_PROMPT = (targetRoles: string[]) =>
   `
-You are merging partial JSON extractions from multiple sources about one university into a single, deduplicated JSON result. Each partial may contain stakeholders and/or demographics extracted from one source.
+You are merging partial JSON extractions from multiple sources about one university into a single, deduplicated JSON result. Each partial contains stakeholders extracted from one source.
 
 STAKEHOLDER RULES:
 - Deduplicate by name (fuzzy match: "Dr. K. S. Singh", "K.S. Singh", "K S Singh" are the same) and/or email/phone.
@@ -566,16 +350,10 @@ STAKEHOLDER RULES:
 - If a name is just a role (e.g. "Vice Chancellor") with no actual person name, set name to null.
 - Never output "N/A", "Unknown", etc. as a name; use null.
 - Do not extract government officials from UGC/AICTE/NAAC/NIRF pages.
-
-DEMOGRAPHIC RULES:
-- Combine NIRF numbers (nirf_total, nirf_male, nirf_female, nirf_programs) and AISHE/NAAC numbers (total_students, hostelites, day_scholars, etc.) from partials.
-- If sources conflict, prefer NIRF/NAAC/official university data over generic pages.
-- Ensure hostelites + day_scholars equals total_students if both known.
-- Use null for missing; never output 0 unless the source literally shows 0.
+- Only keep a linkedin_url when the URL slug clearly matches the person's name (surname or two+ tokens).
 
 SOURCE PROVENANCE:
 - For each final stakeholder, keep the most specific source_url from the partials.
-- For demographics, keep source_urls from the contributing partials.
 `.trim();
 
 export const REPLY_CLASSIFIER_SCHEMA: Schema = {

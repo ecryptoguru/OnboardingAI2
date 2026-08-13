@@ -732,8 +732,11 @@ function SimulateReplyModal({
   university: Doc<"universities">;
   onClose: () => void;
 }) {
+  // Default to recently enriched stakeholders; hide legacy records.
+  const STALE_CUTOFF_MS = 90 * 24 * 60 * 60 * 1000;
   const stakeholders = useQuery(api.stakeholders.listByUniversity, {
     university_id: university._id,
+    enriched_after: Date.now() - STALE_CUTOFF_MS,
   });
   const createReply = useMutation(api.replies.create);
   const classifyReply = useAction(api.actions.replyClassifier.classifyReply);

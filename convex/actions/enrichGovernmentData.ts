@@ -3,7 +3,7 @@
 import { internalAction } from "../_generated/server";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
-import { withRetry, toNum, extractDemographicsFromText } from "../lib/utils";
+import { withRetry, toNum, extractDemographicsFromText, truncateAtNewline } from "../lib/utils";
 import {
   callGeminiWithUsage,
   createLlmUsageEntry,
@@ -201,6 +201,20 @@ function applyDemographicSanity(
     }
   }
 
+  // Without program rows, a tiny NIRF total is almost certainly a specialty
+  // category PDF (Architecture/Pharmacy/etc.). Reject it as an institutional total.
+  const rawNirfTotal = typeof demo.nirf_total === "number" ? (demo.nirf_total as number) : undefined;
+  if (rawNirfTotal !== undefined && rawNirfTotal < 500 && nirfPrograms.length === 0) {
+    console.warn(
+      `[GovData] NIRF total ${rawNirfTotal} for ${uniName} has no program rows and looks like a specialty category; removing.`,
+    );
+    delete demo.nirf_total;
+    delete demo.nirf_male;
+    delete demo.nirf_female;
+    delete demo.nirf_programs;
+    delete demo.nirf_source;
+  }
+
   // ── Cross-source reconciliation: NIRF vs AISHE/NAAC total_students ──────
   const nirfTotal = typeof demo.nirf_total === "number" ? (demo.nirf_total as number) : undefined;
   const nirfMale = typeof demo.nirf_male === "number" ? (demo.nirf_male as number) : undefined;
@@ -278,7 +292,7 @@ async function serperSearch(query: string, apiKey: string, num = 5): Promise<Ser
 
 /**
  * Final fallback: send the PDF bytes directly to Gemini as inline data.
- * Works when pdf-parse is broken (missing DOMMatrix) AND Jina can't reach
+ * Works when local PDF parsing is unavailable AND Jina can't reach
  * the URL (e.g., .gov.in PDFs).
  */
 async function extractPdfViaGemini(
@@ -433,6 +447,13 @@ export const enrichGovernmentData = internalAction({
               if (/\b(architecture|planning)\b/i.test(titleSnippet)) score -= 3;
               if (/\b(hostel|hostelite|day scholar)\b/i.test(titleSnippet)) score += 5;
               if (url.endsWith(".pdf")) score += 2;
+
+              // NIRF PDF category disambiguation: prefer Overall/Engineering,
+              // strongly reject small/specialty category PDFs.
+              if (/ir-o-u-/.test(url)) score += 15;
+              if (/ir-e-u-/.test(url)) score += 10;
+              if (/ir-a-u-|ir-p-u-|ir-d-u-|ir-m-u-|ir-l-u-|ir-b-u-|ir-u-u-/.test(url)) score -= 25;
+
               if (score > 0) allUrls.push({ url: r.link, score });
             }
           } catch (e) {
@@ -463,7 +484,7 @@ export const enrichGovernmentData = internalAction({
             } catch (pdfErr) {
               pdfParseFailed = true;
               console.warn(
-                `[GovData] pdf-parse failed for ${extUrl}:`,
+                `[GovData] local PDF parse failed for ${extUrl}:`,
                 pdfErr instanceof Error ? pdfErr.message : String(pdfErr),
               );
             }
@@ -484,7 +505,7 @@ export const enrichGovernmentData = internalAction({
                 // ignore Jina fallback failure
               }
             }
-            // Fallback 2: Gemini inline PDF (works when pdf-parse is broken
+            // Fallback 2: Gemini inline PDF (works when local PDF parsing is broken
             // or Jina returns HTML wrapper instead of PDF tables)
             if (pdfParseFailed && apiKey) {
               const geminiPdf = await extractPdfViaGemini(extUrl, apiKey);
@@ -656,18 +677,24 @@ SOURCE CONTENT:
 ${contextBlocks.join("\n\n")}
 `.trim();
 
+      // Cap government context and enable one-day LLM caching for repeated reruns.
+      const MAX_GOV_CONTEXT_CHARS = 70_000;
+      const cappedPrompt = truncateAtNewline(
+        prompt,
+        MAX_GOV_CONTEXT_CHARS,
+      );
       const extractionResult = await callGeminiWithUsage({
         apiKey,
         model: MODELS.geminiFlash,
         systemPrompt: GOVERNMENT_DATA_SYSTEM_PROMPT,
-        userPrompt: prompt,
+        userPrompt: cappedPrompt,
         temperature: 0.05,
         responseAsJson: true,
         responseSchema: GOVERNMENT_DATA_SCHEMA,
         maxOutputTokens: 4096,
         label: "gov_data_structured_extraction",
         ctx,
-        skipCache: true,
+        cacheTtlMs: 24 * 60 * 60 * 1000,
       });
       llmUsageEntries.push(extractionResult.usage);
 

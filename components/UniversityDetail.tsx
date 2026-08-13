@@ -80,25 +80,22 @@ export function UniversityDetail({
   const runEnrichmentChain = useAction(
     api.actions.orchestrator.runEnrichmentChain,
   );
-  const [isDeepEnriching, setIsDeepEnriching] = useState(false);
+  const isDeepEnriching = university?.outreach_stage === "enriching";
   const [enrichStep, setEnrichStep] = useState<string | null>(null);
 
   const { withKeyCheck, keyModal } = useRequireGeminiKey();
 
   const handleDeepEnrich = useCallback(async () => {
     if (!universityId) return;
-    setIsDeepEnriching(true);
-    setEnrichStep("Scraping NIRF, AISHE & NAAC sources…");
+    setEnrichStep("Enrichment queued — running in background…");
     try {
       await runEnrichmentChain({ universityId });
-      setEnrichStep("Done!");
+      setEnrichStep("Queued");
       setTimeout(() => setEnrichStep(null), 2000);
     } catch (e) {
       console.error(e);
       setEnrichStep("Error — check console");
       setTimeout(() => setEnrichStep(null), 3000);
-    } finally {
-      setIsDeepEnriching(false);
     }
   }, [universityId, runEnrichmentChain]);
 
@@ -166,7 +163,7 @@ export function UniversityDetail({
               className={`mt-3 flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition-all w-fit shadow-sm ${
                 isDeepEnriching
                   ? "bg-muted text-muted-foreground cursor-not-allowed shadow-none"
-                  : enrichStep === "Done!"
+                  : enrichStep === "Queued"
                     ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
                     : "bg-blue-600 text-white hover:bg-blue-500"
               }`}

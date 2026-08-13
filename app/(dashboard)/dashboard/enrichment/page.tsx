@@ -2,7 +2,7 @@
 
 import { useQuery, useAction } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { Id, Doc } from "../../../../convex/_generated/dataModel";
 import dynamic from "next/dynamic";
 import { useRequireGeminiKey } from "../../../../components/ApiKeyModal";
@@ -49,6 +49,9 @@ export default function EnrichmentPage() {
 
   // Custom filter if needed, but we can use the existing list with stage param
   const rawNewUniversities = useQuery(api.universities.list, { stage: "new" });
+  const rawEnrichingUniversities = useQuery(api.universities.list, {
+    stage: "enriching",
+  });
   const rawEnrichedUniversities = useQuery(api.universities.list, {
     stage: "enriched",
   });
@@ -57,11 +60,17 @@ export default function EnrichmentPage() {
     () => dedupeUniversities(rawNewUniversities),
     [rawNewUniversities],
   );
+  const enrichingUniversities = useMemo(
+    () => dedupeUniversities(rawEnrichingUniversities),
+    [rawEnrichingUniversities],
+  );
   const enrichedUniversities = useMemo(
     () => dedupeUniversities(rawEnrichedUniversities),
     [rawEnrichedUniversities],
   );
 
+  // Track ids the user just enqueued so we can show them in "In Progress"
+  // immediately while the backend query catches up.
   const runDeepEnrichment = useAction(
     api.actions.orchestrator.runEnrichmentChain,
   );
@@ -73,18 +82,24 @@ export default function EnrichmentPage() {
   );
   const [searchQuery, setSearchQuery] = useState("");
 
+  // Track when each id was optimistically added so we can expire stuck ones.
+  const enrichingAddedAt = useRef<Record<string, number>>({});
+
   const { withKeyCheck, keyModal } = useRequireGeminiKey();
 
-  const filterBySearch = (unis: Doc<"universities">[] | undefined) => {
-    if (!searchQuery.trim() || !unis) return unis;
-    const q = searchQuery.toLowerCase().trim();
-    return unis.filter(
-      (u) =>
-        u.university_name.toLowerCase().includes(q) ||
-        (u.city && u.city.toLowerCase().includes(q)) ||
-        (u.state && u.state.toLowerCase().includes(q)),
-    );
-  };
+  const filterBySearch = useCallback(
+    (unis: Doc<"universities">[] | undefined) => {
+      if (!searchQuery.trim() || !unis) return unis;
+      const q = searchQuery.toLowerCase().trim();
+      return unis.filter(
+        (u) =>
+          u.university_name.toLowerCase().includes(q) ||
+          (u.city && u.city.toLowerCase().includes(q)) ||
+          (u.state && u.state.toLowerCase().includes(q)),
+      );
+    },
+    [searchQuery],
+  );
 
   const toggleSelection = (e: React.MouseEvent, id: Id<"universities">) => {
     e.stopPropagation();
@@ -96,11 +111,65 @@ export default function EnrichmentPage() {
     });
   };
 
+  // Optimistic in-progress set: backend enriching query plus recently-queued ids.
+  const inProgressIds = useMemo(() => {
+    const ids = new Set<Id<"universities">>();
+    for (const u of enrichingUniversities || []) ids.add(u._id);
+
+    const now = Date.now();
+    for (const id of enrichingIds) {
+      const addedAt = enrichingAddedAt.current[id];
+      const isNew = newUniversities?.some((u) => u._id === id);
+      const isEnriching = enrichingUniversities?.some((u) => u._id === id);
+      // Keep recently-queued ids in progress until the query catches them,
+      // but release them if they fall back to "new" (error) for >30s.
+      if (
+        isEnriching ||
+        (!isNew && !isEnriching) ||
+        !addedAt ||
+        now - addedAt < 30_000
+      ) {
+        ids.add(id);
+      }
+    }
+    return ids;
+  }, [enrichingIds, enrichingUniversities, newUniversities]);
+
   const filteredNew = filterBySearch(
-    newUniversities?.filter(
-      (u: Doc<"universities">) => !enrichingIds.has(u._id),
-    ),
+    newUniversities?.filter((u) => !inProgressIds.has(u._id)),
   );
+
+  const inProgressUniversities = useMemo(() => {
+    const byId = new Map<Id<"universities">, Doc<"universities">>();
+    for (const u of [...(enrichingUniversities || []), ...(newUniversities || [])]) {
+      if (inProgressIds.has(u._id)) byId.set(u._id, u);
+    }
+    return filterBySearch([...byId.values()]);
+  }, [enrichingUniversities, newUniversities, inProgressIds, filterBySearch]);
+
+  // Clean up optimistic ids once the backend query owns them or they time out.
+  useEffect(() => {
+    const now = Date.now();
+    const enrichedIds = new Set(enrichedUniversities?.map((u) => u._id));
+    const newIds = new Set(newUniversities?.map((u) => u._id));
+    setEnrichingIds((prev) => {
+      const next = new Set(prev);
+      let changed = false;
+      for (const id of next) {
+        const addedAt = enrichingAddedAt.current[id];
+        if (enrichedIds.has(id)) {
+          next.delete(id);
+          delete enrichingAddedAt.current[id];
+          changed = true;
+        } else if (newIds.has(id) && addedAt && now - addedAt > 30_000) {
+          next.delete(id);
+          delete enrichingAddedAt.current[id];
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [enrichedUniversities, newUniversities]);
 
   const selectAll = () => {
     if (!filteredNew) return;
@@ -116,24 +185,24 @@ export default function EnrichmentPage() {
   const handleDeepEnrichSelected = async () => {
     if (selectedNewIds.size === 0) return;
 
-    // Add all selected to enriching state
     const idsToEnrich = Array.from(selectedNewIds);
-    setEnrichingIds((prev) => new Set([...prev, ...idsToEnrich]));
+    setEnrichingIds((prev) => {
+      const next = new Set(prev);
+      for (const id of idsToEnrich) {
+        next.add(id);
+        enrichingAddedAt.current[id] = Date.now();
+      }
+      return next;
+    });
     setSelectedNewIds(new Set()); // clear selection
 
-    // Run them in parallel
+    // Run them in parallel; the action enqueues and returns immediately.
     await Promise.allSettled(
       idsToEnrich.map(async (id) => {
         try {
           await runDeepEnrichment({ universityId: id });
         } catch (error) {
           console.error(`Deep enrichment failed for ${id}:`, error);
-        } finally {
-          setEnrichingIds((prev) => {
-            const next = new Set(prev);
-            next.delete(id);
-            return next;
-          });
         }
       }),
     );
@@ -294,11 +363,7 @@ export default function EnrichmentPage() {
               <div className="w-2 h-2 rounded-full bg-zinc-500"></div>
               Pending / New
               <span className="text-xs bg-muted text-muted-foreground px-2 rounded-full font-medium ml-1">
-                {newUniversities
-                  ? newUniversities.filter(
-                      (u: Doc<"universities">) => !enrichingIds.has(u._id),
-                    ).length
-                  : 0}
+                {filteredNew ? filteredNew.length : 0}
               </span>
             </h2>
             {filteredNew && filteredNew.length > 0 && (
@@ -362,12 +427,22 @@ export default function EnrichmentPage() {
               <div className="w-2 h-2 rounded-full bg-amber-500"></div>
               In Progress
               <span className="text-xs bg-muted text-muted-foreground px-2 rounded-full font-medium ml-1">
-                {enrichingIds.size}
+                {inProgressUniversities ? inProgressUniversities.length : 0}
               </span>
             </h2>
           </div>
           <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
-            {enrichingIds.size === 0 ? (
+            {inProgressUniversities === undefined ? (
+              // Loading skeletons
+              Array(2)
+                .fill(0)
+                .map((_: number, i: number) => (
+                  <div
+                    key={i}
+                    className="h-20 bg-muted/30 border border-card-border/50 animate-pulse rounded-xl mb-3"
+                  />
+                ))
+            ) : inProgressUniversities.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center p-6 text-muted-foreground">
                 <div className="w-12 h-12 bg-card rounded-full flex items-center justify-center mb-3">
                   <svg
@@ -387,11 +462,7 @@ export default function EnrichmentPage() {
                 <p className="text-sm">No enrichment processes running.</p>
               </div>
             ) : (
-              filterBySearch(
-                newUniversities?.filter((u: Doc<"universities">) =>
-                  enrichingIds.has(u._id),
-                ),
-              )?.map((uni: Doc<"universities">) =>
+              inProgressUniversities.map((uni: Doc<"universities">) =>
                 renderUniversityCard(uni, true, true),
               )
             )}

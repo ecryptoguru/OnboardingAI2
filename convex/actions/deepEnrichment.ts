@@ -11,17 +11,12 @@ import {
 import {
   withRetry,
   withConcurrencyLimit,
-  sanitizeLlmInput,
   truncateAtNewline,
   isValidEmail,
   isValidIndianPhone,
-  toNum,
-  toNumStrict,
-  extractDemographicsFromText,
 } from "../lib/utils";
 import {
   augmentStakeholderSources,
-  computeDemographicSourceUrls,
   type StakeholderLike,
 } from "../lib/validateDeepEnrichment";
 import {
@@ -69,8 +64,8 @@ const MAX_COST_ESTIMATE = 30_000; // Firecrawl credits * 100 + Gemini input toke
 // Plus ~55k chars prompt / 4 = ~13.7k tokens. Total ~14.4k.
 
 // ─── External Source Search Helpers ────────────────────────────────────────────
-// Indian university demographics live on government portals, NOT university websites.
-// We use Serper to find these external pages and scrape them for demographic data.
+// Search for leadership, contact and LinkedIn pages. Demographics are handled by
+// enrichGovernmentData, not deep enrichment.
 
 interface SerperResult {
   organic?: Array<{ link: string; title?: string; snippet?: string }>;
@@ -137,6 +132,33 @@ async function discoverExternalSources(
 
   const allUrls: { url: string; score: number }[] = [];
   const seen = new Set<string>();
+  const officialDomain = domain.toLowerCase();
+
+  // Only keep URLs on the official domain / subdomains, plus LinkedIn profiles.
+  // This stops the pipeline from scraping low-yield government portals or
+  // third-party aggregators (e.g. tamilnadu.gov.in pages for SRM).
+  const isRelevantExternalUrl = (link: string): boolean => {
+    try {
+      const u = new URL(link);
+      const host = u.hostname.replace(/^www\./i, "").toLowerCase();
+      if (
+        host === officialDomain ||
+        host.endsWith(`.${officialDomain}`) ||
+        officialDomain.endsWith(`.${host}`)
+      ) {
+        return true;
+      }
+      if (
+        (host === "linkedin.com" || host.endsWith(".linkedin.com")) &&
+        u.pathname.toLowerCase().startsWith("/in/")
+      ) {
+        return true;
+      }
+      return false;
+    } catch {
+      return false;
+    }
+  };
 
   for (const q of queries) {
     if (serperBudget.exhausted || serperBudget.used >= serperBudget.max) break;
@@ -154,6 +176,10 @@ async function discoverExternalSources(
       for (const r of data.organic || []) {
         if (!r.link || seen.has(r.link)) continue;
         seen.add(r.link);
+        if (!isRelevantExternalUrl(r.link)) {
+          console.log(`[ExternalSearch] Skipping off-domain result: ${r.link}`);
+          continue;
+        }
         // Score by relevance
         let score = 0;
         const url = r.link.toLowerCase();
@@ -341,8 +367,8 @@ const LEADERSHIP_URL_PATTERNS = [
   { re: /(?<![a-zA-Z])(contact|contact[-\s]?us|contactus)(?![a-zA-Z])/i, weight: 2 },
   { re: /(?<![a-zA-Z])(telephone[-_\s]?directory|phone[-_\s]?directory|directory)(?![a-zA-Z])/i, weight: 1 },
   { re: /(?<![a-zA-Z])(anti[-\s]?ragging|committee)(?![a-zA-Z])/i, weight: 1 },
-  // NIRF data pages feed demographics; keep them in the scrape list, but lower
-  // priority than leadership pages because they rarely contain decision makers.
+  // NIRF data pages may appear on the site; keep them but deprioritise.
+  // Demographics are now handled by enrichGovernmentData, not deep enrichment.
   { re: /(?<![a-zA-Z])(nirf|nirf.ranking|nirf.report|nirf.data)(?![a-zA-Z])/i, weight: 2 },
 ];
 
@@ -642,7 +668,11 @@ function selectFollowupUrls(
     try {
       const candidate = new URL(link);
       const host = candidate.hostname.toLowerCase();
-      if (host !== workingDomain && !host.endsWith(`.${workingDomain}`)) {
+      if (
+        host !== workingDomain &&
+        !host.endsWith(`.${workingDomain}`) &&
+        !workingDomain.endsWith(`.${host}`)
+      ) {
         return;
       }
       // Skip non-scrapable binary assets and image-serving paths
@@ -703,19 +733,16 @@ export const runDeepEnrichment = internalAction({
     skipped?: boolean;
     reason?: string;
     stakeholdersSynthesized?: number;
-    demographicsIncluded?: boolean;
     contextChars?: number;
     estimatedTokens?: { flash: number; pro: number };
     llmUsage?: LlmUsageSummary;
     stakeholders?: unknown[];
-    demographics?: Record<string, unknown>;
     error?: string;
   }> => {
     try {
       const llmUsageEntries: LlmUsageEntry[] = [];
       const dryRun = args.dryRun ?? false;
       let finalStakeholders: Record<string, unknown>[] = [];
-      let finalDemographics: Record<string, unknown> = {};
       const university = await ctx.runQuery(internal.universities.getInternal, {
         universityId: args.universityId,
       });
@@ -725,7 +752,6 @@ export const runDeepEnrichment = internalAction({
 
       if (!university) throw new Error("University not found");
       const uniName = university.university_name;
-      const existingDemographics = (university.demographics ?? {}) as Record<string, unknown>;
       const url =
         typeof university.website === "string" ? university.website : "";
 
@@ -840,9 +866,9 @@ export const runDeepEnrichment = internalAction({
         ];
       }
 
-      // ─── Phase 1b: External Source Discovery (AISHE/NIRF/NAAC/Admin) ────
-      // Indian university demographics live on government portals, not university websites.
-      // We search for these external sources and scrape them via Jina Reader (free).
+      // ─── Phase 1b: External Source Discovery (leadership/contact/LinkedIn) ────
+      // Supplement site scraping with Serper for leadership leaf pages and LinkedIn profiles.
+      // Demographics are handled separately by enrichGovernmentData.
       let externalBlocks: string[] = [];
       let externalUrls: string[] = [];
       if (serperKey) {
@@ -1146,43 +1172,13 @@ export const runDeepEnrichment = internalAction({
       // ─── Phase 3: Deduplicate & Cap context ──────────────────────────────
       const rawContext = deduplicateContext(validBlocks);
       const finalContext = truncateAtNewline(rawContext, MAX_CONTEXT_CHARS);
-      const safeContext = sanitizeLlmInput(finalContext);
 
       console.log(
         `[DeepEnrichment] Context: ${rawContext.length} chars → capped at ${finalContext.length} chars (${validBlocks.length} sources).`,
       );
 
-      // ─── Phase 4: Single-Pass Gemini 3.5 Flash Extraction ─────────────────
+      // ─── Phase 4: Per-source stakeholder extraction + merge ─────────────────
       // Replaces the old 12× Flash + Pro two-phase pipeline.
-      // Gemini 3.5 Flash has 1M context, stable structured output, and is 25% cheaper than Pro.
-      const extractionPrompt = `
-UNIVERSITY BEING ENRICHED:
-  Name: ${uniName}
-  Website: ${url || "unknown"}
-
-DATA SOURCE PRIORITY (STRICT — government data ONLY):
-1. NIRF data (from nirfindia.org) → nirf_total, nirf_male, nirf_female, nirf_programs
-2. AISHE data (from aishe.gov.in) → total_students, hostelites, day_scholars
-3. NAAC SSR reports / Mandatory Disclosure PDFs → hostelites, day_scholars, gender splits
-4. Anti-Ragging Committee pages → names, mobile numbers, roles
-5. University administration pages → contact emails, phone numbers
-6. LinkedIn profiles → name, role, linkedin_url
-
-CRITICAL RULES:
-- For demographics: ONLY extract data from NIRF, AISHE, NAAC SSR, or Mandatory Disclosure.
-- REJECT any student count from "About Us", "Overview", or marketing pages — these are inflated estimates.
-- Extract ALL emails and phone numbers from ALL sources.
-- Anti-Ragging Committee pages are UGC-mandated and MUST list real mobile numbers — extract every one.
-- Use null for missing values, never 0.
-- Indian phone format: +91XXXXXXXXXX
-
-PRE-DISCOVERED CONTACTS (from regex scan — verify and merge):
-Emails: ${uniqueRegexEmails.join(", ") || "none"}
-Phones: ${uniqueRegexPhones.join(", ") || "none"}
-
-WEB PAGE CONTENT:
-${safeContext}
-      `.trim();
 
       // ─── Cost ceiling guard ─────────────────────────────────────────────
       // Rough estimate: Firecrawl credits * 100 + Gemini input tokens. Abort if too high.
@@ -1192,7 +1188,7 @@ ${safeContext}
           !b.includes("EXTERNAL SOURCE:") && !b.includes("FOLLOWUP SOURCE:"),
       );
       const firecrawlCreditsConsumed = 1 + firecrawlBasedBlocks.length;
-      const estimatedGeminiTokens = Math.round(extractionPrompt.length / 4);
+      const estimatedGeminiTokens = Math.round(finalContext.length / 4);
       const costEstimate =
         firecrawlCreditsConsumed * 100 + estimatedGeminiTokens;
       if (costEstimate > MAX_COST_ESTIMATE) {
@@ -1203,7 +1199,6 @@ ${safeContext}
           success: false,
           error: "budget_exceeded",
           stakeholdersSynthesized: 0,
-          demographicsIncluded: false,
           contextChars: finalContext.length,
           estimatedTokens: { flash: estimatedGeminiTokens, pro: 0 },
           llmUsage: summarizeLlmUsage(llmUsageEntries),
@@ -1211,7 +1206,6 @@ ${safeContext}
       }
 
       let synthesizedJson: {
-        demographics: Record<string, unknown>;
         stakeholders: StakeholderLike[];
       } | null = null;
       let synthesisAttempts = 0;
@@ -1260,24 +1254,17 @@ ${safeContext}
             synthesizedJson.stakeholders,
             validBlocks,
           );
-          const demographicSourceUrls = computeDemographicSourceUrls(validBlocks);
-          if (demographicSourceUrls.length > 0 && synthesizedJson.demographics) {
-            synthesizedJson.demographics.source_urls = demographicSourceUrls;
-          }
 
           console.log(
             `[DeepEnrichment] Gemini latency: ${Date.now() - startMs}ms`,
           );
 
-          // Redact PII: log only field counts, never names/emails/phones
+          // Redact PII: log only counts, never names/emails/phones
           const stCount = Array.isArray(synthesizedJson.stakeholders)
             ? synthesizedJson.stakeholders.length
             : 0;
-          const demoKeys = synthesizedJson.demographics
-            ? Object.keys(synthesizedJson.demographics)
-            : [];
           console.log(
-            `[DeepEnrichment] Synthesized: ${stCount} stakeholders, demographics keys: [${demoKeys.join(", ")}]`,
+            `[DeepEnrichment] Synthesized: ${stCount} stakeholders`,
           );
           break; // Success — exit retry loop
         } catch (e) {
@@ -1295,7 +1282,6 @@ ${safeContext}
                 `[DeepEnrichment] Gemini synthesis unavailable. Falling back to ${regexFallbackStakeholders.length} regex role/phone contacts.`,
               );
               synthesizedJson = {
-                demographics: {},
                 stakeholders: regexFallbackStakeholders.map((st) => ({
                   name: st.name,
                   role: st.role,
@@ -1319,334 +1305,7 @@ ${safeContext}
       if (!synthesizedJson) {
         throw new Error("Failed to synthesize intelligence data after retries");
       }
-      const { demographics, stakeholders } = synthesizedJson;
-      if (demographics && typeof demographics === "object") {
-        const rawEntries = Object.entries(demographics)
-          .filter(([, v]) => v !== null && v !== undefined)
-          .slice(0, 10)
-          .map(([k, v]) => `${k}=${JSON.stringify(v)}`);
-        console.log(
-          `[DeepEnrichment] Raw demographics fields before toNum: ${
-            rawEntries.length > 0 ? rawEntries.join(", ") : "(none)"
-          }`,
-        );
-      }
-
-      const demo = demographics && {
-        // AISHE/NAAC block
-        total_students: toNum(demographics.total_students),
-        total_students_male: toNum(demographics.total_students_male),
-        total_students_female: toNum(demographics.total_students_female),
-        day_scholars: toNumStrict(demographics.day_scholars),
-        day_scholars_male: toNumStrict(demographics.day_scholars_male),
-        day_scholars_female: toNumStrict(demographics.day_scholars_female),
-        hostelites: toNumStrict(demographics.hostelites),
-        hostelites_male: toNumStrict(demographics.hostelites_male),
-        hostelites_female: toNumStrict(demographics.hostelites_female),
-        source:
-          typeof demographics.source === "string"
-            ? demographics.source
-            : undefined,
-        data_quality:
-          typeof demographics.data_quality === "string"
-            ? demographics.data_quality
-            : undefined,
-        source_urls: Array.isArray(demographics.source_urls)
-          ? demographics.source_urls.filter((u) => typeof u === "string")
-          : undefined,
-        // NIRF block
-        nirf_source:
-          typeof demographics.nirf_source === "string"
-            ? demographics.nirf_source
-            : undefined,
-        nirf_total: toNum(demographics.nirf_total),
-        nirf_male: toNum(demographics.nirf_male),
-        nirf_female: toNum(demographics.nirf_female),
-        nirf_programs: Array.isArray(demographics.nirf_programs)
-          ? demographics.nirf_programs
-              .filter(
-                (p: { name?: string }) =>
-                  typeof p.name === "string" && p.name.trim(),
-              )
-              .map(
-                (p: {
-                  name: string;
-                  male?: number | string;
-                  female?: number | string;
-                  total?: number | string;
-                }) => ({
-                  name: p.name.trim(),
-                  male: toNum(p.male),
-                  female: toNum(p.female),
-                  total:
-                    toNum(p.total) ??
-                    (toNum(p.male) != null && toNum(p.female) != null
-                      ? (toNum(p.male) ?? 0) + (toNum(p.female) ?? 0)
-                      : undefined),
-                }),
-              )
-          : undefined,
-      };
-
-      if (demo) {
-        // Inference chain — run in order so each inferred value can feed the next
-
-        // Fall back to NIRF data if general demographics are not available
-        if (!demo.total_students && demo.nirf_total) {
-          demo.total_students = demo.nirf_total;
-          demo.source = demo.source || demo.nirf_source || "NIRF Fallback";
-        }
-        if (!demo.total_students_male && demo.nirf_male) {
-          demo.total_students_male = demo.nirf_male;
-        }
-        if (!demo.total_students_female && demo.nirf_female) {
-          demo.total_students_female = demo.nirf_female;
-        }
-
-        // 1. Compute totals from splits if missing
-        if (
-          !demo.total_students &&
-          demo.total_students_male &&
-          demo.total_students_female
-        )
-          demo.total_students =
-            demo.total_students_male + demo.total_students_female;
-        if (!demo.hostelites && demo.hostelites_male && demo.hostelites_female)
-          demo.hostelites = demo.hostelites_male + demo.hostelites_female;
-        if (
-          !demo.day_scholars &&
-          demo.day_scholars_male &&
-          demo.day_scholars_female
-        )
-          demo.day_scholars = demo.day_scholars_male + demo.day_scholars_female;
-
-        // 2. ⚠️ SANITY GATE: hostelites CANNOT exceed total_students.
-        // If it happens, total_students was likely extracted from a subset/single college.
-        // → DISCARD the invalid total, DO NOT discard the valid hostelites!
-        if (
-          demo.hostelites &&
-          demo.total_students &&
-          demo.hostelites > demo.total_students
-        ) {
-          console.warn(
-            `[DeepEnrichment] REJECTED total_students (${demo.total_students}) — smaller than hostelites (${demo.hostelites}). Discarding invalid total.`,
-          );
-          demo.total_students = undefined;
-          demo.total_students_male = undefined;
-          demo.total_students_female = undefined;
-        }
-
-        // Similarly: day_scholars cannot exceed total_students
-        if (
-          demo.day_scholars &&
-          demo.total_students &&
-          demo.day_scholars > demo.total_students
-        ) {
-          console.warn(
-            `[DeepEnrichment] REJECTED total_students (${demo.total_students}) — smaller than day_scholars (${demo.day_scholars}). Discarding invalid total.`,
-          );
-          demo.total_students = undefined;
-          demo.total_students_male = undefined;
-          demo.total_students_female = undefined;
-        }
-
-        // 3. If total is unknown but we have hostelites, use it only as a reasonable floor.
-        //    Guard: reject if hostelites itself seems implausible vs. NIRF (>2× nirf_total)
-        if (!demo.total_students && demo.hostelites) {
-          const nirfFloor = demo.nirf_total;
-          if (nirfFloor && demo.hostelites > nirfFloor * 2) {
-            console.warn(
-              `[DeepEnrichment] REJECTED hostelites (${demo.hostelites}) — >2× NIRF total (${nirfFloor}). Likely hostel capacity data.`,
-            );
-            demo.hostelites = undefined;
-          } else {
-            // Hostelites is plausible — use it as a minimum total estimate
-            demo.total_students = demo.hostelites;
-          }
-        }
-
-        // Case: total missing but day_scholars present (and reasonable)
-        if (!demo.total_students && demo.day_scholars) {
-          const nirfFloor = demo.nirf_total;
-          if (!nirfFloor || demo.day_scholars <= nirfFloor * 2) {
-            demo.total_students = demo.day_scholars;
-          }
-        }
-
-        // 4. Infer day_scholars from total - hostelites (or vice versa)
-        if (!demo.day_scholars && demo.total_students && demo.hostelites)
-          demo.day_scholars = Math.max(
-            0,
-            demo.total_students - demo.hostelites,
-          );
-        if (!demo.hostelites && demo.total_students && demo.day_scholars)
-          demo.hostelites = Math.max(
-            0,
-            demo.total_students - demo.day_scholars,
-          );
-
-        // 5. Infer gender splits for day_scholars if not found
-        if (
-          !demo.day_scholars_male &&
-          demo.total_students_male &&
-          demo.hostelites_male
-        )
-          demo.day_scholars_male = Math.max(
-            0,
-            demo.total_students_male - demo.hostelites_male,
-          );
-        if (
-          !demo.day_scholars_female &&
-          demo.total_students_female &&
-          demo.hostelites_female
-        )
-          demo.day_scholars_female = Math.max(
-            0,
-            demo.total_students_female - demo.hostelites_female,
-          );
-
-        // 6. Infer gender splits for hostelites if not found (reverse)
-        if (
-          !demo.hostelites_male &&
-          demo.total_students_male &&
-          demo.day_scholars_male
-        )
-          demo.hostelites_male = Math.max(
-            0,
-            demo.total_students_male - demo.day_scholars_male,
-          );
-        if (
-          !demo.hostelites_female &&
-          demo.total_students_female &&
-          demo.day_scholars_female
-        )
-          demo.hostelites_female = Math.max(
-            0,
-            demo.total_students_female - demo.day_scholars_female,
-          );
-      }
-
-      // Diagnostic: log a sample of raw values before toNum to help debug extraction issues
-      if (demographics && typeof demographics === "object") {
-        const rawSample = Object.entries(demographics)
-          .filter(([, v]) => v !== null && v !== undefined)
-          .slice(0, 6)
-          .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-          .join(", ");
-        console.log(`[DeepEnrichment] Raw demographics sample: ${rawSample}`);
-      }
-
-      // Determine data quality for this enrichment run
-      function inferDataQuality(d: Record<string, unknown>): "verified" | "partial" | "inferred" {
-        const quality = d.data_quality;
-        if (quality === "verified" || quality === "partial" || quality === "inferred") {
-          return quality as "verified" | "partial" | "inferred";
-        }
-        const sourceUrls = Array.isArray(d.source_urls) ? d.source_urls : [];
-        const source = String(d.source || "").toLowerCase();
-        const hasGovSource = sourceUrls.some(
-          (u: unknown) =>
-            typeof u === "string" &&
-            /\b(nirfindia|aishe|naac|ugc|gov\.in)\b/i.test(u),
-        );
-        const hasNirf =
-          source.includes("nirf") ||
-          /\bnirf\b/i.test(String(d.nirf_source || ""));
-        if (hasGovSource || hasNirf) return "verified";
-        const hasNonMarketingSource =
-          sourceUrls.length > 0 ||
-          /\b(anti[-\s]?ragging|mandatory disclosure|ssr|iqac|aqar)\b/i.test(source);
-        return hasNonMarketingSource ? "partial" : "inferred";
-      }
-
-      function shouldWriteDemographics(
-        existing: Record<string, unknown>,
-        newQuality: "verified" | "partial" | "inferred",
-      ): boolean {
-        const existingQuality = existing.data_quality;
-        if (existingQuality === "verified" && newQuality !== "verified") {
-          console.log(
-            `[DeepEnrichment] Existing demographics are verified. Skipping ${newQuality} overwrite.`,
-          );
-          return false;
-        }
-        return true;
-      }
-
-      const demoQuality = inferDataQuality(demo);
-      demo.data_quality = demoQuality;
-
-      finalDemographics = demo;
-
-      if (
-        demo &&
-        Object.values(demo).some((val) => typeof val === "number" && val > 0)
-      ) {
-        if (shouldWriteDemographics(existingDemographics, demoQuality)) {
-          if (dryRun) {
-            console.log(
-              `[DeepEnrichment] dryRun: skipping persistence of demographics with quality ${demoQuality}.`,
-            );
-          } else {
-            const populatedFields = Object.entries(demo)
-              .filter(([, v]) => v !== undefined && v !== null)
-              .map(([k]) => k);
-            console.log(
-              `[DeepEnrichment] Saving demographics: ${populatedFields.length} fields populated [${populatedFields.join(", ")}]`,
-            );
-            await ctx.runMutation(
-              internal.universities.updateDemographicsInternal,
-              {
-                universityId: args.universityId,
-                demographics: demo,
-              },
-            );
-          }
-        }
-      } else {
-        // Recovery fallback: if LLM returns demographics keys with null values,
-        // salvage obvious numeric splits from raw context.
-        const fallback = extractDemographicsFromText(finalContext);
-        if (
-          Object.values(fallback).some(
-            (val) => typeof val === "number" && val > 0,
-          )
-        ) {
-          if (shouldWriteDemographics(existingDemographics, "partial")) {
-            const fallbackDemo = {
-              ...fallback,
-              source: "context_regex_fallback",
-              data_quality: "partial",
-              source_urls: computeDemographicSourceUrls(validBlocks),
-            };
-            finalDemographics = fallbackDemo;
-            if (dryRun) {
-              console.warn(
-                "[DeepEnrichment] dryRun: skipping regex fallback demographics persistence.",
-              );
-            } else {
-              console.warn(
-                "[DeepEnrichment] LLM demographics empty. Applying regex fallback demographics extraction.",
-              );
-              await ctx.runMutation(
-                internal.universities.updateDemographicsInternal,
-                {
-                  universityId: args.universityId,
-                  demographics: fallbackDemo,
-                },
-              );
-            }
-          } else {
-            console.warn(
-              "[DeepEnrichment] Existing demographics are verified; skipping regex fallback.",
-            );
-          }
-        } else {
-          console.warn(
-            "[DeepEnrichment] No demographics extracted — all fields null or missing.",
-          );
-        }
-      }
+      const stakeholders = synthesizedJson.stakeholders;
 
       // Sort by data richness so highest-quality stakeholders are upserted first
       interface StakeholderCandidate {
@@ -1923,14 +1582,19 @@ ${safeContext}
         return !isPersonalDomain && nameInitials.length >= 2 && local.includes(nameInitials);
       }
 
-      // LinkedIn-name consistency: the URL slug should contain name fragments.
+      // LinkedIn-name consistency: the URL must be a real /in/ profile and the
+      // slug must contain the person's surname or at least two name tokens.
       function linkedinMatchesName(linkedinUrl: string, name: string): boolean {
-        const slug = linkedinUrl.split("/in/")[1]?.toLowerCase() || "";
-        if (!slug) return false;
+        const lowerUrl = linkedinUrl.toLowerCase();
+        if (!lowerUrl.includes("linkedin.com/in/")) return false;
+        const slug = lowerUrl.split("/in/")[1]?.split("?")[0]?.toLowerCase() || "";
+        if (!slug || /\b(pub\/dir|company|search)\b/.test(slug)) return false;
         const parts = name.toLowerCase().split(/[.\s]+/).filter((w) => w.length > 2);
         if (parts.length === 0) return false;
+        const surname = parts[parts.length - 1];
+        if (surname.length > 2 && slug.includes(surname)) return true;
         const matches = parts.filter((p) => slug.includes(p)).length;
-        return matches >= 1;
+        return matches >= 2;
       }
 
       const currentStakeholders = validStakeholders
@@ -2022,7 +1686,7 @@ ${safeContext}
       // ─── Cost / Usage Logging ─────────────────────────────────────────────
       const llmUsage = summarizeLlmUsage(llmUsageEntries);
       const firecrawlCredits = 1 + firecrawlBasedBlocks.length; // 1 map + N scrapes
-      const flashInputChars = extractionPrompt.length;
+      const flashInputChars = finalContext.length;
       const estimatedFlashTokens = Math.round(flashInputChars / 4);
       console.log(
         `[DeepEnrichment] COST SUMMARY for ${uniName}:\n` +
@@ -2033,16 +1697,9 @@ ${safeContext}
           `  Context: ${finalContext.length.toLocaleString()} chars (raw: ${rawContext.length.toLocaleString()})`,
       );
 
-      const demographicsIncluded =
-        !!finalDemographics &&
-        Object.values(finalDemographics).some(
-          (v) => typeof v === "number" && v > 0,
-        );
-
       return {
         success: true,
         stakeholdersSynthesized: finalStakeholders.length,
-        demographicsIncluded,
         contextChars: finalContext.length,
         estimatedTokens: {
           flash: estimatedFlashTokens,
@@ -2050,7 +1707,6 @@ ${safeContext}
         },
         llmUsage,
         stakeholders: dryRun ? finalStakeholders : undefined,
-        demographics: dryRun ? finalDemographics : undefined,
       };
     } catch (e) {
       console.error("[DeepEnrichment] Fatal error:", e);

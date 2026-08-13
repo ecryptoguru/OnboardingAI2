@@ -31,19 +31,12 @@ function cleanString(value: unknown): string | undefined {
   return trimmed;
 }
 
-function cleanNumber(value: unknown): number | undefined {
-  if (value === null || value === undefined) return undefined;
-  if (typeof value === "number") {
-    if (Number.isNaN(value) || !Number.isFinite(value)) return undefined;
-    if (value < 0) return undefined;
-    return Number.isInteger(value) ? value : Math.round(value);
-  }
-  if (typeof value === "string") {
-    const n = Number(value.replace(/,/g, ""));
-    if (Number.isNaN(n) || !Number.isFinite(n) || n < 0) return undefined;
-    return Math.round(n);
-  }
-  return undefined;
+function isLikelyValidLinkedIn(url: string): boolean {
+  const lower = url.toLowerCase();
+  if (!lower.includes("linkedin.com/in/")) return false;
+  const slug = lower.split("/in/")[1]?.split("?")[0] || "";
+  if (!slug) return false;
+  return !/\b(pub\/dir|company|search)\b/.test(slug);
 }
 
 function isValidStakeholder(st: unknown): st is Record<string, unknown> {
@@ -61,7 +54,7 @@ function isValidStakeholder(st: unknown): st is Record<string, unknown> {
   const hasRole = !!role && role.length > 1;
   const hasEmail = !!email;
   const hasPhone = !!phone;
-  const hasLinkedin = !!linkedin;
+  const hasLinkedin = !!linkedin && isLikelyValidLinkedIn(linkedin);
 
   return (
     (hasName && (hasRole || hasEmail || hasPhone || hasLinkedin)) ||
@@ -82,75 +75,10 @@ function cleanStakeholder(st: Record<string, unknown>): StakeholderLike {
   if (role) out.role = role;
   if (email) out.email = email;
   if (phone) out.phone = phone;
-  if (linkedin) out.linkedin_url = linkedin;
+  if (linkedin && isLikelyValidLinkedIn(linkedin)) out.linkedin_url = linkedin;
   if (sourceUrl) out.source_url = sourceUrl;
 
   return out;
-}
-
-function cleanNirfPrograms(programs: unknown): Array<Record<string, unknown>> {
-  if (!Array.isArray(programs)) return [];
-  const out: Array<Record<string, unknown>> = [];
-  for (const p of programs) {
-    if (!p || typeof p !== "object") continue;
-    const obj = p as Record<string, unknown>;
-    const name = cleanString(obj.name);
-    if (!name) continue;
-    const male = cleanNumber(obj.male);
-    const female = cleanNumber(obj.female);
-    const total = cleanNumber(obj.total) ??
-      (male != null && female != null ? male + female : undefined);
-    out.push({
-      name,
-      male,
-      female,
-      total,
-    });
-  }
-  return out;
-}
-
-function cleanDemographics(demo: unknown): Record<string, unknown> | undefined {
-  if (!demo || typeof demo !== "object" || Array.isArray(demo)) return undefined;
-  const obj = demo as Record<string, unknown>;
-  const out: Record<string, unknown> = {};
-
-  const copyNumber = (key: string) => {
-    const val = cleanNumber(obj[key]);
-    if (val !== undefined) out[key] = val;
-  };
-
-  copyNumber("total_students");
-  copyNumber("total_students_male");
-  copyNumber("total_students_female");
-  copyNumber("day_scholars");
-  copyNumber("day_scholars_male");
-  copyNumber("day_scholars_female");
-  copyNumber("hostelites");
-  copyNumber("hostelites_male");
-  copyNumber("hostelites_female");
-  copyNumber("nirf_total");
-  copyNumber("nirf_male");
-  copyNumber("nirf_female");
-
-  const nirfPrograms = cleanNirfPrograms(obj.nirf_programs);
-  if (nirfPrograms.length > 0) out.nirf_programs = nirfPrograms;
-
-  const source = cleanString(obj.source);
-  const nirfSource = cleanString(obj.nirf_source);
-  const dataQuality = cleanString(obj.data_quality);
-  const sourceUrls = Array.isArray(obj.source_urls)
-    ? obj.source_urls
-        .map((u) => cleanString(u))
-        .filter((u): u is string => !!u)
-    : undefined;
-
-  if (source) out.source = source;
-  if (nirfSource) out.nirf_source = nirfSource;
-  if (dataQuality) out.data_quality = dataQuality;
-  if (sourceUrls && sourceUrls.length > 0) out.source_urls = sourceUrls;
-
-  return Object.keys(out).length > 0 ? out : undefined;
 }
 
 const SOURCE_HEADER_RE = /^\n*===\s*(?:SOURCE|EXTERNAL SOURCE|FOLLOWUP SOURCE|GOVERNMENT SOURCE|GOVERNMENT PDF SOURCE):\s*(.+?)\s*===/m;
@@ -193,36 +121,11 @@ export function augmentStakeholderSources(
   });
 }
 
-export function computeDemographicSourceUrls(
-  blocks: string[],
-  extraUrls: string[] = [],
-): string[] {
-  const urls = new Set<string>(extraUrls);
-  for (const block of blocks) {
-    const url = extractSourceUrl(block);
-    if (!url) continue;
-    const lower = block.toLowerCase();
-    if (
-      /\b(nirf|aishe|naac|ssr|iqac|aqar|mandatory disclosure|anti[-\s]?ragging|hostel|enrollment|student strength|statutory)\b/i.test(
-        lower,
-      )
-    ) {
-      urls.add(url);
-    }
-  }
-  return [...urls];
-}
-
-export function validateDeepEnrichmentOutput(parsed: unknown): {
-  demographics: Record<string, unknown>;
-  stakeholders: StakeholderLike[];
-} {
+export function validateStakeholdersOutput(parsed: unknown): StakeholderLike[] {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    throw new Error("DeepEnrichment output is not a valid object");
+    throw new Error("Stakeholder output is not a valid object");
   }
   const obj = parsed as Record<string, unknown>;
-
-  const demographics = cleanDemographics(obj.demographics) ?? {};
 
   const stakeholders: StakeholderLike[] = [];
   if (Array.isArray(obj.stakeholders)) {
@@ -233,5 +136,5 @@ export function validateDeepEnrichmentOutput(parsed: unknown): {
     }
   }
 
-  return { demographics, stakeholders };
+  return stakeholders;
 }

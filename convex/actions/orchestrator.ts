@@ -3,6 +3,7 @@
 import { action, internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
+import type { Doc } from "../_generated/dataModel";
 import { validateAuth } from "../lib/auth_utils";
 import {
   isSuspiciousWebsite,
@@ -22,10 +23,19 @@ export const runEnrichmentChainInternal = internalAction({
     llmUsage?: LlmUsageSummary;
     error?: string;
   }> => {
+    let university: Doc<"universities"> | null = null;
     try {
       console.log(
         `[Orchestrator] Starting enrichment chain for ${args.universityId}`,
       );
+
+      // Mark the university as actively enriching so the UI can show live progress.
+      // The public wrapper already sets this, but doing it again here makes the
+      // internal action self-contained when called directly from the scheduler.
+      await ctx.runMutation(internal.universities.updateOutreachStageInternal, {
+        universityId: args.universityId,
+        stage: "enriching",
+      });
 
       const results: Record<string, boolean> = {
         websiteReady: false,
@@ -48,7 +58,7 @@ export const runEnrichmentChainInternal = internalAction({
       };
 
       // ── Pre-phase: Discover website if missing ──────────────────────────────
-      const university = await ctx.runQuery(internal.universities.getInternal, {
+      university = await ctx.runQuery(internal.universities.getInternal, {
         universityId: args.universityId,
       });
       if (!university) {
@@ -291,6 +301,19 @@ export const runEnrichmentChainInternal = internalAction({
       console.log(
         `[Orchestrator] Enrichment chain completed for ${args.universityId}: scrape=${results.scrape} antiRagging=${results.antiRagging} govData=${results.governmentData} social=${results.socialMedia} socialPostDeep=${results.socialMediaPostDeep} infer=${results.inferContacts} deep=${results.deepEnrichment} score=${results.scoring}`,
       );
+
+      // If scoring did not finish, clear the "enriching" stage so the UI does
+      // not get stuck and the record can be retried.
+      if (!allOk) {
+        await ctx.runMutation(
+          internal.universities.updateOutreachStageInternal,
+          {
+            universityId: args.universityId,
+            stage: "new",
+          },
+        );
+      }
+
       return {
         success: allOk,
         steps: results,
@@ -301,6 +324,19 @@ export const runEnrichmentChainInternal = internalAction({
       Sentry.captureException(e, {
         extra: { universityId: args.universityId },
       });
+
+      // Avoid leaving the record stuck in "enriching" if the chain fatally fails,
+      // but do not overwrite an already-completed "enriched" stage.
+      if (university?.outreach_stage === "enriching") {
+        await ctx.runMutation(
+          internal.universities.updateOutreachStageInternal,
+          {
+            universityId: args.universityId,
+            stage: "new",
+          },
+        );
+      }
+
       return {
         success: false,
         error: String(e),
@@ -328,14 +364,31 @@ export const runEnrichmentChain = action({
     args,
   ): Promise<{
     success: boolean;
-    steps?: Record<string, boolean>;
-    llmUsage?: LlmUsageSummary;
+    enqueued: boolean;
     error?: string;
+    message?: string;
   }> => {
     await validateAuth(ctx);
-    return await ctx.runAction(
+
+    // Mark the university as actively enriching so the UI can show live progress.
+    await ctx.runMutation(internal.universities.updateOutreachStageInternal, {
+      universityId: args.universityId,
+      stage: "enriching",
+    });
+
+    // Schedule the long-running chain in the background. This avoids the
+    // 300s Convex action timeout that was producing the public "Uncaught Error".
+    await ctx.scheduler.runAfter(
+      0,
       internal.actions.orchestrator.runEnrichmentChainInternal,
       args,
     );
+
+    return {
+      success: true,
+      enqueued: true,
+      message:
+        "Enrichment chain enqueued and running in the background. Use universities:get to poll outreach_stage.",
+    };
   },
 });

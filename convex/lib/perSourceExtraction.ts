@@ -4,12 +4,12 @@ import { ActionCtx } from "../_generated/server";
 import { Schema } from "@google/genai";
 import { callGeminiWithUsage, LlmUsageEntry, MODELS, THINKING_LEVEL } from "./llm";
 import {
-  DEEP_ENRICHMENT_SCHEMA,
-  DEEP_ENRICHMENT_SYNTHESIS_PROMPT,
-  MERGE_PARTIALS_PROMPT,
+  STAKEHOLDERS_SCHEMA,
+  STAKEHOLDERS_SYNTHESIS_PROMPT,
+  STAKEHOLDERS_MERGE_PROMPT,
 } from "./prompts";
 import {
-  validateDeepEnrichmentOutput,
+  validateStakeholdersOutput,
   StakeholderLike,
   extractSourceUrl,
 } from "./validateDeepEnrichment";
@@ -17,17 +17,19 @@ import {
 const MAX_PARTIAL_SOURCES = 5;
 
 function withMaxStakeholders(
-  schema: any,
+  schema: Schema,
   maxItems: number,
   description: string,
-): any {
+): Schema {
+  const typed = schema as Schema & { properties: Record<string, Schema> };
+  const stakeholders = typed.properties.stakeholders ?? {};
   return {
-    ...schema,
+    ...typed,
     properties: {
-      ...schema.properties,
+      ...typed.properties,
       stakeholders: {
-        ...schema.properties.stakeholders,
-        maxItems,
+        ...stakeholders,
+        maxItems: String(maxItems),
         description,
       },
     },
@@ -35,20 +37,19 @@ function withMaxStakeholders(
 }
 
 const PER_SOURCE_SCHEMA = withMaxStakeholders(
-  DEEP_ENRICHMENT_SCHEMA,
+  STAKEHOLDERS_SCHEMA,
   12,
   "University officials from this single source. Return at most 12 of the most relevant decision-makers and those with complete contact information.",
 ) as Schema;
 
 const MERGE_SCHEMA = withMaxStakeholders(
-  DEEP_ENRICHMENT_SCHEMA,
+  STAKEHOLDERS_SCHEMA,
   25,
   "Merged, deduplicated university officials. Return at most 25 decision-makers prioritising those with complete contact information.",
 ) as Schema;
 
 interface PartialExtraction {
   source_url: string;
-  demographics: Record<string, unknown>;
   stakeholders: StakeholderLike[];
   raw: string;
 }
@@ -78,7 +79,7 @@ function contactHints(emails: string[], phones: string[]): string {
 
 function perSourceSystemPrompt(targetRoles: string[]): string {
   return (
-    DEEP_ENRICHMENT_SYNTHESIS_PROMPT(targetRoles) +
+    STAKEHOLDERS_SYNTHESIS_PROMPT(targetRoles) +
     "\n\nIMPORTANT: You are examining exactly ONE source. " +
     "Extract only facts explicitly stated in this source. " +
     "Do not infer values from other sources or general knowledge. " +
@@ -90,7 +91,7 @@ function perSourceSystemPrompt(targetRoles: string[]): string {
 }
 
 function mergeSystemPrompt(targetRoles: string[]): string {
-  return MERGE_PARTIALS_PROMPT(targetRoles);
+  return STAKEHOLDERS_MERGE_PROMPT(targetRoles);
 }
 
 async function extractOnePartial(
@@ -107,7 +108,7 @@ async function extractOnePartial(
     options.preDiscoveredEmails || [],
     options.preDiscoveredPhones || [],
   );
-  const prompt = `${header}\n\n${contacts}\n\nSOURCE CONTENT:\n${block.trim()}\n\nExtract stakeholders and demographics from this single source only.`;
+  const prompt = `${header}\n\n${contacts}\n\nSOURCE CONTENT:\n${block.trim()}\n\nExtract only stakeholders (university officials and decision-makers) from this single source. Do not extract demographics.`;
 
   try {
     const result = await callGeminiWithUsage({
@@ -127,10 +128,9 @@ async function extractOnePartial(
     llmUsageEntries.push(result.usage);
 
     const parsed = JSON.parse(cleanJson(result.text));
-    const { demographics, stakeholders } = validateDeepEnrichmentOutput(parsed);
+    const stakeholders = validateStakeholdersOutput(parsed);
     return {
       source_url: sourceUrl,
-      demographics,
       stakeholders: stakeholders.map((st) => ({
         ...st,
         source_url: st.source_url || sourceUrl,
@@ -173,25 +173,21 @@ export async function mergePartialExtractions(
   ctx: ActionCtx,
   llmUsageEntries: LlmUsageEntry[],
 ): Promise<{
-  demographics: Record<string, unknown>;
   stakeholders: StakeholderLike[];
 }> {
   if (partials.length === 0) {
-    return { demographics: {}, stakeholders: [] };
+    return { stakeholders: [] };
   }
 
   if (!apiKey) {
-    return { demographics: {}, stakeholders: [] };
+    return { stakeholders: [] };
   }
 
   const parts = partials
     .map((p) => {
       return (
         `=== PARTIAL EXTRACTION FROM ${p.source_url} ===\n` +
-        JSON.stringify({
-          demographics: p.demographics,
-          stakeholders: p.stakeholders,
-        })
+        JSON.stringify({ stakeholders: p.stakeholders })
       );
     })
     .join("\n\n");
@@ -222,5 +218,5 @@ export async function mergePartialExtractions(
   llmUsageEntries.push(result.usage);
 
   const parsed = JSON.parse(cleanJson(result.text));
-  return validateDeepEnrichmentOutput(parsed);
+  return { stakeholders: validateStakeholdersOutput(parsed) };
 }

@@ -883,6 +883,7 @@ export const scrapeUniversity = internalAction({
             phone: st.phone || undefined,
             email_source: st.email_source,
             phone_source: st.phone_source,
+            source_url: (st as { source_url?: string }).source_url,
           })),
           source: "scraper",
         });

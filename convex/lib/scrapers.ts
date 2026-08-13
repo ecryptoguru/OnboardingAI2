@@ -1,5 +1,9 @@
 "use node";
 
+// Ensure browser globals are present before pdfjs-dist module code loads.
+import "./pdfPolyfills";
+import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+
 import { normalizeIndianPhone, withRetry } from "./utils";
 import { normalizeRoleText, normalizeStakeholderRole } from "./roleRegistry";
 
@@ -23,72 +27,125 @@ export interface FirecrawlScrapeResult {
   };
 }
 
+function firecrawlRetryAfterMs(res: Response): number | null {
+  const retryAfter = res.headers.get("retry-after");
+  if (retryAfter) {
+    const seconds = parseInt(retryAfter, 10);
+    if (!Number.isNaN(seconds)) return seconds * 1000;
+  }
+  const reset = res.headers.get("x-ratelimit-reset");
+  if (reset) {
+    const resetDate = new Date(reset).getTime();
+    const wait = resetDate - Date.now() + 1000;
+    if (wait > 0 && wait < 120_000) return wait;
+  }
+  return null;
+}
+
 /**
  * Firecrawl Map: Returns a domain sitemap in a single synchronous call.
- * Consumes 1 credit per request.
+ * Consumes 1 credit per request. Retries on 429 with server-provided backoff.
  */
 export async function firecrawlMap(
   url: string,
   apiKey: string,
   limit = 5000,
+  maxAttempts = 3,
 ): Promise<FirecrawlMapResult> {
-  const res = await fetch(`${FIRECRAWL_BASE}/map`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      url,
-      search: "",
-      sitemap: "include",
-      includeSubdomains: true,
-      ignoreQueryParameters: true,
-      ignoreCache: false,
-      limit,
-      timeout: 60000,
-    }),
-    signal: AbortSignal.timeout(25000),
-  });
+  let lastText = "";
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const res = await fetch(`${FIRECRAWL_BASE}/map`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        url,
+        search: "",
+        sitemap: "include",
+        includeSubdomains: true,
+        ignoreQueryParameters: true,
+        ignoreCache: false,
+        limit,
+        timeout: 60000,
+      }),
+      signal: AbortSignal.timeout(25000),
+    });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Firecrawl map failed: ${res.status} - ${text}`);
+    if (res.ok) {
+      const json = await res.json();
+      return json as FirecrawlMapResult;
+    }
+
+    lastText = await res.text();
+    if (res.status === 429 && attempt < maxAttempts) {
+      const wait = firecrawlRetryAfterMs(res) ?? 1000 * 2 ** attempt;
+      const bounded = Math.min(wait, 60_000);
+      console.warn(`[Firecrawl] 429 on map; sleeping ${bounded}ms (attempt ${attempt})`);
+      await new Promise((resolve) => setTimeout(resolve, bounded));
+      continue;
+    }
+    if (res.status >= 500 && res.status < 600 && attempt < maxAttempts) {
+      const wait = 1000 * 2 ** attempt;
+      console.warn(`[Firecrawl] ${res.status} on map; retrying in ${wait}ms (attempt ${attempt})`);
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      continue;
+    }
+    break;
   }
 
-  const json = await res.json();
-  return json as FirecrawlMapResult;
+  throw new Error(`Firecrawl map failed after ${maxAttempts} attempts: ${lastText}`);
 }
 
 /**
  * Firecrawl Scrape: Returns clean Markdown from a single URL.
- * Consumes 1 credit per request.
+ * Consumes 1 credit per request. Retries on 429 with server-provided backoff.
  */
 export async function firecrawlScrape(
   url: string,
   apiKey: string,
+  maxAttempts = 3,
 ): Promise<FirecrawlScrapeResult> {
-  const res = await fetch(`${FIRECRAWL_BASE}/scrape`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      url,
-      formats: ["markdown"],
-      onlyMainContent: true,
-    }),
-    signal: AbortSignal.timeout(35000),
-  });
+  let lastText = "";
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    const res = await fetch(`${FIRECRAWL_BASE}/scrape`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        url,
+        formats: ["markdown"],
+        onlyMainContent: true,
+      }),
+      signal: AbortSignal.timeout(35000),
+    });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Firecrawl scrape failed: ${res.status} - ${text}`);
+    if (res.ok) {
+      const json = await res.json();
+      return json as FirecrawlScrapeResult;
+    }
+
+    lastText = await res.text();
+    if (res.status === 429 && attempt < maxAttempts) {
+      const wait = firecrawlRetryAfterMs(res) ?? 1000 * 2 ** attempt;
+      const bounded = Math.min(wait, 60_000);
+      console.warn(`[Firecrawl] 429 on scrape; sleeping ${bounded}ms (attempt ${attempt})`);
+      await new Promise((resolve) => setTimeout(resolve, bounded));
+      continue;
+    }
+    if (res.status >= 500 && res.status < 600 && attempt < maxAttempts) {
+      const wait = 1000 * 2 ** attempt;
+      console.warn(`[Firecrawl] ${res.status} on scrape; retrying in ${wait}ms (attempt ${attempt})`);
+      await new Promise((resolve) => setTimeout(resolve, wait));
+      continue;
+    }
+    break;
   }
 
-  const json = await res.json();
-  return json as FirecrawlScrapeResult;
+  throw new Error(`Firecrawl scrape failed after ${maxAttempts} attempts: ${lastText}`);
 }
 
 // ─── High-Yield URL Filters ────────────────────────────────────────────────
@@ -222,87 +279,110 @@ export async function downloadPdfBuffer(url: string): Promise<Buffer> {
   );
 }
 
-/**
- * Extract text content from a PDF buffer using pdf-parse v2.
- *
- * Uses advanced ParseParameters for optimal LLM ingestion:
- * - `first: 30`  → Limit to first 30 pages (NAAC SSR tables often span 50+ pages).
- * - `lineEnforce: true`  → Preserve logical line breaks.
- * - `cellSeparator: "\t"` → Inject tabs between table cells.
- * - `parseHyperlinks: true` → Capture embedded URLs.
- *
- * `parser.destroy()` is always called via try/finally to prevent memory leaks.
- */
-interface PDFParser {
-  getText(params?: Record<string, unknown>): Promise<{ text: string }>;
-  getTable(
-    params?: Record<string, unknown>,
-  ): Promise<{ pages: { tables: string[][][] }[] }>;
-  destroy(): Promise<void>;
+interface TextItem {
+  str: string;
+  dir: string;
+  width: number;
+  height: number;
+  transform: number[];
+  fontName: string;
+  hasEOL: boolean;
 }
 
+// Point the fake worker at the worker bundle so it can be imported inline.
+// This avoids spawning a real Web Worker, which is unavailable in Convex.
+try {
+  const gwo = (pdfjsLib as unknown as { GlobalWorkerOptions?: { workerSrc?: string } }).GlobalWorkerOptions;
+  if (gwo) gwo.workerSrc = "pdfjs-dist/legacy/build/pdf.worker.mjs";
+} catch {
+  // read-only in some builds; extraction will fall back to empty string
+}
+
+/**
+ * Extract text from a PDF buffer using pdfjs-dist without canvas rendering.
+ * Falls back to empty string if the runtime cannot load the parser.
+ */
 export async function extractPdfText(buffer: Buffer): Promise<string> {
-  let parser: PDFParser | null = null;
   try {
-    const { PDFParse } = await import("pdf-parse");
-    parser = new PDFParse({ data: buffer }) as PDFParser;
-    const data = await parser.getText({
-      first: 30,
-      lineEnforce: true,
-      cellSeparator: "\t",
-      parseHyperlinks: true,
+    const loadingTask = (pdfjsLib as unknown as { getDocument: (opts: { data: Uint8Array; useSystemFonts?: boolean; verbosity?: number }) => { promise: Promise<PdfDocument> } }).getDocument({
+      data: new Uint8Array(buffer),
+      useSystemFonts: true,
+      verbosity: (pdfjsLib as unknown as { VerbosityLevel?: { ERRORS: number } }).VerbosityLevel?.ERRORS ?? 0,
     });
-    return data.text || "";
+    const pdf = await loadingTask.promise;
+    const maxPages = Math.min(pdf.numPages, 30);
+    const pages: string[] = [];
+    for (let i = 1; i <= maxPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items
+        .map((item: unknown) => (item as TextItem).str || "")
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      if (pageText) pages.push(pageText);
+    }
+    return pages.join("\n\n");
   } catch (e) {
     console.warn(
       `[PDF] Failed to extract text:`,
       e instanceof Error ? e.message : String(e),
     );
     return "";
-  } finally {
-    if (parser) {
-      try {
-        await parser.destroy();
-      } catch {
-        // ignore destroy failures
-      }
-    }
   }
 }
 
+interface PdfDocument {
+  numPages: number;
+  getPage(n: number): Promise<PdfPage>;
+}
+
+interface PdfPage {
+  getTextContent(): Promise<{ items: unknown[] }>;
+}
+
 /**
- * Extract structured tabular data from a PDF buffer using pdf-parse v2 `getTable()`.
- *
- * AISHE / NAAC SSR / IQAC PDFs are full of enrollment, hostel, and faculty
- * tables. Getting them as 2-D arrays preserves row/column relationships
- * far better than flat text for LLM reasoning.
- *
- * - `first: 30` → Enrollment tables can span large reports; scan first 30 pages.
- * - Returns a markdown-ish table string ready for LLM context.
- * - Falls back to empty string if no tables detected or on error.
- *
- * `parser.destroy()` is always called via try/finally to prevent memory leaks.
+ * Extract table-like data from a PDF buffer by grouping text items by line
+ * and column position, then joining with ` | `. Falls back to empty string.
  */
 export async function extractPdfTables(buffer: Buffer): Promise<string> {
-  let parser: PDFParser | null = null;
   try {
-    const { PDFParse } = await import("pdf-parse");
-    parser = new PDFParse({ data: buffer }) as PDFParser;
-    const result = await parser.getTable({ first: 30 });
-
+    const loadingTask = (pdfjsLib as unknown as { getDocument: (opts: { data: Uint8Array; useSystemFonts?: boolean; verbosity?: number }) => { promise: Promise<PdfDocument> } }).getDocument({
+      data: new Uint8Array(buffer),
+      useSystemFonts: true,
+      verbosity: (pdfjsLib as unknown as { VerbosityLevel?: { ERRORS: number } }).VerbosityLevel?.ERRORS ?? 0,
+    });
+    const pdf = await loadingTask.promise;
+    const maxPages = Math.min(pdf.numPages, 30);
     const chunks: string[] = [];
-    for (const page of result.pages) {
-      for (const table of page.tables) {
-        // Skip trivial single-cell or empty tables
-        if (table.length < 2) continue;
-        const rows = table
-          .map((row: string[]) =>
-            row
-              .map((cell: string) => cell.replace(/\s+/g, " ").trim())
-              .join(" | "),
-          )
-          .join("\n");
-        chunks.push(rows);
+    for (let i = 1; i <= maxPages; i++) {
+      const page = await pdf.getPage(i);
+      const content = await page.getTextContent();
+      const items = (content.items as TextItem[]).filter(
+        (it) => typeof it.str === "string" && it.str.trim().length > 0,
+      );
+
+      // Group by vertical position (rounded to 2 decimals) to reconstruct rows
+      const rows = new Map<number, { x: number; text: string }[]>();
+      for (const it of items) {
+        const y = Math.round((it.transform?.[5] ?? 0) * 100) / 100;
+        const x = it.transform?.[4] ?? 0;
+        if (!rows.has(y)) rows.set(y, []);
+        rows.get(y)!.push({ x, text: it.str.replace(/\s+/g, " ").trim() });
+      }
+
+      const sortedRows = [...rows.entries()].sort(([a], [b]) => b - a);
+      const tableRows = sortedRows
+        .map(([, cells]) =>
+          cells
+            .sort((a, b) => a.x - b.x)
+            .map((c) => c.text)
+            .join(" | "),
+        )
+        .filter((row) => row.length > 0);
+
+      if (tableRows.length > 1) {
+        chunks.push(`=== PAGE ${i} ===\n${tableRows.join("\n")}`);
       }
     }
 
@@ -314,14 +394,6 @@ export async function extractPdfTables(buffer: Buffer): Promise<string> {
       e instanceof Error ? e.message : String(e),
     );
     return "";
-  } finally {
-    if (parser) {
-      try {
-        await parser.destroy();
-      } catch {
-        // ignore destroy failures
-      }
-    }
   }
 }
 

@@ -116,6 +116,7 @@ export default defineSchema({
     source_url: v.optional(v.string()),
     sources: v.optional(v.array(v.string())),
     last_enriched_source: v.optional(v.string()),
+    last_enriched_at: v.optional(v.number()),
     change_log: v.optional(v.array(v.string())),
     // Contact provenance tracking
     email_source: v.optional(

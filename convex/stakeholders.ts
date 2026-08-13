@@ -74,7 +74,10 @@ function sanitizeEmail(
 }
 
 export const listByUniversity = query({
-  args: { university_id: v.id("universities") },
+  args: {
+    university_id: v.id("universities"),
+    enriched_after: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
     const all = await ctx.db
@@ -84,7 +87,6 @@ export const listByUniversity = query({
       )
       .collect();
 
-    // Carefully exclude UGC stakeholders that have no contact info to prevent duplicates alongside rich AI data
     return all.filter((s) => {
       const isUGC = (s.source ?? "").toLowerCase().includes("ugc");
       const hasEmail = s.email && s.email !== "null";
@@ -93,13 +95,20 @@ export const listByUniversity = query({
       if (isUGC && !hasEmail && !hasPhone) {
         return false;
       }
+      if (args.enriched_after != null) {
+        const at = s.last_enriched_at ?? s.updated_at ?? s.created_at ?? 0;
+        if (at < args.enriched_after) return false;
+      }
       return true;
     });
   },
 });
 
 export const listByUniversities = query({
-  args: { university_ids: v.array(v.id("universities")) },
+  args: {
+    university_ids: v.array(v.id("universities")),
+    enriched_after: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
     const results = await Promise.all(
@@ -113,6 +122,10 @@ export const listByUniversities = query({
           const hasEmail = s.email && s.email !== "null";
           const hasPhone = s.phone && s.phone !== "null";
           if (isUGC && !hasEmail && !hasPhone) return false;
+          if (args.enriched_after != null) {
+            const at = s.last_enriched_at ?? s.updated_at ?? s.created_at ?? 0;
+            if (at < args.enriched_after) return false;
+          }
           return true;
         });
       }),
@@ -307,6 +320,7 @@ export const bulkInsertInternal = internalMutation({
         phone: v.optional(v.string()),
         email_source: v.optional(v.string()),
         phone_source: v.optional(v.string()),
+        source_url: v.optional(v.string()),
       }),
     ),
     source: v.optional(v.string()),
@@ -316,6 +330,7 @@ export const bulkInsertInternal = internalMutation({
     const university = await ctx.db.get(args.university_id);
     const institutionDomain = normalizeInstitutionDomain(university?.website);
     for (const st of args.stakeholders) {
+      const source = args.source || "scraper";
       await ctx.db.insert("stakeholders", {
         university_id: args.university_id,
         name: st.name,
@@ -323,9 +338,12 @@ export const bulkInsertInternal = internalMutation({
         email: sanitizeEmail(st.email, institutionDomain),
         phone: sanitizePhone(st.phone),
         is_primary: false,
-        source: args.source || "scraper",
+        source,
         email_source: st.email_source as EmailSource | undefined,
         phone_source: st.phone_source as PhoneSource | undefined,
+        last_enriched_source: st.source_url,
+        last_enriched_at: now,
+        sources: [source],
         created_at: now,
       });
     }
@@ -544,6 +562,7 @@ export const upsertBulkInternal = internalMutation({
           phone_source:
             (st.phone_source as PhoneSource | undefined) ?? match.phone_source,
           last_enriched_source: st.source_url ?? match.last_enriched_source,
+          last_enriched_at: now,
           sources: Array.from(mergedSources),
           updated_at: now,
         });
@@ -565,6 +584,7 @@ export const upsertBulkInternal = internalMutation({
           email_source: st.email_source as EmailSource | undefined,
           phone_source: st.phone_source as PhoneSource | undefined,
           last_enriched_source: st.source_url,
+          last_enriched_at: now,
           sources,
           created_at: now,
         });
@@ -794,6 +814,114 @@ export const getByEmailInternal = internalQuery({
         q.eq("email", args.email.toLowerCase().trim()),
       )
       .first();
+  },
+});
+
+function isClericalOrSupportRole(role?: string | null): boolean {
+  if (!role) return false;
+  const lower = role.toLowerCase();
+  return /\b(staff|assistant|attendant|stenographer|technician|superintendent|operator|driver|peon|clerk)\b/.test(lower);
+}
+
+function isDecisionMakerRole(role?: string | null): boolean {
+  const canonical = role ? normalizeStakeholderRole(role) : undefined;
+  if (!canonical) return false;
+  return [
+    "Owner",
+    "President",
+    "Chairman",
+    "Chairperson",
+    "Chancellor",
+    "Vice Chancellor",
+    "Pro Vice Chancellor",
+    "Advisor",
+    "Advisor to Chancellor",
+    "Registrar",
+    "Dy Registrar",
+    "Joint Registrar",
+    "Dean",
+    "Deputy Dean",
+    "Assistant Dean",
+    "Dean Student Welfare",
+    "Dean Student Affairs",
+    "Director Administration",
+    "Chief Warden",
+    "Controller of Examinations",
+    "Deputy Controller of Examinations",
+    "Finance Officer",
+    "Chief Finance Officer",
+    "Librarian",
+    "Head of Department",
+    "Placement Officer",
+    "Public Relations Officer",
+    "Director",
+    "Joint Director",
+    "Deputy Director",
+    "Associate Director",
+  ].includes(canonical);
+}
+
+export const cleanupLegacyStakeholders = mutation({
+  args: {
+    university_id: v.id("universities"),
+    dry_run: v.optional(v.boolean()),
+    enriched_before: v.optional(v.number()),
+    bad_sources: v.optional(v.array(v.string())),
+  },
+  handler: async (ctx, args) => {
+    await validateAuth(ctx);
+    const dryRun = args.dry_run ?? true;
+    const badSources = (args.bad_sources ?? ["scraper", "Scribd"]).map((s) =>
+      s.toLowerCase(),
+    );
+    const cutoff = args.enriched_before;
+    const all = await ctx.db
+      .query("stakeholders")
+      .withIndex("by_university", (q) => q.eq("university_id", args.university_id))
+      .collect();
+
+    const toDelete = all.filter((s) => {
+      const source = (s.source ?? "").toLowerCase();
+      const sources = (s.sources ?? []).join(" ").toLowerCase();
+      const role = s.role;
+      const hasContact = !!s.email || !!s.phone || !!s.linkedin_url;
+      const lastEnriched = s.last_enriched_at ?? s.updated_at ?? s.created_at ?? 0;
+
+      // Purge known bad / low-quality sources and cross-contamination.
+      if (badSources.some((b) => source.includes(b) || sources.includes(b))) {
+        return true;
+      }
+
+      // Purge stale records that were never refreshed during the latest run.
+      if (cutoff != null && lastEnriched < cutoff && !isSingletonRole(role)) {
+        return true;
+      }
+
+      // Purge support/clerical staff with no decision authority.
+      if (isClericalOrSupportRole(role)) {
+        return true;
+      }
+
+      // Drop orphaned records with no contact info unless they are a high-value singleton role.
+      if (!hasContact && !isDecisionMakerRole(role) && !isSingletonRole(role)) {
+        return true;
+      }
+
+      return false;
+    });
+
+    if (!dryRun) {
+      for (const s of toDelete) {
+        await ctx.db.delete(s._id);
+      }
+    }
+
+    return {
+      dry_run: dryRun,
+      deleted: dryRun ? 0 : toDelete.length,
+      would_delete: toDelete.length,
+      ids: toDelete.map((s) => s._id),
+    };
   },
 });
 
