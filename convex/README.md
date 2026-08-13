@@ -108,6 +108,28 @@ python3 .devin/scripts/checklist.py .
 - [Project README](../README.md) — full stack overview
 - [CODEBASE map](../CODEBASE.md) — central navigation reference
 
+## Deep enrichment pipeline
+
+`convex/actions/deepEnrichment.ts` runs a source-partitioned extraction flow:
+
+1. **Firecrawl map** discovers high-yield pages, scored by URL and page title.
+2. **External search** finds leadership/LinkedIn/contact pages (government data is intentionally handled by `enrichGovernmentData.ts`).
+3. **Bounded fetches** with retries and concurrency limits populate page content.
+4. **Per-source LLM extraction** (Flash-Lite) extracts stakeholders and demographics for each top source.
+5. **Merge LLM** (Flash) deduplicates partials and resolves conflicts.
+6. **Runtime validation** (`lib/validateDeepEnrichment.ts`) sanitizes output before persistence.
+7. **Provenance** is attached: stakeholder `source_url`/`sources` and demographics `source_urls`/`data_quality`.
+8. **Dry-run mode** on `runDeepEnrichment` returns extracted data without writing to the DB.
+
+Key shared helpers:
+
+- `convex/lib/roleRegistry.ts` — canonical role names, aliases, decision/singleton flags.
+- `convex/lib/scrapers.ts` — URL scoring, contact extraction, phone-to-stakeholder matching.
+- `convex/lib/perSourceExtraction.ts` — map-reduce per-source extraction.
+- `convex/lib/validateDeepEnrichment.ts` — structured output validation and provenance helpers.
+
+Government PDFs and official demographic data are intentionally owned by `convex/actions/enrichGovernmentData.ts` (which uses `extractPdfTables`) so `deepEnrichment` focuses on website stakeholders and contacts.
+
 ---
 
 © 2026 Fretbox. Confidential.

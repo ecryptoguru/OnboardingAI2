@@ -1,6 +1,6 @@
 "use node";
 
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, ThinkingLevel } from "@google/genai";
 import { createHash } from "crypto";
 import { withRetry } from "./utils";
 import { getOptionalNumber, getOptionalBoolean } from "./env";
@@ -43,8 +43,21 @@ async function checkLlmCache(
   userPrompt: string,
   model: string,
   temperature: number,
+  maxOutputTokens: number,
+  responseAsJson: boolean,
+  responseSchema: unknown,
+  thinkingLevel?: string,
 ): Promise<string | null> {
-  const h = hashPrompt([model, String(temperature), systemPrompt, userPrompt]);
+  const h = hashPrompt([
+    model,
+    String(temperature),
+    thinkingLevel ?? "",
+    String(maxOutputTokens),
+    responseAsJson ? "json" : "text",
+    responseSchema ? JSON.stringify(responseSchema) : "",
+    systemPrompt,
+    userPrompt,
+  ]);
   const cached = await ctx.runQuery(internal.llmBudget.getCacheEntryInternal, {
     promptHash: h,
     model,
@@ -63,10 +76,23 @@ async function storeLlmCache(
   userPrompt: string,
   model: string,
   temperature: number,
+  maxOutputTokens: number,
+  responseAsJson: boolean,
+  responseSchema: unknown,
   response: string,
+  thinkingLevel?: string,
   ttlMs = 48 * 60 * 60 * 1000,
 ): Promise<void> {
-  const h = hashPrompt([model, String(temperature), systemPrompt, userPrompt]);
+  const h = hashPrompt([
+    model,
+    String(temperature),
+    thinkingLevel ?? "",
+    String(maxOutputTokens),
+    responseAsJson ? "json" : "text",
+    responseSchema ? JSON.stringify(responseSchema) : "",
+    systemPrompt,
+    userPrompt,
+  ]);
   await ctx.runMutation(internal.llmBudget.setCacheEntryInternal, {
     promptHash: h,
     model,
@@ -74,6 +100,39 @@ async function storeLlmCache(
     response,
     expiresAt: Date.now() + ttlMs,
   });
+}
+
+// ─── 3.x model helpers ───────────────────────────────────────────────────────
+/**
+ * Detect Gemini 3.x models that use thinkingLevel and ignore temperature.
+ * Excludes gemini-3.1-flash-lite, which behaves like a legacy Flash model.
+ */
+function isGemini3Model(model: string): boolean {
+  // New 3.x API behavior: no temperature, use thinkingLevel.
+  // Applies to 3.6, 3.5-flash-lite, and future 3.7+ models.
+  // NOT gemini-3.5-flash or gemini-3.1-flash-lite, which keep legacy behavior.
+  return /^gemini-3\.(6|[7-9]|[1-9][0-9])/.test(model) ||
+    model.includes("gemini-3.5-flash-lite") ||
+    model.includes("gemini-3-flash-preview");
+}
+
+function defaultThinkingLevelForModel(model: string): string | undefined {
+  if (!isGemini3Model(model)) return undefined;
+  if (model.includes("flash-lite")) return THINKING_LEVEL.minimal;
+  if (model === MODELS.gemini_3_6_flash) return THINKING_LEVEL.low;
+  return THINKING_LEVEL.low;
+}
+
+function toSdkThinkingLevel(
+  level?: string,
+): (typeof ThinkingLevel)[keyof typeof ThinkingLevel] | undefined {
+  if (!level) return undefined;
+  const key = level as keyof typeof ThinkingLevel;
+  if (key in ThinkingLevel) {
+    return ThinkingLevel[key];
+  }
+  console.warn(`[LLM] Unknown thinking level ${level}; omitting`);
+  return undefined;
 }
 
 // ─── Direct Google SDK ───────────────────────────────────────────────
@@ -87,14 +146,16 @@ export function getGoogleAI(apiKey?: string | null): GoogleGenAI {
 }
 
 // ─── Model constants (imported from models.ts for V8 runtime compatibility) ──
-import { MODELS, TEMP, THINKING } from "./models";
-export { MODELS, TEMP, THINKING };
+import { MODELS, TEMP, THINKING, THINKING_LEVEL } from "./models";
+export { MODELS, TEMP, THINKING, THINKING_LEVEL };
 
 const MODEL_PRICING_USD_PER_MILLION: Record<
   string,
   { input: number; output: number }
 > = {
+  "gemini-3.6-flash": { input: 1.5, output: 7.5 },
   "gemini-3.5-flash": { input: 1.5, output: 9.0 },
+  "gemini-3.5-flash-lite": { input: 0.3, output: 2.5 },
   "gemini-3.1-flash-lite": { input: 0.25, output: 1.5 },
 };
 
@@ -134,10 +195,10 @@ function estimateTokensFromText(text: string | undefined | null): number {
 }
 
 function getModelPricing(model: string): { input: number; output: number } {
-  return (
-    MODEL_PRICING_USD_PER_MILLION[model] ||
-    MODEL_PRICING_USD_PER_MILLION[MODELS.geminiFlash]
-  );
+  const pricing = MODEL_PRICING_USD_PER_MILLION[model];
+  if (pricing) return pricing;
+  console.warn(`[LLM] No pricing for ${model}; defaulting to gemini-3.5-flash`);
+  return MODEL_PRICING_USD_PER_MILLION[MODELS.gemini];
 }
 
 function readUsageNumber(
@@ -328,6 +389,7 @@ export async function callGemini({
   model = MODELS.gemini,
   fallbackModel,
   thinkingBudget,
+  thinkingLevel,
   maxOutputTokens = 8192,
   apiKey,
   label,
@@ -344,6 +406,7 @@ export async function callGemini({
   model?: string;
   fallbackModel?: string;
   thinkingBudget?: number;
+  thinkingLevel?: keyof typeof ThinkingLevel;
   maxOutputTokens?: number;
   apiKey?: string | null;
   label?: string;
@@ -361,6 +424,7 @@ export async function callGemini({
     model,
     fallbackModel,
     thinkingBudget,
+    thinkingLevel,
     maxOutputTokens,
     apiKey,
     label,
@@ -381,6 +445,7 @@ export async function callGeminiWithUsage({
   model = MODELS.gemini,
   fallbackModel,
   thinkingBudget,
+  thinkingLevel,
   maxOutputTokens = 8192,
   apiKey,
   label = "gemini_call",
@@ -397,6 +462,7 @@ export async function callGeminiWithUsage({
   model?: string;
   fallbackModel?: string;
   thinkingBudget?: number;
+  thinkingLevel?: keyof typeof ThinkingLevel;
   maxOutputTokens?: number;
   apiKey?: string | null;
   label?: string;
@@ -405,9 +471,27 @@ export async function callGeminiWithUsage({
   skipCache?: boolean;
   cacheTtlMs?: number;
 }): Promise<{ text: string; usage: LlmUsageEntry }> {
+  const is3 = isGemini3Model(model);
+  const effectiveThinkingLevel = is3
+    ? (thinkingLevel ?? defaultThinkingLevelForModel(model))
+    : undefined;
+  // For 3.x models temperature is deprecated and ignored; we still keep a
+  // deterministic cache key value (0) so identical 3.x prompts share a cache.
+  const cacheTemperature = is3 ? 0 : temperature;
+
   // ─── Guardrail 1: Cache lookup ────────────────────────────────────────────
   if (ctx && !skipCache) {
-    const cached = await checkLlmCache(ctx, systemPrompt, userPrompt, model, temperature);
+    const cached = await checkLlmCache(
+      ctx,
+      systemPrompt,
+      userPrompt,
+      model,
+      cacheTemperature,
+      maxOutputTokens,
+      responseAsJson,
+      responseSchema,
+      effectiveThinkingLevel,
+    );
     if (cached) {
       return {
         text: cached,
@@ -440,28 +524,41 @@ export async function callGeminiWithUsage({
   const aiClient = getGoogleAI(apiKey);
   const startMs = Date.now();
 
-  async function callModel(modelName: string, thinkBudget: number): Promise<{ text: string; usage: LlmUsageEntry }> {
+  async function callModel(
+    modelName: string,
+    thinkBudget: number,
+    level?: string,
+  ): Promise<{ text: string; usage: LlmUsageEntry }> {
     return withRetry(
       async () => {
+        const sendTemperature = !isGemini3Model(modelName);
+        const sdkLevel = toSdkThinkingLevel(level);
+        const config: Record<string, unknown> = {
+          systemInstruction: systemPrompt,
+          maxOutputTokens,
+          responseMimeType: responseAsJson ? "application/json" : "text/plain",
+          responseSchema,
+          httpOptions: { timeout: 25000 },
+        };
+        if (sendTemperature) {
+          config.temperature = temperature;
+        }
+        if (sdkLevel) {
+          config.thinkingConfig = {
+            thinkingLevel: sdkLevel,
+            includeThoughts: false,
+          };
+        } else if (thinkBudget > 0) {
+          config.thinkingConfig = {
+            thinkingBudget: thinkBudget,
+            includeThoughts: false,
+          };
+        }
+
         const response = await aiClient.models.generateContent({
           model: modelName,
           contents: userPrompt,
-          config: {
-            systemInstruction: systemPrompt,
-            temperature,
-            maxOutputTokens,
-            responseMimeType: responseAsJson ? "application/json" : "text/plain",
-            responseSchema,
-            httpOptions: { timeout: 25000 },
-            ...(thinkBudget > 0
-              ? {
-                  thinkingConfig: {
-                    thinkingBudget: thinkBudget,
-                    includeThoughts: false,
-                  },
-                }
-              : {}),
-          },
+          config,
         });
 
         const candidate = response.candidates?.[0];
@@ -496,7 +593,7 @@ export async function callGeminiWithUsage({
   let result: { text: string; usage: LlmUsageEntry };
   let usedModel = model;
   try {
-    result = await callModel(model, resolvedBudget);
+    result = await callModel(model, resolvedBudget, effectiveThinkingLevel);
   } catch (primaryErr) {
     if (fallbackModel && fallbackModel !== model) {
       console.warn(
@@ -505,7 +602,10 @@ export async function callGeminiWithUsage({
       );
       const isFallbackPro = /\bpro\b/i.test(fallbackModel);
       const fallbackThinkBudget = isFallbackPro ? Math.max(512, resolvedBudget) : 0;
-      result = await callModel(fallbackModel, fallbackThinkBudget);
+      const fallbackLevel = isGemini3Model(fallbackModel)
+        ? defaultThinkingLevelForModel(fallbackModel)
+        : undefined;
+      result = await callModel(fallbackModel, fallbackThinkBudget, fallbackLevel);
       usedModel = fallbackModel;
     } else {
       throw primaryErr;
@@ -526,7 +626,19 @@ export async function callGeminiWithUsage({
       await recordLlmSpend(ctx, usage);
     }
     if (!skipCache) {
-      await storeLlmCache(ctx, systemPrompt, userPrompt, model, temperature, text, cacheTtlMs);
+      await storeLlmCache(
+        ctx,
+        systemPrompt,
+        userPrompt,
+        model,
+        cacheTemperature,
+        maxOutputTokens,
+        responseAsJson,
+        responseSchema,
+        text,
+        effectiveThinkingLevel,
+        cacheTtlMs,
+      );
     }
   }
 
@@ -602,7 +714,16 @@ export async function callGeminiWithGroundingAndUsage({
 }): Promise<{ text: string; sources: string[]; usage: LlmUsageEntry }> {
   // ─── Guardrail 1: Cache lookup ────────────────────────────────────────────
   if (ctx && !skipCache) {
-    const cached = await checkLlmCache(ctx, systemPrompt, userPrompt, model, temperature);
+    const cached = await checkLlmCache(
+      ctx,
+      systemPrompt,
+      userPrompt,
+      model,
+      temperature,
+      maxOutputTokens,
+      false,
+      undefined,
+    );
     if (cached) {
       return {
         text: cached,
@@ -683,7 +804,19 @@ export async function callGeminiWithGroundingAndUsage({
       await recordLlmSpend(ctx, result.usage);
     }
     if (!skipCache) {
-      await storeLlmCache(ctx, systemPrompt, userPrompt, model, temperature, result.text, cacheTtlMs);
+      await storeLlmCache(
+        ctx,
+        systemPrompt,
+        userPrompt,
+        model,
+        temperature,
+        maxOutputTokens,
+        false,
+        undefined,
+        result.text,
+        undefined,
+        cacheTtlMs,
+      );
     }
   }
 

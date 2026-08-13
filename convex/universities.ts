@@ -833,6 +833,7 @@ export const updateDemographicsInternal = internalMutation({
       hostelites_female: v.optional(v.number()),
       source: v.optional(v.string()), // NAAC/AISHE source year
       data_quality: v.optional(v.string()), // "verified" | "partial" | "inferred"
+      source_urls: v.optional(v.array(v.string())), // URLs that contributed
       nirf_source: v.optional(v.string()), // e.g. "NIRF 2024"
       nirf_total: v.optional(v.number()),
       nirf_male: v.optional(v.number()),

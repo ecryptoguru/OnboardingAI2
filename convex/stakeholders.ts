@@ -344,6 +344,8 @@ export const upsertBulkInternal = internalMutation({
         linkedin_url: v.optional(v.string()),
         email_source: v.optional(v.string()),
         phone_source: v.optional(v.string()),
+        source_url: v.optional(v.string()),
+        sources: v.optional(v.array(v.string())),
       }),
     ),
     source: v.optional(v.string()),
@@ -525,6 +527,10 @@ export const upsertBulkInternal = internalMutation({
           uniDomain,
         );
         const mergedPhone = normalizedPhone ?? sanitizePhone(match.phone);
+        const mergedSources = new Set<string>(match.sources || []);
+        if (st.source_url) mergedSources.add(st.source_url);
+        if (st.sources) st.sources.forEach((s) => mergedSources.add(s));
+
         await ctx.db.patch(match._id, {
           name: st.name ?? match.name,
           role: normalizedRole ?? sanitizeRole(match.role) ?? match.role,
@@ -532,13 +538,18 @@ export const upsertBulkInternal = internalMutation({
           phone: mergedPhone,
           linkedin_url: st.linkedin_url ?? match.linkedin_url,
           source: args.source ?? match.source ?? "deep_enrichment",
+          source_url: st.source_url ?? match.source_url,
           email_source:
             (st.email_source as EmailSource | undefined) ?? match.email_source,
           phone_source:
             (st.phone_source as PhoneSource | undefined) ?? match.phone_source,
+          last_enriched_source: st.source_url ?? match.last_enriched_source,
+          sources: Array.from(mergedSources),
+          updated_at: now,
         });
       } else {
         // Insert new
+        const sources = st.sources ?? (st.source_url ? [st.source_url] : undefined);
         await ctx.db.insert("stakeholders", {
           university_id: args.university_id,
           name: st.name,
@@ -550,8 +561,11 @@ export const upsertBulkInternal = internalMutation({
           linkedin_url: st.linkedin_url,
           is_primary: false,
           source: args.source || "deep_enrichment",
+          source_url: st.source_url,
           email_source: st.email_source as EmailSource | undefined,
           phone_source: st.phone_source as PhoneSource | undefined,
+          last_enriched_source: st.source_url,
+          sources,
           created_at: now,
         });
       }

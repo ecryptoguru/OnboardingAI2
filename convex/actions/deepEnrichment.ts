@@ -4,17 +4,14 @@ import { internalAction } from "../_generated/server";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import {
-  callGeminiWithUsage,
   LlmUsageEntry,
   LlmUsageSummary,
   summarizeLlmUsage,
-  THINKING,
-  MODELS,
 } from "../lib/llm";
 import {
   withRetry,
+  withConcurrencyLimit,
   sanitizeLlmInput,
-  validateJsonOutput,
   truncateAtNewline,
   isValidEmail,
   isValidIndianPhone,
@@ -23,13 +20,19 @@ import {
   extractDemographicsFromText,
 } from "../lib/utils";
 import {
+  augmentStakeholderSources,
+  computeDemographicSourceUrls,
+  type StakeholderLike,
+} from "../lib/validateDeepEnrichment";
+import {
+  extractPartialsFromSources,
+  mergePartialExtractions,
+} from "../lib/perSourceExtraction";
+import {
   isDecisionMakerRole,
   isLikelyAcademicNonDecisionRole,
 } from "../lib/stakeholderQuality";
-import {
-  DEEP_ENRICHMENT_SYNTHESIS_PROMPT,
-  DEEP_ENRICHMENT_SCHEMA,
-} from "../lib/prompts";
+
 import {
   firecrawlMap,
   firecrawlScrape,
@@ -44,6 +47,7 @@ import {
   isSingletonRole,
   normalizeInstitutionDomain,
   normalizeStakeholderRole,
+  TARGET_ROLES,
 } from "../lib/contactInference";
 import {
   createSerperBudget,
@@ -51,50 +55,12 @@ import {
 } from "../lib/serperBudget";
 import * as Sentry from "@sentry/node";
 
-const TARGET_ROLES = [
-  "Owner",
-  "President",
-  "Chairman",
-  "Chairperson",
-  "Chancellor",
-  "Vice Chancellor",
-  "Pro Vice Chancellor",
-  "Advisor",
-  "Advisor to Chancellor",
-  "Registrar",
-  "Dy Registrar",
-  "Joint Registrar",
-  "Dean",
-  "Deputy Dean",
-  "Dean Student Welfare",
-  "Dean Student Affairs",
-  "Director Administration",
-  "Chief Warden",
-  "Controller of Examinations",
-  "Deputy Controller of Examinations",
-  "Finance Officer",
-  "Chief Finance Officer",
-  "Librarian",
-  "Head of Department",
-  "Placement Officer",
-  "Public Relations Officer",
-  "Director",
-  "Rector",
-  "Secretary",
-  "Treasurer",
-  "Dean of Faculty",
-  "Head of Administration",
-  "Executive Director",
-  "Managing Director",
-  "Joint Director",
-  "Deputy Director",
-  "Associate Director",
-];
+
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 const MAX_CONTEXT_CHARS = 70_000; // Cap context to keep Gemini calls fast
-const MAX_URLS_TO_SCRAPE = 9; // Limit first-pass Firecrawl API calls per enrichment
-const MAX_FOLLOWUP_URLS = 8; // Free Jina-based recursive follow-up from menu pages
+const MAX_URLS_TO_SCRAPE = 6; // Limit first-pass Firecrawl API calls per enrichment
+const MAX_FOLLOWUP_URLS = 4; // Free Jina-based recursive follow-up from menu pages
 const MAX_CHARS_PER_SOURCE = 6_000; // Truncate each scraped source
 const MIN_BLOCK_LENGTH = 200; // Minimum length for a block to be considered valid
 const MAX_REGEX_CONTACTS = 30; // Cap to avoid bloating the prompt
@@ -129,14 +95,15 @@ async function serperSearch(
 }
 
 /**
- * Search for AISHE, NIRF, NAAC, and administration pages.
- * Returns URLs sorted by relevance for demographic + stakeholder extraction.
+ * Search for leadership, LinkedIn, and contact pages.
+ * Government data (NIRF, AISHE, NAAC) is handled by enrichGovernmentData.ts.
+ * Returns URLs sorted by relevance for stakeholder extraction.
  */
 async function discoverExternalSources(
   uniName: string,
   domain: string,
   serperKey: string,
-  serperBudget = createSerperBudget({ maxQueries: 6 }),
+  serperBudget = createSerperBudget({ maxQueries: 4 }),
   options: {
     city?: string;
     state?: string;
@@ -159,15 +126,6 @@ async function discoverExternalSources(
     `${uniName} ${locationTerms} site:${domain} officers deans registrar directory`,
     `${uniName} ${locationTerms} site:${domain} administration contact directory`,
     `${uniName} ${locationTerms} site:${domain} vice chancellor director finance officer`,
-    // NIRF data — highest value for demographics
-    `${uniName} ${locationTerms} NIRF student strength enrollment`,
-    `${uniName} ${locationTerms} site:${domain} NIRF`,
-    `${uniName} ${locationTerms} site:${domain} NIRF report`,
-    `${uniName} ${locationTerms} site:${domain} NIRF filetype:pdf`,
-    // Anti-ragging — mandatory page with contacts + hostel numbers
-    `${uniName} ${locationTerms} anti-ragging committee contact`,
-    // NAAC / IQAC / SSR
-    `${uniName} ${locationTerms} NAAC SSR hostelite student data`,
     // Administration / Contact
     `${uniName} ${locationTerms} administration contact dean office`,
     // LinkedIn for officials
@@ -220,20 +178,8 @@ async function discoverExternalSources(
           score += 4;
         }
 
-        // Boost government/education data sources
-        if (url.includes("nirfindia.org")) score += 10;
-        if (url.includes("aishe.gov.in")) score += 10;
-        if (url.includes("naac.gov.in")) score += 8;
-        if (url.includes("ugc.gov.in")) score += 6;
-
         // Content relevance signals
-        if (/\b(nirf|ranking|student.*strength|enrollment)\b/i.test(combined))
-          score += 5;
-        if (/\b(hostel|hostelite|day scholar|accommodation)\b/i.test(combined))
-          score += 5;
-        if (
-          /\b(contact|phone|email|directory|administration)\b/i.test(combined)
-        )
+        if (/\b(contact|phone|email|directory|administration)\b/i.test(combined))
           score += 4;
         if (
           /\b(vice.?chancellor|registrar|dean|principal|director|officer)\b/i.test(
@@ -241,10 +187,6 @@ async function discoverExternalSources(
           )
         )
           score += 4;
-
-        // NIRF and data source URL signals
-        if (/(?<![a-zA-Z])(nirf|nirf.ranking|nirf.report|nirf.data)(?![a-zA-Z])/i.test(url))
-          score += 8;
 
         // Leadership leaf page URL signals
         if (/(?<![a-zA-Z])(officer|officers|dean|deans|registrar|director|directors|chancellor|vice[-\s]?chancellor|chairman|chairperson)(?![a-zA-Z])/i.test(url))
@@ -275,7 +217,7 @@ async function discoverExternalSources(
 
   return allUrls
     .sort((a, b) => b.score - a.score)
-    .slice(0, 5)
+    .slice(0, 3)
     .map((u) => u.url);
 }
 
@@ -317,7 +259,7 @@ function normalizeContent(raw: string): string {
 const JINA_REMOVE_SELECTOR =
   "nav, header, footer, .menu, .navbar, #menu, .main-navigation, .site-nav, .topbar, .sidebar, aside, .widget, .footer-content, .site-header, .masthead, .main-menu";
 
-async function fetchJinaText(
+async function fetchJinaTextRaw(
   url: string,
   timeoutMs = 20000,
 ): Promise<string> {
@@ -335,6 +277,29 @@ async function fetchJinaText(
     throw new Error(`Jina failed for ${url}: ${res.status}`);
   }
   return res.text();
+}
+
+async function fetchJinaText(
+  url: string,
+  timeoutMs = 20000,
+): Promise<string> {
+  return withRetry(
+    () => fetchJinaTextRaw(url, timeoutMs),
+    {
+      maxRetries: 2,
+      retryOn: (err: unknown) => {
+        const status =
+          (err as Record<string, unknown>)?.status ||
+          (err as Record<string, unknown>)?.statusCode;
+        if (typeof status === "number") {
+          return status === 429 || (status >= 500 && status < 600);
+        }
+        const msg = err instanceof Error ? err.message : String(err);
+        const lower = msg.toLowerCase();
+        return /\b(429|50[0-3]|timeout|etimedout|fetch failed|network error|econnrefused|econnreset|socket hang up)\b/i.test(lower);
+      },
+    },
+  );
 }
 
 // ─── Context deduplicator ─────────────────────────────────────────────────────
@@ -370,14 +335,15 @@ const LEADERSHIP_URL_PATTERNS = [
   { re: /(?<![a-zA-Z])(registrar|controller|finance|librarian|warden|rector|secretary|treasurer)(?![a-zA-Z])/i, weight: 8 },
   { re: /(?<![a-zA-Z])(dean|deans|director|directors|principal|head|hod|chairman|chairpersons?|president|owner)(?![a-zA-Z])/i, weight: 7 },
   { re: /(?<![a-zA-Z])(officer|officers)(?![a-zA-Z])/i, weight: 6 },
-  { re: /(?<![a-zA-Z])(staff)(?![a-zA-Z])/i, weight: 4 },
+  { re: /(?<![a-zA-Z])(staff)(?![a-zA-Z])/i, weight: -10 },
   { re: /(?<![a-zA-Z])(administration|leadership|governance|management|executive|team)(?![a-zA-Z])/i, weight: 3 },
   { re: /(?<![a-zA-Z])(about[-\s]?us|about)(?![a-zA-Z])/i, weight: 2 },
   { re: /(?<![a-zA-Z])(contact|contact[-\s]?us|contactus)(?![a-zA-Z])/i, weight: 2 },
   { re: /(?<![a-zA-Z])(telephone[-_\s]?directory|phone[-_\s]?directory|directory)(?![a-zA-Z])/i, weight: 1 },
   { re: /(?<![a-zA-Z])(anti[-\s]?ragging|committee)(?![a-zA-Z])/i, weight: 1 },
-  // NIRF data pages feed demographics; keep them in the scrape list.
-  { re: /(?<![a-zA-Z])(nirf|nirf.ranking|nirf.report|nirf.data)(?![a-zA-Z])/i, weight: 8 },
+  // NIRF data pages feed demographics; keep them in the scrape list, but lower
+  // priority than leadership pages because they rarely contain decision makers.
+  { re: /(?<![a-zA-Z])(nirf|nirf.ranking|nirf.report|nirf.data)(?![a-zA-Z])/i, weight: 2 },
 ];
 
 function scoreLeadershipUrl(url: string): number {
@@ -395,6 +361,19 @@ function scoreLeadershipUrl(url: string): number {
   // Drop news / event / meeting / circular / notification pages that rarely list stable decision makers.
   if (/(meeting|minutes|circular|notification|proud|news|event|blog|press[-_]?release|announcement|tender)/i.test(url))
     score -= 6;
+  return score;
+}
+
+function scoreSourceBlock(block: string): number {
+  const match = block.match(/=== (?:EXTERNAL |FOLLOWUP )?SOURCE: ([^=\n]+) ===/);
+  const url = match?.[1]?.trim() || "";
+  let score = scoreLeadershipUrl(url) || 0;
+  const text = block.toLowerCase();
+  if (/(nirf|naac|aishe|ssr|iqac|mandatory disclosure)/.test(text)) score += 3;
+  if (/(vice\s*chancellor|registrar|dean|director|officer)/.test(text)) score += 4;
+  if (/(hostel|hostelites|day scholar|student strength|enrollment)/.test(text)) score += 2;
+  if (/(staff|attendant|stenographer|junior assistant|senior assistant|office assistant|technician)/.test(text)) score -= 3;
+  if (/(news|event|blog|tender|career|notification)/.test(text)) score -= 4;
   return score;
 }
 
@@ -577,33 +556,6 @@ function normalizeUrlKey(url: string): string {
   }
 }
 
-function extractNirfPdfUrls(blocks: string[], baseUrl: string): string[] {
-  const found = new Set<string>();
-  for (const block of blocks) {
-    const links = extractUrlsFromMarkdown(block, baseUrl);
-    for (const link of links) {
-      if (/\.(pdf|docx?)$/i.test(link) && /nirf/i.test(link)) {
-        found.add(link.replace(/\s/g, "%20"));
-      }
-    }
-  }
-  const scored = [...found].map((url) => {
-    let score = 0;
-    const yearMatch = url.match(/(20\d{2})/);
-    const year = yearMatch ? parseInt(yearMatch[1], 10) : 0;
-    score += year * 10;
-    if (/\boverall/i.test(url)) score += 5;
-    if (/\b(engg|engineering)\b/i.test(url)) score += 4;
-    if (/\bmanagement\b/i.test(url)) score += 1;
-    if (/\b(university|institute|college)\b/i.test(url)) score += 2;
-    return { url, score };
-  });
-  return scored
-    .sort((a, b) => b.score - a.score)
-    .slice(0, 2)
-    .map((s) => s.url);
-}
-
 function isSamePageAnchor(link: string, sourceUrl: string): boolean {
   try {
     const source = new URL(sourceUrl);
@@ -741,6 +693,7 @@ function selectFollowupUrls(
 export const runDeepEnrichment = internalAction({
   args: {
     universityId: v.id("universities"),
+    dryRun: v.optional(v.boolean()),
   },
   handler: async (
     ctx,
@@ -754,10 +707,15 @@ export const runDeepEnrichment = internalAction({
     contextChars?: number;
     estimatedTokens?: { flash: number; pro: number };
     llmUsage?: LlmUsageSummary;
+    stakeholders?: unknown[];
+    demographics?: Record<string, unknown>;
     error?: string;
   }> => {
     try {
       const llmUsageEntries: LlmUsageEntry[] = [];
+      const dryRun = args.dryRun ?? false;
+      let finalStakeholders: Record<string, unknown>[] = [];
+      let finalDemographics: Record<string, unknown> = {};
       const university = await ctx.runQuery(internal.universities.getInternal, {
         universityId: args.universityId,
       });
@@ -767,6 +725,7 @@ export const runDeepEnrichment = internalAction({
 
       if (!university) throw new Error("University not found");
       const uniName = university.university_name;
+      const existingDemographics = (university.demographics ?? {}) as Record<string, unknown>;
       const url =
         typeof university.website === "string" ? university.website : "";
 
@@ -903,7 +862,7 @@ export const runDeepEnrichment = internalAction({
             console.log(
               `[DeepEnrichment] Discovered ${externalUrls.length} external sources: ${externalUrls.join(", ")}`,
             );
-            const jinaPromises = externalUrls.map(async (extUrl) => {
+            const jinaTasks = externalUrls.map((extUrl) => async () => {
               try {
                 const text = await fetchJinaText(extUrl, 25000);
                 const normalized = normalizeContent(text).substring(
@@ -920,7 +879,7 @@ export const runDeepEnrichment = internalAction({
                 return "";
               }
             });
-            externalBlocks = (await Promise.all(jinaPromises)).filter(
+            externalBlocks = (await withConcurrencyLimit(jinaTasks, 4)).filter(
               (b) => b.length > MIN_BLOCK_LENGTH,
             );
             console.log(
@@ -936,7 +895,7 @@ export const runDeepEnrichment = internalAction({
       }
 
       // ─── Phase 2: Firecrawl Scrape → Get clean Markdown ──────────────────
-      const scrapePromises = highYieldUrls.map(async (targetUrl) => {
+      const scrapeTasks = highYieldUrls.map((targetUrl) => async () => {
         try {
           const result = await withRetry(
             async () => firecrawlScrape(targetUrl, firecrawlKey),
@@ -975,7 +934,7 @@ export const runDeepEnrichment = internalAction({
         }
       });
 
-      const scrapedBlocks = await Promise.all(scrapePromises);
+      const scrapedBlocks = await withConcurrencyLimit(scrapeTasks, 4);
       let validBlocks = scrapedBlocks.filter(
         (b) => b.length > MIN_BLOCK_LENGTH,
       );
@@ -985,43 +944,6 @@ export const runDeepEnrichment = internalAction({
         validBlocks = validBlocks.concat(externalBlocks);
         console.log(
           `[DeepEnrichment] Merged ${externalBlocks.length} external blocks into context (total: ${validBlocks.length}).`,
-        );
-      }
-
-      // ─── Phase 2b-2: NIRF PDF follow-up ──────────────────────────────────────
-      // University NIRF pages are link lists to PDF data reports. Extract the most
-      // recent Engineering / Overall PDFs and scrape them with Firecrawl.
-      const nirfPdfUrls = extractNirfPdfUrls(validBlocks, workingUrl);
-      if (nirfPdfUrls.length > 0) {
-        console.log(
-          `[DeepEnrichment] NIRF PDF follow-up: ${nirfPdfUrls.join(", ")}`,
-        );
-        const nirfBlocks = await Promise.all(
-          nirfPdfUrls.map(async (pdfUrl) => {
-            try {
-              const result = await withRetry(
-                async () => firecrawlScrape(pdfUrl, firecrawlKey),
-                { maxRetries: 1 },
-              );
-              const markdown = result.data?.markdown || "";
-              const normalized = normalizeContent(markdown).substring(
-                0,
-                MAX_CHARS_PER_SOURCE,
-              );
-              if (normalized.length < MIN_BLOCK_LENGTH) return "";
-              return `\n=== NIRF SOURCE: ${pdfUrl} ===\n${normalized}\n`;
-            } catch (e) {
-              console.warn(
-                `[DeepEnrichment] Firecrawl failed for NIRF PDF ${pdfUrl}:`,
-                e instanceof Error ? e.message : String(e),
-              );
-              return "";
-            }
-          }),
-        );
-        validBlocks = validBlocks.concat(nirfBlocks.filter((b) => b.length > 0));
-        console.log(
-          `[DeepEnrichment] Merged NIRF PDF blocks (total: ${validBlocks.length}).`,
         );
       }
 
@@ -1056,7 +978,7 @@ export const runDeepEnrichment = internalAction({
           console.log(
             `[DeepEnrichment] Following ${followupUrls.length} leadership leaf links from scraped pages: ${followupUrls.join(", ")}`,
           );
-          const followupPromises = followupUrls.map(async (fu) => {
+          const followupTasks = followupUrls.map((fu) => async () => {
             try {
               const text = await fetchJinaText(fu, 25000);
               const normalized = normalizeContent(text).substring(
@@ -1073,7 +995,7 @@ export const runDeepEnrichment = internalAction({
               return "";
             }
           });
-          const followupBlocks = (await Promise.all(followupPromises)).filter(
+          const followupBlocks = (await withConcurrencyLimit(followupTasks, 4)).filter(
             (b) => b.length > MIN_BLOCK_LENGTH,
           );
           if (followupBlocks.length > 0) {
@@ -1217,6 +1139,10 @@ export const runDeepEnrichment = internalAction({
             ) === index,
         );
 
+      // ─── Phase 3: Re-rank sources so per-source extraction starts with the
+      // highest-yield blocks, then deduplicate & cap context.
+      validBlocks.sort((a, b) => scoreSourceBlock(b) - scoreSourceBlock(a));
+
       // ─── Phase 3: Deduplicate & Cap context ──────────────────────────────
       const rawContext = deduplicateContext(validBlocks);
       const finalContext = truncateAtNewline(rawContext, MAX_CONTEXT_CHARS);
@@ -1286,7 +1212,7 @@ ${safeContext}
 
       let synthesizedJson: {
         demographics: Record<string, unknown>;
-        stakeholders: unknown[];
+        stakeholders: StakeholderLike[];
       } | null = null;
       let synthesisAttempts = 0;
       const maxSynthesisAttempts = 2;
@@ -1294,42 +1220,55 @@ ${safeContext}
         synthesisAttempts++;
         try {
           console.log(
-            `[DeepEnrichment] Phase 4: Running Gemini extraction (model: ${MODELS.geminiFlash}, attempt ${synthesisAttempts})`,
+            `[DeepEnrichment] Phase 4: Running per-source extraction + merge (attempt ${synthesisAttempts})`,
           );
           const startMs = Date.now();
-          const result = await callGeminiWithUsage({
+
+          const partials = await extractPartialsFromSources(
+            validBlocks,
+            {
+              uniName,
+              website: url,
+              targetRoles: TARGET_ROLES,
+              preDiscoveredEmails: uniqueRegexEmails,
+              preDiscoveredPhones: uniqueRegexPhones,
+            },
             apiKey,
-            model: MODELS.geminiFlash,
-            systemPrompt: DEEP_ENRICHMENT_SYNTHESIS_PROMPT(TARGET_ROLES),
-            userPrompt: extractionPrompt,
-            temperature: 0.05,
-            responseAsJson: true,
-            responseSchema: DEEP_ENRICHMENT_SCHEMA,
-            thinkingBudget: THINKING.off,
-            maxOutputTokens: 8192,
-            label: "deep_enrichment_synthesis",
             ctx,
-            skipCache: false,
-            cacheTtlMs: 24 * 60 * 60 * 1000,
-          });
-          llmUsageEntries.push(result.usage);
+            llmUsageEntries,
+          );
+          console.log(
+            `[DeepEnrichment] Extracted ${partials.length} partial extractions`,
+          );
+
+          synthesizedJson = await mergePartialExtractions(
+            partials,
+            {
+              uniName,
+              website: url,
+              targetRoles: TARGET_ROLES,
+              preDiscoveredEmails: uniqueRegexEmails,
+              preDiscoveredPhones: uniqueRegexPhones,
+            },
+            apiKey,
+            ctx,
+            llmUsageEntries,
+          );
+
+          // Attach source provenance where the model did not provide it
+          synthesizedJson.stakeholders = augmentStakeholderSources(
+            synthesizedJson.stakeholders,
+            validBlocks,
+          );
+          const demographicSourceUrls = computeDemographicSourceUrls(validBlocks);
+          if (demographicSourceUrls.length > 0 && synthesizedJson.demographics) {
+            synthesizedJson.demographics.source_urls = demographicSourceUrls;
+          }
+
           console.log(
             `[DeepEnrichment] Gemini latency: ${Date.now() - startMs}ms`,
           );
 
-          const cleanedText = result.text
-            .replace(/^```(json)?\n?/, "")
-            .replace(/\n?```$/, "")
-            .trim();
-          const parsed = JSON.parse(cleanedText);
-          synthesizedJson = validateJsonOutput(
-            parsed,
-            ["demographics", "stakeholders"],
-            "DeepEnrichment output",
-          ) as {
-            demographics: Record<string, unknown>;
-            stakeholders: unknown[];
-          };
           // Redact PII: log only field counts, never names/emails/phones
           const stCount = Array.isArray(synthesizedJson.stakeholders)
             ? synthesizedJson.stakeholders.length
@@ -1353,30 +1292,22 @@ ${safeContext}
             ];
             if (regexFallbackStakeholders.length > 0) {
               console.warn(
-                `[DeepEnrichment] Gemini synthesis unavailable. Persisting ${regexFallbackStakeholders.length} regex role/phone fallbacks.`,
+                `[DeepEnrichment] Gemini synthesis unavailable. Falling back to ${regexFallbackStakeholders.length} regex role/phone contacts.`,
               );
-              await ctx.runMutation(internal.stakeholders.upsertBulkInternal, {
-                university_id: args.universityId,
+              synthesizedJson = {
+                demographics: {},
                 stakeholders: regexFallbackStakeholders.map((st) => ({
-                  name: undefined,
+                  name: st.name,
                   role: st.role,
                   email: st.email,
                   phone: st.phone,
-                  linkedin_url: undefined,
+                  linkedin_url: st.linkedin_url,
                   email_source: st.email ? "regex" : undefined,
                   phone_source: st.phone ? "regex" : undefined,
                 })),
-                source: "deep_enrichment",
-              });
-              return {
-                success: true,
-                stakeholdersSynthesized: regexFallbackStakeholders.length,
-                demographicsIncluded: false,
-                contextChars: finalContext.length,
-                estimatedTokens: { flash: estimatedGeminiTokens, pro: 0 },
-                llmUsage: summarizeLlmUsage(llmUsageEntries),
-                reason: "llm_synthesis_failed_regex_fallback",
               };
+              finalStakeholders = synthesizedJson.stakeholders as Record<string, unknown>[];
+              break;
             }
             throw new Error(
               "Failed to synthesize intelligence data after retries",
@@ -1416,6 +1347,13 @@ ${safeContext}
           typeof demographics.source === "string"
             ? demographics.source
             : undefined,
+        data_quality:
+          typeof demographics.data_quality === "string"
+            ? demographics.data_quality
+            : undefined,
+        source_urls: Array.isArray(demographics.source_urls)
+          ? demographics.source_urls.filter((u) => typeof u === "string")
+          : undefined,
         // NIRF block
         nirf_source:
           typeof demographics.nirf_source === "string"
@@ -1598,23 +1536,73 @@ ${safeContext}
         console.log(`[DeepEnrichment] Raw demographics sample: ${rawSample}`);
       }
 
+      // Determine data quality for this enrichment run
+      function inferDataQuality(d: Record<string, unknown>): "verified" | "partial" | "inferred" {
+        const quality = d.data_quality;
+        if (quality === "verified" || quality === "partial" || quality === "inferred") {
+          return quality as "verified" | "partial" | "inferred";
+        }
+        const sourceUrls = Array.isArray(d.source_urls) ? d.source_urls : [];
+        const source = String(d.source || "").toLowerCase();
+        const hasGovSource = sourceUrls.some(
+          (u: unknown) =>
+            typeof u === "string" &&
+            /\b(nirfindia|aishe|naac|ugc|gov\.in)\b/i.test(u),
+        );
+        const hasNirf =
+          source.includes("nirf") ||
+          /\bnirf\b/i.test(String(d.nirf_source || ""));
+        if (hasGovSource || hasNirf) return "verified";
+        const hasNonMarketingSource =
+          sourceUrls.length > 0 ||
+          /\b(anti[-\s]?ragging|mandatory disclosure|ssr|iqac|aqar)\b/i.test(source);
+        return hasNonMarketingSource ? "partial" : "inferred";
+      }
+
+      function shouldWriteDemographics(
+        existing: Record<string, unknown>,
+        newQuality: "verified" | "partial" | "inferred",
+      ): boolean {
+        const existingQuality = existing.data_quality;
+        if (existingQuality === "verified" && newQuality !== "verified") {
+          console.log(
+            `[DeepEnrichment] Existing demographics are verified. Skipping ${newQuality} overwrite.`,
+          );
+          return false;
+        }
+        return true;
+      }
+
+      const demoQuality = inferDataQuality(demo);
+      demo.data_quality = demoQuality;
+
+      finalDemographics = demo;
+
       if (
         demo &&
         Object.values(demo).some((val) => typeof val === "number" && val > 0)
       ) {
-        const populatedFields = Object.entries(demo)
-          .filter(([, v]) => v !== undefined && v !== null)
-          .map(([k]) => k);
-        console.log(
-          `[DeepEnrichment] Saving demographics: ${populatedFields.length} fields populated [${populatedFields.join(", ")}]`,
-        );
-        await ctx.runMutation(
-          internal.universities.updateDemographicsInternal,
-          {
-            universityId: args.universityId,
-            demographics: demo,
-          },
-        );
+        if (shouldWriteDemographics(existingDemographics, demoQuality)) {
+          if (dryRun) {
+            console.log(
+              `[DeepEnrichment] dryRun: skipping persistence of demographics with quality ${demoQuality}.`,
+            );
+          } else {
+            const populatedFields = Object.entries(demo)
+              .filter(([, v]) => v !== undefined && v !== null)
+              .map(([k]) => k);
+            console.log(
+              `[DeepEnrichment] Saving demographics: ${populatedFields.length} fields populated [${populatedFields.join(", ")}]`,
+            );
+            await ctx.runMutation(
+              internal.universities.updateDemographicsInternal,
+              {
+                universityId: args.universityId,
+                demographics: demo,
+              },
+            );
+          }
+        }
       } else {
         // Recovery fallback: if LLM returns demographics keys with null values,
         // salvage obvious numeric splits from raw context.
@@ -1624,20 +1612,35 @@ ${safeContext}
             (val) => typeof val === "number" && val > 0,
           )
         ) {
-          console.warn(
-            "[DeepEnrichment] LLM demographics empty. Applying regex fallback demographics extraction.",
-          );
-          await ctx.runMutation(
-            internal.universities.updateDemographicsInternal,
-            {
-              universityId: args.universityId,
-              demographics: {
-                ...fallback,
-                source: "context_regex_fallback",
-                data_quality: "partial",
-              },
-            },
-          );
+          if (shouldWriteDemographics(existingDemographics, "partial")) {
+            const fallbackDemo = {
+              ...fallback,
+              source: "context_regex_fallback",
+              data_quality: "partial",
+              source_urls: computeDemographicSourceUrls(validBlocks),
+            };
+            finalDemographics = fallbackDemo;
+            if (dryRun) {
+              console.warn(
+                "[DeepEnrichment] dryRun: skipping regex fallback demographics persistence.",
+              );
+            } else {
+              console.warn(
+                "[DeepEnrichment] LLM demographics empty. Applying regex fallback demographics extraction.",
+              );
+              await ctx.runMutation(
+                internal.universities.updateDemographicsInternal,
+                {
+                  universityId: args.universityId,
+                  demographics: fallbackDemo,
+                },
+              );
+            }
+          } else {
+            console.warn(
+              "[DeepEnrichment] Existing demographics are verified; skipping regex fallback.",
+            );
+          }
         } else {
           console.warn(
             "[DeepEnrichment] No demographics extracted — all fields null or missing.",
@@ -1652,6 +1655,14 @@ ${safeContext}
         phone?: string;
         linkedin_url?: string;
         role?: string;
+        source_url?: string;
+        sources?: string[];
+      }
+
+      function isClericalOrSupportRole(role?: string | null): boolean {
+        if (!role) return false;
+        const lower = role.toLowerCase();
+        return /\b(staff|assistant|attendant|stenographer|technician|superintendent|operator|driver|peon|clerk)\b/.test(lower);
       }
 
       const richness = (st: StakeholderCandidate) =>
@@ -1726,29 +1737,38 @@ ${safeContext}
           }
         }
 
-        // Single-phone fallback
-        if (uniqueRegexPhones.length === 1) return [uniqueRegexPhones[0]];
+        // If there are multiple phones and no name match, do not blindly assign
+        // the first phone; that over-assigns shared office numbers.
+        if (uniqueRegexPhones.length > 1) return [];
 
-        // Block-proximity fallback (name or role appears near phone)
+        // Single-phone fallback: only assign if the stakeholder's name or role
+        // appears in the context near that phone, or if the role is a singleton
+        // decision-maker role that plausibly owns the main office number.
         const normalizedRole = (stakeholder.role || "").toLowerCase();
         const normalizedName = normalizeNameDedup(stakeholder.name);
         if (!normalizedName && !normalizedRole) return [];
 
-        const matchingBlocks = validBlocks.filter((block) => {
-          const blockLower = block.toLowerCase();
-          return (
-            (!!normalizedName && blockLower.includes(normalizedName.split(" ")[0] || "")) ||
-            (!!normalizedRole && blockLower.includes(normalizedRole))
-          );
-        });
-        if (matchingBlocks.length === 0) return [];
-
-        const matchedPhones = new Set<string>();
-        for (const block of matchingBlocks) {
-          const contacts = extractContactsFromMarkdown(block);
-          contacts.phones.forEach((phone) => matchedPhones.add(phone));
+        const phone = uniqueRegexPhones[0];
+        const phoneCtx = allPhoneContexts.find((p) => p.value === phone);
+        const ctx = (phoneCtx?.context || "").toLowerCase();
+        const nameFirstToken = normalizedName?.split(" ")[0];
+        if (
+          nameFirstToken && ctx.includes(nameFirstToken)
+        ) {
+          return [phone];
         }
-        return Array.from(matchedPhones);
+        if (normalizedRole && ctx.includes(normalizedRole)) {
+          return [phone];
+        }
+
+        if (
+          isSingletonRole(stakeholder.role) ||
+          isDecisionMakerRole(stakeholder.role)
+        ) {
+          return [phone];
+        }
+
+        return [];
       }
 
       const validStakeholders = ((stakeholders as StakeholderCandidate[]) || [])
@@ -1770,6 +1790,9 @@ ${safeContext}
           // Avoid polluting outreach stakeholders with faculty profile pages.
           // We only keep them when they also carry a decision-maker role.
           if (academicRole && !decisionRole) return false;
+
+          // Drop clerical / support staff unless they have a priority role.
+          if (!priorityRole && isClericalOrSupportRole(st.role)) return false;
 
           // Keep if: has a real name + some contact info
           // OR: has a priority role with any trustworthy contact channel
@@ -1958,54 +1981,76 @@ ${safeContext}
           );
         });
 
+      finalStakeholders = currentStakeholders.map((st) => ({
+        name: st.name || undefined,
+        role: st.role || undefined,
+        email: st.email || undefined,
+        phone: st.phone || undefined,
+        linkedin_url: st.linkedin_url || undefined,
+        source_url: st.source_url || undefined,
+        sources:
+          st.sources ??
+          (st.source_url ? [st.source_url] : undefined),
+        email_source: st.email ? "scraped" : undefined,
+        phone_source: st.phone ? "scraped" : undefined,
+      }));
+
       if (currentStakeholders.length > 0) {
-        await ctx.runMutation(internal.stakeholders.upsertBulkInternal, {
-          university_id: args.universityId,
-          stakeholders: currentStakeholders.map((st) => ({
-            name: st.name || undefined,
-            role: st.role || undefined,
-            email: st.email || undefined,
-            phone: st.phone || undefined,
-            linkedin_url: st.linkedin_url || undefined,
-            email_source: st.email ? "scraped" : undefined,
-            phone_source: st.phone ? "scraped" : undefined,
-          })),
-          source: "deep_enrichment",
-        });
+        if (dryRun) {
+          console.log(
+            `[DeepEnrichment] dryRun: skipping persistence of ${currentStakeholders.length} stakeholders.`,
+          );
+        } else {
+          await ctx.runMutation(internal.stakeholders.upsertBulkInternal, {
+            university_id: args.universityId,
+            stakeholders: finalStakeholders,
+            source: "deep_enrichment",
+          });
+        }
       }
 
       // Note: scoring is now handled by the orchestrator to avoid double-scoring
       // when multiple enrichment actions run in parallel.
 
-      await ctx.runMutation(internal.universities.updateOutreachStageInternal, {
-        universityId: args.universityId,
-        stage: "enriched",
-      });
+      if (!dryRun) {
+        await ctx.runMutation(internal.universities.updateOutreachStageInternal, {
+          universityId: args.universityId,
+          stage: "enriched",
+        });
+      }
 
       // ─── Cost / Usage Logging ─────────────────────────────────────────────
       const llmUsage = summarizeLlmUsage(llmUsageEntries);
-      const firecrawlCredits = 1 + validBlocks.length; // 1 map + N scrapes
+      const firecrawlCredits = 1 + firecrawlBasedBlocks.length; // 1 map + N scrapes
       const flashInputChars = extractionPrompt.length;
       const estimatedFlashTokens = Math.round(flashInputChars / 4);
       console.log(
         `[DeepEnrichment] COST SUMMARY for ${uniName}:\n` +
-          `  Firecrawl credits: ${firecrawlCredits} (1 map + ${validBlocks.length} scrapes)\n` +
+          `  Firecrawl credits: ${firecrawlCredits} (1 map + ${firecrawlBasedBlocks.length} scrapes)\n` +
           `  LLM exact tokens: in=${llmUsage.inputTokens.toLocaleString()} out=${llmUsage.outputTokens.toLocaleString()} total=${llmUsage.totalTokens.toLocaleString()}\n` +
           `  LLM exact cost: $${llmUsage.totalCostUsd.toFixed(6)} across ${llmUsage.calls} call(s)\n` +
           `  Estimated input tokens for context guard: ${estimatedFlashTokens.toLocaleString()}\n` +
           `  Context: ${finalContext.length.toLocaleString()} chars (raw: ${rawContext.length.toLocaleString()})`,
       );
 
+      const demographicsIncluded =
+        !!finalDemographics &&
+        Object.values(finalDemographics).some(
+          (v) => typeof v === "number" && v > 0,
+        );
+
       return {
         success: true,
-        stakeholdersSynthesized: validStakeholders.length,
-        demographicsIncluded: !!demographics,
+        stakeholdersSynthesized: finalStakeholders.length,
+        demographicsIncluded,
         contextChars: finalContext.length,
         estimatedTokens: {
           flash: estimatedFlashTokens,
           pro: 0, // legacy field — we no longer use Pro
         },
         llmUsage,
+        stakeholders: dryRun ? finalStakeholders : undefined,
+        demographics: dryRun ? finalDemographics : undefined,
       };
     } catch (e) {
       console.error("[DeepEnrichment] Fatal error:", e);

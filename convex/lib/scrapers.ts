@@ -1,6 +1,7 @@
 "use node";
 
 import { normalizeIndianPhone, withRetry } from "./utils";
+import { normalizeRoleText, normalizeStakeholderRole } from "./roleRegistry";
 
 // ─── Firecrawl API Client ──────────────────────────────────────────────────
 // Provides synchronous Map (sitemap discovery) and Scrape (single-page) calls.
@@ -105,6 +106,7 @@ export const HIGH_YIELD_PATTERNS = [
 
 /**
  * Score and rank discovered URLs by how likely they are to contain contact info.
+ * Uses both the URL slug and the page title / description from Firecrawl.
  * Returns URLs sorted by relevance (highest first).
  */
 export function filterHighYieldUrls(
@@ -116,10 +118,35 @@ export function filterHighYieldUrls(
   const scored = mapResult.links
     .map((link) => {
       const url = link.url.toLowerCase();
+      const title = (link.title || "").toLowerCase();
+      const description = (link.description || "").toLowerCase();
+      const combined = `${url} ${title} ${description}`;
+
       let score = 0;
       for (const pattern of HIGH_YIELD_PATTERNS) {
         if (pattern.test(url)) score += 1;
+        if (pattern.test(title)) score += 2;
+        if (pattern.test(description)) score += 1;
       }
+
+      // Extra title signal is a strong indicator of an administration/people page
+      if (/\b(administration|governance|leadership|officers?|deans?|director)\b/i.test(title)) {
+        score += 3;
+      }
+      if (/\b(contact|phone|email|directory|telephone)\b/i.test(title)) {
+        score += 3;
+      }
+
+      // NIRF / NAAC pages are good for demographics
+      if (/\b(nirf|naac|iqac|ssr|mandatory disclosure|anti[-\s]?ragging)\b/i.test(combined)) {
+        score += 2;
+      }
+
+      // Penalise generic news/event pages that sometimes have leadership in the URL
+      if (/(news|events?|blogs?|press[-_]?release|tender|career|jobs?)/i.test(combined)) {
+        score -= 3;
+      }
+
       return { url: link.url, score };
     })
     .filter((item) => item.score > 0)
@@ -407,10 +434,41 @@ export function extractContactsWithContext(
   return { emails, phones };
 }
 
+function normalizeNameTokens(name?: string | null): string[] {
+  if (!name) return [];
+  const cleaned = name
+    .toLowerCase()
+    .replace(/\b(dr|prof|professor|mr|mrs|ms|shri|smt|er|engg|arch)\b/gi, "")
+    .replace(/[.,]/g, " ")
+    .replace(/[^a-z0-9\s]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return cleaned.split(/\s+/).filter((p) => p.length > 0);
+}
+
+function buildNamePatterns(tokens: string[]): string[] {
+  const patterns = new Set<string>();
+  for (const token of tokens) {
+    patterns.add(token);
+    // Common initial variants: "K.S." → "k s" and "ks"
+    const collapsed = token.replace(/[^a-z0-9]/g, "");
+    if (collapsed && collapsed !== token) patterns.add(collapsed);
+    if (token.length > 2) {
+      patterns.add(`\\b${token}\\b`);
+    }
+  }
+  // Whole name as a loose phrase (ignoring dots/initials)
+  if (tokens.length > 1) {
+    const phrase = tokens.map((t) => t.replace(/[^a-z0-9]/g, "")).join("\\s+");
+    patterns.add(phrase);
+  }
+  return [...patterns];
+}
+
 /**
  * Match regex-extracted phones to named stakeholders using proximity heuristics.
- * For each named stakeholder, look for a phone whose surrounding context
- * contains the person's name or role.
+ * Handles Indian name initials ("K. S. Singh" vs "KS Singh") and uses role
+ * aliases when the name is missing or ambiguous.
  */
 export function matchPhonesToStakeholders(
   phones: ContactWithContext[],
@@ -419,35 +477,64 @@ export function matchPhonesToStakeholders(
   const matches = new Map<string, string>();
   if (phones.length === 0 || stakeholders.length === 0) return matches;
 
-  for (const st of stakeholders) {
-    if (!st.name?.trim()) continue;
+  // Prefer stakeholders with explicit, senior roles for tie-breaking
+  const sorted = [...stakeholders].sort((a, b) => {
+    const aHasName = a.name ? 1 : 0;
+    const bHasName = b.name ? 1 : 0;
+    if (aHasName !== bHasName) return bHasName - aHasName;
+    return 0;
+  });
 
-    const nameParts = st.name
-      .toLowerCase()
-      .replace(/[.,]/g, "")
-      .split(/\s+/)
-      .filter((p) => p.length > 0);
-    const roleLower = (st.role || "").toLowerCase();
+  for (const st of sorted) {
+    const nameTokens = normalizeNameTokens(st.name);
+    const namePatterns = buildNamePatterns(nameTokens);
+    const canonicalRole = normalizeStakeholderRole(st.role);
+    const roleText = normalizeRoleText(st.role);
+    const roleAliases = canonicalRole
+      ? [canonicalRole.toLowerCase(), roleText]
+      : [roleText];
 
     for (const phone of phones) {
-      // Skip if this phone is already matched
+      // Skip if this phone is already matched to a named person
       if (matches.has(phone.value)) continue;
 
       const ctx = phone.context;
       let score = 0;
 
-      // Name proximity: name parts appear in the phone's context
-      for (const part of nameParts) {
-        if (new RegExp(`\\b${part}\\b`).test(ctx)) score += 2;
+      // Name proximity: count how many name tokens appear in the phone's context
+      if (namePatterns.length > 0) {
+        let matchedTokens = 0;
+        for (const pattern of namePatterns) {
+          try {
+            if (new RegExp(pattern, "i").test(ctx)) matchedTokens++;
+          } catch {
+            // Ignore invalid regex from unusual tokens
+          }
+        }
+        // Score by fraction of unique tokens matched, not raw count
+        score += Math.min(matchedTokens, nameTokens.length * 2) * 2;
       }
 
-      // Role proximity: role appears in the phone's context
-      if (roleLower && ctx.includes(roleLower)) score += 1;
+      // Role proximity: canonical role or any alias appears
+      if (roleText) {
+        for (const alias of roleAliases) {
+          if (!alias) continue;
+          if (ctx.includes(alias)) {
+            score += 2;
+            break;
+          }
+        }
+      }
 
-      // If score is high enough, associate the phone
-      if (score >= 3 || (nameParts.length === 1 && score >= 2)) {
-        matches.set(phone.value, st.name);
-        break; // One phone per stakeholder
+      // Threshold: need at least 2 points with name match, or role-only with strong signal
+      const hasName = nameTokens.length > 0;
+      if (
+        (hasName && score >= 3) ||
+        (!hasName && roleText && score >= 2 && nameTokens.length === 0)
+      ) {
+        const label = st.name || st.role || "unknown";
+        matches.set(phone.value, label);
+        break; // One phone per stakeholder pass
       }
     }
   }

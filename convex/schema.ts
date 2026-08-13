@@ -61,6 +61,7 @@ export default defineSchema({
         hostelites_male: v.optional(v.number()),
         hostelites_female: v.optional(v.number()),
         source: v.optional(v.string()), // e.g., "AISHE 2022-23 AND NAAC SSR 2023"
+        source_urls: v.optional(v.array(v.string())),
         // ── Data quality tracking ────────────────────────────────────────────
         data_quality: v.optional(
           v.union(
@@ -112,6 +113,7 @@ export default defineSchema({
     is_primary: v.boolean(),
     source: v.optional(v.string()), // "scraper" | "serper" | "manual"
     source_type: v.optional(v.string()),
+    source_url: v.optional(v.string()),
     sources: v.optional(v.array(v.string())),
     last_enriched_source: v.optional(v.string()),
     change_log: v.optional(v.array(v.string())),

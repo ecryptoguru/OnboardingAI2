@@ -377,6 +377,17 @@ export const DEEP_ENRICHMENT_SCHEMA: Schema = {
           description:
             "AISHE/NAAC data provenance, e.g. 'AISHE 2022-23' or 'NAAC SSR 2023'",
         },
+        data_quality: {
+          type: Type.STRING,
+          nullable: true,
+          description: "One of: verified, partial, inferred",
+        },
+        source_urls: {
+          type: Type.ARRAY,
+          nullable: true,
+          description: "URLs that contributed the demographic values",
+          items: { type: Type.STRING },
+        },
       },
     },
     stakeholders: {
@@ -416,12 +427,44 @@ export const DEEP_ENRICHMENT_SCHEMA: Schema = {
             description:
               "Full LinkedIn URL from search results e.g. https://linkedin.com/in/username",
           },
+          source_url: {
+            type: Type.STRING,
+            nullable: true,
+            description:
+              "URL this stakeholder was extracted from, if known",
+          },
         },
       },
     },
   },
   required: ["demographics", "stakeholders"],
 };
+
+export const MERGE_PARTIALS_PROMPT = (targetRoles: string[]) =>
+  `
+You are merging partial JSON extractions from multiple sources about one university into a single, deduplicated JSON result. Each partial may contain stakeholders and/or demographics extracted from one source.
+
+STAKEHOLDER RULES:
+- Deduplicate by name (fuzzy match: "Dr. K. S. Singh", "K.S. Singh", "K S Singh" are the same) and/or email/phone.
+- Keep the most complete record (name, role, email, phone, linkedin_url, source_url).
+- Target roles: ${targetRoles.join(", ")}
+- Return at most 20 stakeholders total, prioritising decision-making roles and those with complete contact info.
+- Use only facts present in the partials. Do not invent.
+- If a person has multiple roles, keep the most senior / decision-maker role.
+- If a name is just a role (e.g. "Vice Chancellor") with no actual person name, set name to null.
+- Never output "N/A", "Unknown", etc. as a name; use null.
+- Do not extract government officials from UGC/AICTE/NAAC/NIRF pages.
+
+DEMOGRAPHIC RULES:
+- Combine NIRF numbers (nirf_total, nirf_male, nirf_female, nirf_programs) and AISHE/NAAC numbers (total_students, hostelites, day_scholars, etc.) from partials.
+- If sources conflict, prefer NIRF/NAAC/official university data over generic pages.
+- Ensure hostelites + day_scholars equals total_students if both known.
+- Use null for missing; never output 0 unless the source literally shows 0.
+
+SOURCE PROVENANCE:
+- For each final stakeholder, keep the most specific source_url from the partials.
+- For demographics, keep source_urls from the contributing partials.
+`.trim();
 
 export const REPLY_CLASSIFIER_SCHEMA: Schema = {
   type: Type.OBJECT,
