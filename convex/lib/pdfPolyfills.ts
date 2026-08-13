@@ -50,8 +50,18 @@ if (!g.Path2D) {
   } as unknown as typeof Path2D;
 }
 
-if (!g.Promise.withResolvers) {
-  g.Promise.withResolvers = function <T>() {
+interface PromiseWithResolversConstructor {
+  withResolvers?<T>(): {
+    promise: Promise<T>;
+    resolve: (value: T | PromiseLike<T>) => void;
+    reject: (reason?: unknown) => void;
+  };
+}
+
+const gPromise = g.Promise as unknown as PromiseWithResolversConstructor;
+
+if (!gPromise.withResolvers) {
+  gPromise.withResolvers = function <T>() {
     let resolve: (value: T | PromiseLike<T>) => void = () => {};
     let reject: (reason?: unknown) => void = () => {};
     const promise = new Promise<T>((res, rej) => {
