@@ -10,6 +10,14 @@ const nextConfig: NextConfig = {
   typescript: {
     ignoreBuildErrors: false,
   },
+  async rewrites() {
+    return [
+      {
+        source: "/favicon.ico",
+        destination: "/favicon.svg",
+      },
+    ];
+  },
   webpack: (config, { isServer }) => {
     config.infrastructureLogging = {
       level: "error",
