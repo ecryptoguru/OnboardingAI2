@@ -17,7 +17,10 @@ import {
   createSerperBudget,
   runWithSerperBudget,
 } from "../lib/serperBudget";
-import { DEEP_ENRICHMENT_SYNTHESIS_PROMPT, DEEP_ENRICHMENT_SCHEMA } from "../lib/prompts";
+import {
+  GOVERNMENT_DATA_SCHEMA,
+  GOVERNMENT_DATA_SYSTEM_PROMPT,
+} from "../lib/prompts";
 import {
   downloadPdfBuffer,
   extractPdfTables,
@@ -64,6 +67,44 @@ function hasAnyDemographicData(
   );
 }
 
+function isNirfProgramComplete(programs: Array<Record<string, unknown>>): boolean {
+  if (programs.length < 2) return false;
+  const names = programs.map((p) => String(p.name || "").toLowerCase());
+  const hasUg4 = names.some((n) => /ug.*?4/.test(n));
+  const hasUg5 = names.some((n) => /ug.*?5/.test(n));
+  const hasPg = names.some((n) => /pg/.test(n));
+  const hasPhd = names.some((n) => /phd|doctoral|research/.test(n));
+  // A complete institutional view should include UG 4-year, 5-year, PG, PhD or multiple PG rows.
+  const distinctCategories = [hasUg4, hasUg5, hasPg, hasPhd].filter(Boolean).length;
+  return distinctCategories >= 3 || (hasUg4 && hasPg) || (hasUg5 && hasPg && programs.length >= 3);
+}
+
+function sumProgramGender(programs: Array<Record<string, unknown>>): {
+  total: number;
+  male: number;
+  female: number;
+} {
+  let total = 0;
+  let male = 0;
+  let female = 0;
+  for (const program of programs) {
+    const totalVal = typeof program.total === "number" ? (program.total as number) : 0;
+    const maleVal = typeof program.male === "number" ? (program.male as number) : 0;
+    const femaleVal = typeof program.female === "number" ? (program.female as number) : 0;
+    if (totalVal > 0) {
+      total += totalVal;
+      male += maleVal;
+      female += femaleVal;
+    } else if (maleVal > 0 || femaleVal > 0) {
+      const rowTotal = maleVal + femaleVal;
+      total += rowTotal;
+      male += maleVal;
+      female += femaleVal;
+    }
+  }
+  return { total, male, female };
+}
+
 function applyDemographicSanity(
   demo: Record<string, unknown>,
   uniName: string,
@@ -84,7 +125,7 @@ function applyDemographicSanity(
     typeof demo.day_scholars_female === "number"
       ? (demo.day_scholars_female as number)
       : undefined;
-  const total =
+  let total =
     typeof demo.total_students === "number"
       ? (demo.total_students as number)
       : undefined;
@@ -106,21 +147,18 @@ function applyDemographicSanity(
     ? (demo.nirf_programs as Array<Record<string, unknown>>)
     : [];
 
-  if (!demo.total_students && male && female) {
-    demo.total_students = male + female;
+  if (!total && male && female) {
+    total = male + female;
+    demo.total_students = total;
   }
-  if (!demo.hostelites && hostelitesMale && hostelitesFemale) {
-    demo.hostelites = hostelitesMale + hostelitesFemale;
-  }
-  if (!demo.day_scholars && dayScholarsMale && dayScholarsFemale) {
-    demo.day_scholars = dayScholarsMale + dayScholarsFemale;
-  }
-
-  if (total && male && female && Math.abs(male + female - total) > 100) {
+  if (male && female && total && Math.abs(male + female - total) > 100) {
     console.warn(
       `[GovData] Rejecting inconsistent total_students for ${uniName}: male+female=${male + female}, total=${total}`,
     );
     delete demo.total_students;
+    delete demo.total_students_male;
+    delete demo.total_students_female;
+    total = undefined;
   }
 
   if (total && hostelites && dayScholars && Math.abs(hostelites + dayScholars - total) > 100) {
@@ -128,25 +166,99 @@ function applyDemographicSanity(
       `[GovData] Rejecting inconsistent total_students for ${uniName}: hostelites+day_scholars=${hostelites + dayScholars}, total=${total}`,
     );
     delete demo.total_students;
+    delete demo.total_students_male;
+    delete demo.total_students_female;
+    total = undefined;
   }
 
-  if (
-    typeof demo.nirf_total === "number" &&
-    nirfPrograms.length > 0
-  ) {
-    const declaredTotal = demo.nirf_total as number;
-    const programSum = nirfPrograms.reduce((sum, program) => {
-      const totalVal = typeof program.total === "number" ? (program.total as number) : 0;
-      const maleVal = typeof program.male === "number" ? (program.male as number) : 0;
-      const femaleVal = typeof program.female === "number" ? (program.female as number) : 0;
-      return sum + (totalVal || maleVal + femaleVal);
-    }, 0);
-    if (programSum > 0 && Math.abs(programSum - declaredTotal) > 100) {
-      console.warn(
-        `[GovData] Replacing inconsistent nirf_total for ${uniName}: declared=${declaredTotal}, derived=${programSum}`,
-      );
-      demo.nirf_total = programSum;
+  // ── Reconcile NIRF program rows with nirf_total / nirf_male / nirf_female ─
+  if (nirfPrograms.length > 0) {
+    const { total: programTotal, male: programMale, female: programFemale } =
+      sumProgramGender(nirfPrograms);
+    const declaredTotal = typeof demo.nirf_total === "number" ? (demo.nirf_total as number) : 0;
+
+    if (programTotal > 0) {
+      if (!declaredTotal || Math.abs(programTotal - declaredTotal) > 50) {
+        console.warn(
+          `[GovData] Aligning nirf_total for ${uniName}: declared=${declaredTotal}, derived=${programTotal}`,
+        );
+      }
+      demo.nirf_total = programTotal;
+      demo.nirf_male = programMale;
+      demo.nirf_female = programFemale;
     }
+
+    const nirfComplete = isNirfProgramComplete(nirfPrograms);
+    if (!nirfComplete && programTotal > 0 && programTotal < 1000) {
+      console.warn(
+        `[GovData] NIRF data for ${uniName} looks like a partial category (programTotal=${programTotal}); removing it as an institutional total.`,
+      );
+      delete demo.nirf_total;
+      delete demo.nirf_male;
+      delete demo.nirf_female;
+      delete demo.nirf_programs;
+      delete demo.nirf_source;
+    }
+  }
+
+  // ── Cross-source reconciliation: NIRF vs AISHE/NAAC total_students ──────
+  const nirfTotal = typeof demo.nirf_total === "number" ? (demo.nirf_total as number) : undefined;
+  const nirfMale = typeof demo.nirf_male === "number" ? (demo.nirf_male as number) : undefined;
+  const nirfFemale =
+    typeof demo.nirf_female === "number" ? (demo.nirf_female as number) : undefined;
+
+  if (nirfTotal !== undefined && nirfTotal > 1000) {
+    if (total !== undefined) {
+      const diff = Math.abs(nirfTotal - total);
+      const relativeDiff = diff / Math.max(nirfTotal, total);
+      if (nirfTotal > total * 1.5 && (diff > 1000 || relativeDiff > 0.25)) {
+        console.warn(
+          `[GovData] total_students ${total} is much smaller than NIRF ${nirfTotal} for ${uniName}; preferring NIRF.`,
+        );
+        demo.total_students = nirfTotal;
+        if (nirfMale !== undefined && nirfFemale !== undefined) {
+          demo.total_students_male = nirfMale;
+          demo.total_students_female = nirfFemale;
+        }
+        demo.data_quality = "partial";
+        demo.source = String(demo.nirf_source || demo.source || "nirf");
+      } else if (diff > 100) {
+        // Both totals are present and plausible but disagree; flag as partial.
+        console.warn(
+          `[GovData] NIRF total (${nirfTotal}) and AISHE/NAAC total (${total}) differ for ${uniName}; data_quality=partial.`,
+        );
+        demo.data_quality = "partial";
+      }
+    } else if (nirfMale !== undefined && nirfFemale !== undefined) {
+      // No AISHE/NAAC total but NIRF is complete; use NIRF.
+      demo.total_students = nirfTotal;
+      demo.total_students_male = nirfMale;
+      demo.total_students_female = nirfFemale;
+      demo.data_quality = "verified";
+      demo.source = String(demo.nirf_source || demo.source || "nirf");
+    }
+  }
+
+  // ── Derive sub-totals from gender splits when only splits exist ──────────
+  if (!demo.hostelites && hostelitesMale && hostelitesFemale) {
+    demo.hostelites = hostelitesMale + hostelitesFemale;
+  }
+  if (!demo.day_scholars && dayScholarsMale && dayScholarsFemale) {
+    demo.day_scholars = dayScholarsMale + dayScholarsFemale;
+  }
+
+  // ── Final consistency check on splits ───────────────────────────────────
+  const finalTotal = typeof demo.total_students === "number" ? (demo.total_students as number) : undefined;
+  const finalMale = typeof demo.total_students_male === "number" ? (demo.total_students_male as number) : undefined;
+  const finalFemale =
+    typeof demo.total_students_female === "number" ? (demo.total_students_female as number) : undefined;
+  if (finalTotal && finalMale && finalFemale && Math.abs(finalMale + finalFemale - finalTotal) > 100) {
+    console.warn(
+      `[GovData] Post-reconcile gender mismatch for ${uniName}: male+female=${finalMale + finalFemale}, total=${finalTotal}`,
+    );
+    delete demo.total_students_male;
+    delete demo.total_students_female;
+    if (demo.data_quality === "verified") demo.data_quality = "partial";
   }
 }
 
@@ -261,9 +373,10 @@ export const enrichGovernmentData = internalAction({
 
       // ─── Phase 1: Discover external government sources via Serper ─────────
       const queries = [
-        `${uniName} NIRF student strength enrollment`,
-        `${uniName} site:nirfindia.org NIRF PDF`,
-        `${uniName} AISHE enrollment data`,
+        `${uniName} NIRF engineering ranking 2024 2025 student strength`,
+        `${uniName} site:nirfindia.org/rankings NIRF`,
+        `${uniName} site:nirfindia.org PDF NIRF student strength`,
+        `${uniName} AISHE enrollment data total students`,
         `${uniName} site:aishe.gov.in AISHE PDF`,
         `${uniName} NAAC SSR hostelite student data`,
         `${uniName} site:naac.gov.in NAAC SSR PDF`,
@@ -312,9 +425,12 @@ export const enrichGovernmentData = internalAction({
               const url = r.link.toLowerCase();
               const titleSnippet = ((r.title || "") + " " + (r.snippet || "")).toLowerCase();
               if (url.includes("nirfindia.org")) score += 10;
+              if (url.includes("nirfindia.org/rankings") || url.includes("nirfindia.org/engranking")) score += 6;
               if (url.includes("aishe.gov.in")) score += 10;
               if (url.includes("naac.gov.in")) score += 8;
               if (/\b(nirf|ranking|student.*strength|enrollment)\b/i.test(titleSnippet)) score += 5;
+              if (/\b(engineering|overall|student strength|total students)\b/i.test(titleSnippet)) score += 4;
+              if (/\b(architecture|planning)\b/i.test(titleSnippet)) score -= 3;
               if (/\b(hostel|hostelite|day scholar)\b/i.test(titleSnippet)) score += 5;
               if (url.endsWith(".pdf")) score += 2;
               if (score > 0) allUrls.push({ url: r.link, score });
@@ -421,7 +537,10 @@ export const enrichGovernmentData = internalAction({
             `total_students (number), total_students_male (number), ` +
             `total_students_female (number), hostelites (number or null), hostelites_male (number or null), ` +
             `hostelites_female (number or null), day_scholars (number or null), day_scholars_male (number or null), ` +
-            `day_scholars_female (number or null). Use null for missing values. Do not include any explanation.`;
+            `day_scholars_female (number or null), ` +
+            `nirf_total (number or null), nirf_male (number or null), nirf_female (number or null), ` +
+            `nirf_source (string or null, e.g. "NIRF 2024-25"). ` +
+            `Use null for missing values. Do not include any explanation.`;
           const groundingResponse = await aiClient.models.generateContent({
             model: MODELS.geminiFlash,
             contents: {
@@ -465,6 +584,13 @@ export const enrichGovernmentData = internalAction({
             day_scholars: toNum(groundingParsed.day_scholars),
             day_scholars_male: toNum(groundingParsed.day_scholars_male),
             day_scholars_female: toNum(groundingParsed.day_scholars_female),
+            nirf_total: toNum(groundingParsed.nirf_total),
+            nirf_male: toNum(groundingParsed.nirf_male),
+            nirf_female: toNum(groundingParsed.nirf_female),
+            nirf_source:
+              typeof groundingParsed.nirf_source === "string"
+                ? groundingParsed.nirf_source
+                : undefined,
             source: "government_data_enrichment_gemini_grounding",
             data_quality: "inferred",
           };
@@ -509,7 +635,7 @@ EXTRACT ONLY official government demographic data from the sources below.
 Data sources include NIRF ranking pages, AISHE enrollment data, NAAC SSR reports, Anti-Ragging disclosures, and Mandatory Disclosure documents.
 
 CRITICAL EXTRACTION TARGETS:
-1. NIRF program tables: program name, male count, female count, total count
+1. NIRF program tables: program name, male count, female count, total count. Prefer the NIRF engineering/overall ranking table, not architecture-only or department-only tables.
 2. HOSTELITE DATA: Total hostelites, male hostelites, female hostelites (search for "hostelites", "hostellers", "Boys Hostel", "Girls Hostel", "residential students", "hostel capacity")
 3. DAY SCHOLAR DATA: Total day scholars, male day scholars, female day scholars (search for "day scholars", "day students", "non-residential")
 4. OVERALL TOTALS: total_students, total_students_male, total_students_female
@@ -518,6 +644,9 @@ RULES:
 - ONLY extract data from official government sources (NIRF, AISHE, NAAC, Mandatory Disclosure, Anti-Ragging).
 - REJECT any data from university "About Us" or marketing pages.
 - Use null for missing values, never 0.
+- Extract EVERY NIRF program row: UG (4 Years), UG (5 Years), PG (2 Years), PG-Integrated, PhD, etc.
+- Compute nirf_total, nirf_male and nirf_female by summing the program rows; do NOT copy a separate summary row if it disagrees with the row sum.
+- Record the NIRF data year in nirf_source (e.g. "NIRF 2024-25").
 - If NIRF tables have "Hostellers" and "Day Scholars" columns, extract those too.
 - If NAAC SSR "Criterion 2" or "Criterion 4" tables show hostel/day scholar splits, extract them.
 - If hostelites + day_scholars does not approximately equal total_students, prefer the split values and set total_students to null.
@@ -530,11 +659,11 @@ ${contextBlocks.join("\n\n")}
       const extractionResult = await callGeminiWithUsage({
         apiKey,
         model: MODELS.geminiFlash,
-        systemPrompt: DEEP_ENRICHMENT_SYNTHESIS_PROMPT([]),
+        systemPrompt: GOVERNMENT_DATA_SYSTEM_PROMPT,
         userPrompt: prompt,
         temperature: 0.05,
         responseAsJson: true,
-        responseSchema: DEEP_ENRICHMENT_SCHEMA,
+        responseSchema: GOVERNMENT_DATA_SCHEMA,
         maxOutputTokens: 4096,
         label: "gov_data_structured_extraction",
         ctx,
@@ -559,8 +688,15 @@ ${contextBlocks.join("\n\n")}
         hostelites: toNum(demographics.hostelites),
         hostelites_male: toNum(demographics.hostelites_male),
         hostelites_female: toNum(demographics.hostelites_female),
-        source: "government_data_enrichment",
+        source:
+          typeof demographics.source === "string" && demographics.source
+            ? demographics.source
+            : "government_data_enrichment",
         data_quality: "verified",
+        source_urls: Array.isArray(demographics.source_urls)
+          ? demographics.source_urls.filter((u: unknown) => typeof u === "string")
+          : undefined,
+        nirf_source: typeof demographics.nirf_source === "string" ? demographics.nirf_source : undefined,
         nirf_total: toNum(demographics.nirf_total),
         nirf_male: toNum(demographics.nirf_male),
         nirf_female: toNum(demographics.nirf_female),
@@ -611,7 +747,10 @@ ${contextBlocks.join("\n\n")}
                 `total_students (number), total_students_male (number), ` +
                 `total_students_female (number), hostelites (number or null), hostelites_male (number or null), ` +
                 `hostelites_female (number or null), day_scholars (number or null), day_scholars_male (number or null), ` +
-                `day_scholars_female (number or null). Use null for missing values. Do not include any explanation.`;
+                `day_scholars_female (number or null), ` +
+                `nirf_total (number or null), nirf_male (number or null), nirf_female (number or null), ` +
+                `nirf_source (string or null, e.g. "NIRF 2024-25"). ` +
+                `Use null for missing values. Do not include any explanation.`;
               const groundingResponse = await aiClient.models.generateContent({
                 model: MODELS.geminiFlash,
                 contents: {
@@ -694,6 +833,21 @@ ${contextBlocks.join("\n\n")}
                   toNum(parsed.day_scholars_female)! > 50
                 ) {
                   demo.day_scholars_female = toNum(parsed.day_scholars_female);
+                }
+                if (parsed.nirf_total && toNum(parsed.nirf_total)! > 100) {
+                  demo.nirf_total = toNum(parsed.nirf_total);
+                }
+                if (parsed.nirf_male && toNum(parsed.nirf_male)! > 50) {
+                  demo.nirf_male = toNum(parsed.nirf_male);
+                }
+                if (parsed.nirf_female && toNum(parsed.nirf_female)! > 50) {
+                  demo.nirf_female = toNum(parsed.nirf_female);
+                }
+                if (
+                  typeof parsed.nirf_source === "string" &&
+                  parsed.nirf_source
+                ) {
+                  demo.nirf_source = parsed.nirf_source;
                 }
                 demo.source = "government_data_enrichment_gemini_grounding";
                 demo.data_quality = "inferred";

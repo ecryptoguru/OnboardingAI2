@@ -294,6 +294,118 @@ Before producing the final JSON, mentally verify:
 Only after passing these checks, output the final JSON.
 `.trim();
 
+export const GOVERNMENT_DATA_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    demographics: {
+      type: Type.OBJECT,
+      description:
+        "Student population data extracted from NIRF, AISHE, NAAC SSR, Mandatory Disclosure and Anti-Ragging documents. Use null for missing values — NEVER use 0 for a missing field.",
+      properties: {
+        // ── NIRF Block: program-wise student strength ───────────────────────
+        nirf_source: {
+          type: Type.STRING,
+          nullable: true,
+          description: "NIRF data year, e.g. 'NIRF 2023-24' or 'NIRF 2024-25'",
+        },
+        nirf_total: {
+          type: Type.NUMBER,
+          nullable: true,
+          description:
+            "Sum of all program rows Male+Female. Compute this by adding every row.",
+        },
+        nirf_male: {
+          type: Type.NUMBER,
+          nullable: true,
+          description: "Sum of all Male values across all program rows.",
+        },
+        nirf_female: {
+          type: Type.NUMBER,
+          nullable: true,
+          description: "Sum of all Female values across all program rows.",
+        },
+        nirf_programs: {
+          type: Type.ARRAY,
+          nullable: true,
+          description:
+            "One entry per NIRF program row. Extract EVERY row — UG (4 Years), UG (5 Years), PG (2 Years), PG-Integrated, PhD, etc.",
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              name: {
+                type: Type.STRING,
+                description:
+                  "Program name exactly as in NIRF table, e.g. UG (4 Years), PG (2 Years), PhD",
+              },
+              male: { type: Type.NUMBER, nullable: true },
+              female: { type: Type.NUMBER, nullable: true },
+              total: {
+                type: Type.NUMBER,
+                nullable: true,
+                description: "male + female for this row",
+              },
+            },
+          },
+        },
+        // ── AISHE / NAAC SSR Block: hostelite breakdown ──────────────────────
+        total_students: {
+          type: Type.NUMBER,
+          nullable: true,
+          description: "Total enrolled students from AISHE or NAAC SSR data.",
+        },
+        total_students_male: { type: Type.NUMBER, nullable: true },
+        total_students_female: { type: Type.NUMBER, nullable: true },
+        day_scholars: {
+          type: Type.NUMBER,
+          nullable: true,
+          description:
+            "Day scholars from NAAC SSR Criterion 2.1, anti-ragging page, or Mandatory Disclosure. Do NOT output 0 if not found.",
+        },
+        day_scholars_male: { type: Type.NUMBER, nullable: true },
+        day_scholars_female: { type: Type.NUMBER, nullable: true },
+        hostelites: {
+          type: Type.NUMBER,
+          nullable: true,
+          description:
+            "Hostelites from NAAC SSR Criterion 2.1 or AISHE. Do NOT output 0 if not found.",
+        },
+        hostelites_male: { type: Type.NUMBER, nullable: true },
+        hostelites_female: { type: Type.NUMBER, nullable: true },
+        source: {
+          type: Type.STRING,
+          nullable: true,
+          description:
+            "AISHE/NAAC data provenance, e.g. 'AISHE 2022-23' or 'NAAC SSR 2023'",
+        },
+        data_quality: {
+          type: Type.STRING,
+          nullable: true,
+          description: "One of: verified, partial, inferred",
+        },
+        source_urls: {
+          type: Type.ARRAY,
+          nullable: true,
+          description: "URLs that contributed the demographic values",
+          items: { type: Type.STRING },
+        },
+      },
+    },
+  },
+  required: ["demographics"],
+};
+
+export const GOVERNMENT_DATA_SYSTEM_PROMPT = `
+You are an expert data-extraction assistant for Indian higher-education institutions.
+Your job is to read government and official disclosure documents (NIRF, AISHE, NAAC SSR, Mandatory Disclosure, Anti-Ragging) and return ONLY a JSON object matching the schema.
+
+RULES:
+- Extract ONLY numbers that are explicitly shown in the provided source content.
+- Use null for missing values. NEVER output 0 for missing data.
+- NIRF tables: extract EVERY program row including UG (4 Years), UG (5 Years), PG (2 Years), PG-Integrated and PhD. Do not skip rows.
+- If a source has both NIRF program totals and an AISHE/NAAC overall total, return both; do not force them to match if they come from different years.
+- Do not invent, infer or round numbers.
+`.trim();
+
 export const DEEP_ENRICHMENT_SCHEMA: Schema = {
   type: Type.OBJECT,
   properties: {

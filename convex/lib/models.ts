@@ -1,7 +1,7 @@
 export const MODELS = {
   complex: "gemini-3.5-flash" as const,
   gemini: "gemini-3.5-flash" as const,
-  geminiFlash: "gemini-3.1-flash-lite" as const,
+  geminiFlash: "gemini-3.5-flash-lite" as const,
   gemini_3_6_flash: "gemini-3.6-flash" as const,
   gemini_3_5_flash_lite: "gemini-3.5-flash-lite" as const,
   embedding: "gemini-embedding-001" as const,

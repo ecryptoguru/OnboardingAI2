@@ -17,10 +17,10 @@
 
 | University | Stakeholders (v3 dry-run) | Stakeholders (v2 dry-run) | Demographics (v3) | Demographics (v2) | LLM cost (v3) | LLM cost (v2) | Firecrawl credits | Full-orchestrator LLM cost |
 |---|---:|---:|---|---|---:|---:|---:|---:|
-| NIT Delhi | 14 | 15 | none | none | $0.0254 | $0.0304 | 7 | $0.0167 |
-| VNIT Nagpur | 6 | 7 | none | none | $0.0174 | $0.0289 | 7 | $0.0436 |
-| Anna University | 13 | 2 | none | none | $0.0218 | $0.0233 | 7 | $0.0168 |
-| **Total** | **33** | **24** | **none** | **none** | **$0.0645** | **$0.0826** | **21** | **$0.0771** |
+| NIT Delhi | 14 | 15 | **6,897** | none | $0.0254 | $0.0304 | 7 | $0.0167 |
+| VNIT Nagpur | 6 | 7 | **4,635** | none | $0.0174 | $0.0289 | 7 | $0.0436 |
+| Anna University | 13 | 2 | **11,940** | none | $0.0218 | $0.0233 | 7 | $0.0168 |
+| **Total** | **33** | **24** | **verified** | **none** | **$0.0645** | **$0.0826** | **21** | **$0.0771** |
 
 v3 improves on v2 in every dimension:
 - **+9 total stakeholders** extracted (33 vs 24), with a much higher decision-maker ratio.
@@ -35,6 +35,7 @@ v3 improves on v2 in every dimension:
 ### 1. Model routing
 - Per-source extraction now uses `gemini-3.5-flash-lite`.
 - Merge/synthesis now uses `gemini-3.6-flash` with a `gemini-3.5-flash` fallback.
+- Government data extraction and the scraper fallback now use the updated `gemini-3.5-flash-lite` alias.
 - Model-specific pricing and thinking-level handling updated in `convex/lib/llm.ts`.
 
 ### 2. Caching
@@ -206,7 +207,27 @@ v3 improves on v2 in every dimension:
 
 ---
 
-## 4. Side-by-side comparison with v2
+## 4. Government data extraction after v3 fixes
+
+After upgrading `enrichGovernmentData` to `gemini-3.5-flash-lite`, tightening cross-source sanity checks, and improving NIRF search scoring, the government-data pipeline was re-run for the three test universities.
+
+| University | data_quality | source | total_students | male | female | nirf_total | nirf_programs | source_url(s) | LLM cost |
+|---|---|---|---|---:|---:|---:|---|---|---|---:|
+| NIT Delhi | verified | NIRF 2024-25 | 6,897 | 5,488 | 1,409 | 6,897 | UG 4 yrs, UG 5 yrs, PG 2 yrs | [Engineering PDF](https://www.nirfindia.org/nirfpdfcdn/2025/pdf/Engineering/IR-E-I-1074.pdf) | $0.00699 |
+| VNIT Nagpur | verified | NIRF 2024-25 | 4,635 | 3,593 | 1,042 | 4,635 | UG 4 yrs, UG 5 yrs, PG 2 yrs (×2), PhD | [Engineering PDF](https://www.nirfindia.org/nirfpdfcdn/2025/pdf/Engineering/IR-E-U-0334.pdf), [Architecture PDF](https://www.nirfindia.org/nirfpdfcdn/2025/pdf/Architecture/IR-A-U-0334.pdf) | $0.01461 |
+| Anna University | verified | NIRF 2024-25 | 11,940 | 7,096 | 4,844 | 11,940 | UG 4 yrs, UG 5 yrs, PG 2 yrs, PG-Integrated | [University PDF](https://www.nirfindia.org/nirfpdfcdn/2025/pdf/University/IR-O-U-0439.pdf) | $0.00537 |
+
+### What changed
+- `enrichGovernmentData` now uses `gemini-3.5-flash-lite` instead of `gemini-3.1-flash-lite`.
+- A dedicated `GOVERNMENT_DATA_SCHEMA` and `GOVERNMENT_DATA_SYSTEM_PROMPT` replaced the stakeholder-focused prompt, reducing token waste and hallucination.
+- `nirf_total`, `nirf_male`, and `nirf_female` are recomputed from `nirf_programs` rows; if a summary total disagrees with the program sum, the program sum wins.
+- NIRF data is rejected as an institutional total when it looks like a partial category (e.g. only Architecture/Planning rows).
+- Cross-source checks now prefer a complete NIRF total over an under-counted AISHE/NAAC `total_students`; this fixed the NIT Delhi case where the old `total_students` was only 699 vs NIRF 6,897.
+
+### Result
+All three universities now have **verified, internally consistent NIRF 2024-25 demographics** with gender splits and source URLs. The total LLM spend for the three government-data runs was **$0.02697**.
+
+## 5. Side-by-side comparison with v2
 
 | Metric | v2 | v3 | Change |
 |---|---:|---:|---|
@@ -239,14 +260,14 @@ The pipeline is now both cheaper and more productive.
 ### Known issues / residual risks
 1. **Legacy low-quality stakeholders remain in the DB.** Old runs (especially VNIT and NIT) left staff, scraper, and a Scribd-sourced record. These were not purged by the orchestrator. A one-time cleanup or a `last_enriched_at` filter in the outreach UI would help.
 2. **VNIT full-orchestrator cost was higher than expected ($0.0436).** This came from (a) government-data extraction emitting a very large output and (b) deep enrichment missing the cache because the website was re-discovered. Once the cache is warm, the deep portion drops to near $0.
-3. **No deep-enrichment demographics yet.** The per-source/merge extraction does not reliably pull NIRF/hostelite/day-scholar numbers. Government-data enrichment still provides verified demographics for universities where it succeeds.
-4. **Scraper and government-data paths still use `gemini-3.1-flash-lite`.** Only the deep-enrichment per-source and merge paths were upgraded. If the goal is full-model migration, `convex/lib/models.ts` `geminiFlash` and `gemini` aliases should also be moved to the 3.x family, with a cost/quality check.
+3. **Demographics come from `enrichGovernmentData`, not deep enrichment.** The per-source/merge pipeline is not yet reliable for NIRF/hostelite/day-scholar numbers; government-data extraction now consistently provides verified NIRF 2024-25 totals for the three test universities.
+4. **PDF table extraction is still broken in the Convex isolate.** `pdf-parse` / `pdfjs-dist` fail with `DOMMatrix is not defined`; the Jina Reader fallback handles many NIRF PDFs, but engineering a dedicated PDF dependency fix may be needed if Jina can't reach .gov.in content.
 5. **Firecrawl rate limits.** Re-running many universities in quick succession triggers 429s; the retry logic handles this, but throughput is gated.
 
 ### Recommended immediate actions
-- Run `npx convex run actions/wipeEnrichment:purgeBadDemographics` if stale demographics need cleaning (verify first).
 - Review and, if desired, remove legacy support-staff stakeholders for the three test universities before broader rollout.
-- Decide whether to upgrade `scraper` and `government-data` model aliases to `gemini-3.5-flash-lite` and re-measure.
+- Decide whether to extend the new demographics to hostelite / day-scholar fields once the source PDFs are reliably parsed.
+- Fix the in-isolate PDF dependency issue (`@napi-rs/canvas` / `DOMMatrix`) if .gov.in PDFs become unreachable to Jina Reader.
 
 ---
 
