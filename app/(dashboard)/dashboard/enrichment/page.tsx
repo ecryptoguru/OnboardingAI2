@@ -2,11 +2,26 @@
 
 import { useQuery, useAction } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Id, Doc } from "../../../../convex/_generated/dataModel";
 import dynamic from "next/dynamic";
 import { useRequireGeminiKey } from "../../../../components/ApiKeyModal";
 import { MagnifyingGlassIcon } from "@heroicons/react/24/outline";
+
+function normalizeName(name: string) {
+  return name.toLowerCase().replace(/[^a-z0-9]/g, "").trim();
+}
+
+function dedupeUniversities(unis: Doc<"universities">[] | undefined) {
+  if (!unis) return unis;
+  const seen = new Set<string>();
+  return unis.filter((u) => {
+    const key = `${normalizeName(u.university_name)}|${(u.state || "").toLowerCase().trim()}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
 
 const UniversityDetail = dynamic(
   () =>
@@ -20,10 +35,19 @@ export default function EnrichmentPage() {
   const [selectedId, setSelectedId] = useState<Id<"universities"> | null>(null);
 
   // Custom filter if needed, but we can use the existing list with stage param
-  const newUniversities = useQuery(api.universities.list, { stage: "new" });
-  const enrichedUniversities = useQuery(api.universities.list, {
+  const rawNewUniversities = useQuery(api.universities.list, { stage: "new" });
+  const rawEnrichedUniversities = useQuery(api.universities.list, {
     stage: "enriched",
   });
+
+  const newUniversities = useMemo(
+    () => dedupeUniversities(rawNewUniversities),
+    [rawNewUniversities],
+  );
+  const enrichedUniversities = useMemo(
+    () => dedupeUniversities(rawEnrichedUniversities),
+    [rawEnrichedUniversities],
+  );
 
   const runDeepEnrichment = useAction(
     api.actions.orchestrator.runEnrichmentChain,

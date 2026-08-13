@@ -195,7 +195,7 @@ export const getStats = query({
     await validateAuth(ctx);
 
     // Use index-scoped collects per type to avoid a full table scan.
-    const [central, state, priv, deemed, other] = await Promise.all([
+    const [central, state, priv, deemed, ini, other] = await Promise.all([
       ctx.db
         .query("universities")
         .withIndex("by_type", (q) => q.eq("type", "Central"))
@@ -214,6 +214,11 @@ export const getStats = query({
       ctx.db
         .query("universities")
         .withIndex("by_type", (q) => q.eq("type", "Deemed"))
+        .collect()
+        .then((r) => r.length),
+      ctx.db
+        .query("universities")
+        .withIndex("by_type", (q) => q.eq("type", "INI"))
         .collect()
         .then((r) => r.length),
       ctx.db
@@ -252,7 +257,7 @@ export const getStats = query({
     ]);
 
     const all = newCount + enriching + enriched + sequencing + outreachActive + replied + meetingBooked + proposalSent + closed + notInterested + skipped;
-    const allWithType = central + state + priv + deemed + other;
+    const allWithType = central + state + priv + deemed + ini + other;
 
     return {
       All: all,
@@ -260,6 +265,7 @@ export const getStats = query({
       State: state,
       Private: priv,
       Deemed: deemed,
+      INI: ini,
       Other: all - allWithType + other,
     };
   },

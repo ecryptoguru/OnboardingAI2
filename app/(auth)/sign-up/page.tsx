@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuthActions } from "@convex-dev/auth/react";
+import { RedirectIfAuthenticated } from "@/components/RedirectIfAuthenticated";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -21,7 +22,6 @@ export default function SignUpPage() {
       email: emailValue,
       password: formData.get("password") as string,
       flow: formData.get("flow") as string,
-      redirectTo: "/dashboard",
     })
       .catch((err: Error) => {
         console.error(err);
@@ -44,7 +44,9 @@ export default function SignUpPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <>
+      <RedirectIfAuthenticated />
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="text-4xl mb-3">🎸</div>
@@ -107,5 +109,6 @@ export default function SignUpPage() {
         </p>
       </div>
     </div>
+  </>
   );
 }

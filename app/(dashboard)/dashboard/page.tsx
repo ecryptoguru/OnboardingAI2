@@ -100,6 +100,7 @@ export default function UniversitiesPage() {
     "State",
     "Private",
     "Deemed",
+    "INI",
     "Other",
   ] as const;
 
@@ -289,18 +290,18 @@ export default function UniversitiesPage() {
                   <td className="px-6 py-4">
                     <span
                       className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
-                        uni.type === "Central"
+                        uni.type === "Central" || uni.type === "Private"
                           ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
                           : uni.type === "State"
                             ? "bg-blue-500/10 text-blue-400 border border-blue-500/20"
-                            : uni.type === "Private"
-                              ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/20"
-                              : uni.type === "Deemed"
-                                ? "bg-orange-500/10 text-orange-400 border border-orange-500/20"
+                            : uni.type === "Deemed"
+                              ? "bg-orange-500/10 text-orange-400 border border-orange-500/20"
+                              : uni.type === "INI"
+                                ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
                                 : "bg-muted text-muted-foreground border border-card-border/50"
                       }`}
                     >
-                      {uni.type || "Other"}
+                      {(uni.type === "INI" && uni.category) || uni.type || "Other"}
                     </span>
                   </td>
                   <td className="px-6 py-4">

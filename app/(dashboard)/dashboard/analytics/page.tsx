@@ -139,9 +139,12 @@ export default function AnalyticsPage() {
               color: "text-amber-400",
             },
             {
-              label: "High Tier Leads",
-              value: funnel?.highTier?.toLocaleString() ?? "—",
-              sub: `${funnel?.mediumTier ?? 0} Medium tier`,
+              label: "Tiered Leads",
+              value:
+                funnel && (funnel.highTier ?? 0) + (funnel.mediumTier ?? 0) > 0
+                  ? ((funnel?.highTier ?? 0) + (funnel?.mediumTier ?? 0)).toLocaleString()
+                  : "—",
+              sub: `${funnel?.highTier ?? 0} High · ${funnel?.mediumTier ?? 0} Medium`,
               color: "text-blue-400",
             },
             {

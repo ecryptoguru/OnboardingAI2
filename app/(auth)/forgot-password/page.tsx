@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuthActions } from "@convex-dev/auth/react";
+import { RedirectIfAuthenticated } from "@/components/RedirectIfAuthenticated";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -17,6 +18,18 @@ export default function ForgotPasswordPage() {
     setError("");
     const formData = new FormData(e.currentTarget);
     const emailValue = (formData.get("email") as string).trim().toLowerCase();
+
+    if (!emailValue) {
+      setError("Please enter your email address.");
+      setLoading(false);
+      return;
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailValue)) {
+      setError("Please enter a valid email address.");
+      setLoading(false);
+      return;
+    }
 
     try {
       await signIn("password", { flow: "reset", email: emailValue });
@@ -45,7 +58,9 @@ export default function ForgotPasswordPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
+    <>
+      <RedirectIfAuthenticated />
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="text-4xl mb-3">🎸</div>
@@ -116,5 +131,6 @@ export default function ForgotPasswordPage() {
         )}
       </div>
     </div>
+  </>
   );
 }

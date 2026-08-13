@@ -1,6 +1,7 @@
 "use client";
 
 import { useAuthActions } from "@convex-dev/auth/react";
+import { RedirectIfAuthenticated } from "@/components/RedirectIfAuthenticated";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useState, useEffect, Suspense } from "react";
@@ -29,14 +30,26 @@ function ResetPasswordForm() {
     setLoading(true);
     setError("");
 
-    if (password !== confirmPassword) {
-      setError("Passwords do not match.");
+    if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) {
+      setError("Please enter a valid email address.");
+      setLoading(false);
+      return;
+    }
+
+    if (!code.trim()) {
+      setError("Please enter the reset code from your email.");
       setLoading(false);
       return;
     }
 
     if (password.length < 8) {
       setError("Password must be at least 8 characters.");
+      setLoading(false);
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setError("Passwords do not match.");
       setLoading(false);
       return;
     }
@@ -176,8 +189,10 @@ function ResetPasswordForm() {
 
 export default function ResetPasswordPage() {
   return (
-    <div className="min-h-screen bg-background flex items-center justify-center p-4">
-      <div className="w-full max-w-sm">
+    <>
+      <RedirectIfAuthenticated />
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="text-4xl mb-3">🎸</div>
           <h1 className="text-2xl font-bold text-foreground">Reset password</h1>
@@ -191,5 +206,6 @@ export default function ResetPasswordPage() {
         </Suspense>
       </div>
     </div>
+  </>
   );
 }

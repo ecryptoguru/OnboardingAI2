@@ -41,7 +41,7 @@ export default defineSchema({
     vc_name: v.optional(v.string()),
     registrar_name: v.optional(v.string()),
     student_count: v.optional(v.number()),
-    type: v.optional(v.string()), // "Private" | "Public" | "Deemed" | "Central" | "State" | "Other"
+    type: v.optional(v.string()), // "Private" | "Public" | "Deemed" | "Central" | "State" | "INI" | "Other"
     category: v.optional(v.string()), // "IIT" | "NIT" | "IIIT"
     data_source: v.optional(v.string()), // "ugc" | "curated" | "csv" | "manual"
     naac_grade: v.optional(v.string()),

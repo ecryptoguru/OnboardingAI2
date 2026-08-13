@@ -15,7 +15,7 @@ export type InstituteOfNationalImportance =
   (typeof INSTITUTES_OF_NATIONAL_IMPORTANCE)[number];
 
 type CuratedInstitute = InstituteOfNationalImportance & {
-  type: "Other";
+  type: "INI";
   data_source: "curated";
 };
 
@@ -135,7 +135,7 @@ async function doSync(ctx: ActionCtx): Promise<SyncResult> {
         normalizeUrlDomain(record.website) !==
           normalizeUrlDomain(institute.website) ||
         record.established_year !== institute.established_year ||
-        record.type !== "Other" ||
+        record.type !== "INI" ||
         record.category !== institute.category ||
         record.data_source !== "curated" ||
         needsWebsiteStatusFix;
@@ -149,14 +149,14 @@ async function doSync(ctx: ActionCtx): Promise<SyncResult> {
       updates.push({
         id: record._id as Id<"universities">,
         ...institute,
-        type: "Other",
+        type: "INI",
         data_source: "curated",
         website_status: expectedWebsiteStatus,
       });
     } else {
       inserts.push({
         ...institute,
-        type: "Other",
+        type: "INI",
         data_source: "curated",
       });
     }
