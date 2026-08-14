@@ -8,6 +8,11 @@ import { Id, Doc } from "../_generated/dataModel";
 import { callGeminiWithUsage, type LlmUsageSummary } from "../lib/llm";
 import { MODELS, TEMP } from "../lib/models";
 import { STAKEHOLDERS_SCHEMA } from "../lib/prompts";
+import {
+  downloadPdfBuffer,
+  extractPdfTables,
+  extractPdfText,
+} from "../lib/scrapers";
 
 interface TestReport {
   testStartedAt: string;
@@ -1480,6 +1485,39 @@ export const testGeminiModel = internalAction({
     } catch (e: unknown) {
       const err = e instanceof Error ? e.message : String(e);
       return { success: false, model, error: err };
+    }
+  },
+});
+
+/**
+ * Diagnostic: confirm unpdf-based PDF parsing works in the Convex node
+ * runtime by downloading a real NIRF PDF and running extractPdfText /
+ * extractPdfTables against it.
+ */
+export const testPdfExtraction = internalAction({
+  args: {
+    url: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const url =
+      args.url ?? "https://unigug.ac.in/NIRFPORTAL/GON2025.pdf";
+    try {
+      const buffer = await downloadPdfBuffer(url);
+      const [pdfText, pdfTables] = await Promise.all([
+        extractPdfText(buffer),
+        extractPdfTables(buffer),
+      ]);
+      return {
+        success: true,
+        url,
+        bytes: buffer.length,
+        textLength: pdfText.length,
+        tablesLength: pdfTables.length,
+        sample: pdfText.slice(0, 200),
+      };
+    } catch (e: unknown) {
+      const err = e instanceof Error ? e.message : String(e);
+      return { success: false, url, error: err };
     }
   },
 });
