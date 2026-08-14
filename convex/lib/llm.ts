@@ -630,6 +630,27 @@ export async function callGeminiWithUsage({
 
   let result: { text: string; usage: LlmUsageEntry };
   let usedModel = model;
+  const recordProviderAlert = async (err: unknown) => {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (!ctx) return;
+    if (
+      /\b429\b|quota|rate limit|not enough credits|insufficient credits|resource exhausted/i.test(
+        msg,
+      )
+    ) {
+      try {
+        await ctx.runMutation(internal.apiAlerts.recordInternal, {
+          api: "gemini",
+          severity: "critical",
+          message: `Gemini quota/rate limit hit: ${msg.slice(0, 200)}`,
+          context: `model=${model}${fallbackModel ? ` fallback=${fallbackModel}` : ""}`,
+        });
+      } catch {
+        // alert recording must never break the pipeline
+      }
+    }
+  };
+
   try {
     result = await callModel(model, resolvedBudget, effectiveThinkingLevel);
   } catch (primaryErr) {
@@ -643,9 +664,15 @@ export async function callGeminiWithUsage({
       const fallbackLevel = isGemini3Model(fallbackModel)
         ? defaultThinkingLevelForModel(fallbackModel)
         : undefined;
-      result = await callModel(fallbackModel, fallbackThinkBudget, fallbackLevel);
-      usedModel = fallbackModel;
+      try {
+        result = await callModel(fallbackModel, fallbackThinkBudget, fallbackLevel);
+        usedModel = fallbackModel;
+      } catch (fallbackErr) {
+        await recordProviderAlert(fallbackErr);
+        throw fallbackErr;
+      }
     } else {
+      await recordProviderAlert(primaryErr);
       throw primaryErr;
     }
   }

@@ -294,6 +294,73 @@ async function serperSearch(query: string, apiKey: string, num = 5): Promise<Ser
 }
 
 /**
+ * Round-2 demographics discovery: when NIRF/AISHE queries yield nothing,
+ * spend a fresh 2-query budget on NAAC SSR / university-site enrollment
+ * pages so universities without NIRF participation still get student data
+ * (marked data_quality: "partial" downstream).
+ */
+async function discoverDemographicsRound2(
+  uniName: string,
+  domain: string,
+  serperKey: string,
+): Promise<string[]> {
+  const budget = createSerperBudget({ maxQueries: 2 });
+  const queries = [
+    `${uniName} NAAC SSR student enrollment total students hostel`,
+    `${uniName} total students enrolled admissions strength`,
+  ];
+  const blocks: string[] = [];
+  const seen = new Set<string>();
+  const officialDomain = domain.toLowerCase().replace(/^www\./, "");
+
+  for (const q of queries) {
+    if (budget.exhausted || budget.used >= budget.max) break;
+    try {
+      const result = await runWithSerperBudget(budget, () =>
+        withRetry(() => serperSearch(q, serperKey, 5), { maxRetries: 1 }),
+      );
+      if (!result.ok) continue;
+      for (const r of result.value?.organic || []) {
+        if (!r.link || seen.has(r.link)) continue;
+        seen.add(r.link);
+        let host = "";
+        try {
+          host = new URL(r.link).hostname.replace(/^www\./i, "").toLowerCase();
+        } catch {
+          continue;
+        }
+        const onOfficial =
+          host === officialDomain || host.endsWith(`.${officialDomain}`);
+        const onGov =
+          host.endsWith(".gov.in") || host.includes("naac.gov.in");
+        if (!onOfficial && !onGov) continue;
+        try {
+          const jinaRes = await fetch(`https://r.jina.ai/${encodeURIComponent(r.link)}`, {
+            headers: { Accept: "text/plain" },
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!jinaRes.ok) continue;
+          const text = await jinaRes.text();
+          if (text.length > 200 && !hasHtmlWrapper(text)) {
+            blocks.push(
+              `\n=== GOVERNMENT SOURCE: ${r.link} ===\n${text.substring(0, MAX_SOURCE_CONTEXT_CHARS)}`,
+            );
+          }
+        } catch {
+          // skip unreachable hits
+        }
+      }
+    } catch (e) {
+      console.warn(
+        `[GovData] Round-2 Serper query failed for "${q}":`,
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  }
+  return blocks;
+}
+
+/**
  * Final fallback: send the PDF bytes directly to Gemini as inline data.
  * Works when local PDF parsing is unavailable AND Jina can't reach
  * the URL (e.g., .gov.in PDFs).
@@ -448,6 +515,16 @@ export const enrichGovernmentData = internalAction({
                 console.warn(
                   `[GovData] Serper quota exhausted for ${uniName}; falling back to grounding.`,
                 );
+                try {
+                  await ctx.runMutation(internal.apiAlerts.recordInternal, {
+                    api: "serper",
+                    severity: "critical",
+                    message: "Serper quota exhausted during government-data discovery",
+                    context: uniName,
+                  });
+                } catch {
+                  // alert recording must never break the pipeline
+                }
                 break;
               }
               continue;
@@ -822,7 +899,7 @@ ${contextBlocks.join("\n\n")}
 
       applyDemographicSanity(demo as Record<string, unknown>, uniName);
 
-      const hasAnyData = hasAnyDemographicData(demo as Record<string, unknown>);
+      let hasAnyData = hasAnyDemographicData(demo as Record<string, unknown>);
       if (!hasAnyData) {
         // Deterministic fallback: regex-scan the raw government text for numbers
         const rawText = contextBlocks.join("\n\n");
@@ -840,7 +917,79 @@ ${contextBlocks.join("\n\n")}
           demo.source = "government_data_enrichment_fallback";
           demo.data_quality = "partial";
           applyDemographicSanity(demo as Record<string, unknown>, uniName);
-        } else {
+        } else if (serperKey) {
+          // Round-2: NAAC SSR / university-site enrollment discovery. Many
+          // private universities don't participate in NIRF; NAAC SSRs and
+          // their own admissions pages still publish total enrollment.
+          console.log(
+            `[GovData] Attempting Round-2 demographics discovery for ${uniName}...`,
+          );
+          let round2Domain = "";
+          try {
+            round2Domain = new URL(university.website || "").hostname;
+          } catch {
+            round2Domain = (university.website || "").replace(/^www\./, "");
+          }
+          const round2Blocks = await discoverDemographicsRound2(
+            uniName,
+            round2Domain,
+            serperKey,
+          );
+          if (round2Blocks.length > 0) {
+            console.log(
+              `[GovData] Round-2 discovered ${round2Blocks.length} sources (${round2Blocks.join("").length} chars) for ${uniName}`,
+            );
+            const round2Prompt = `
+UNIVERSITY: ${uniName}
+
+EXTRACT official enrollment demographics from the NAAC SSR / university disclosure sources below. Use null for missing values, never 0.
+
+SOURCE CONTENT:
+${round2Blocks.join("\n\n").substring(0, 60_000)}`;
+            const round2Result = await callGeminiWithUsage({
+              apiKey,
+              model: MODELS.geminiFlash,
+              systemPrompt: GOVERNMENT_DATA_SYSTEM_PROMPT,
+              userPrompt: round2Prompt,
+              temperature: 0.05,
+              responseAsJson: true,
+              responseSchema: GOVERNMENT_DATA_SCHEMA,
+              maxOutputTokens: 4096,
+              label: "gov_data_round2_extraction",
+              ctx,
+              cacheTtlMs: 24 * 60 * 60 * 1000,
+            });
+            llmUsageEntries.push(round2Result.usage);
+            const round2Parsed = parseJsonObject(round2Result.text);
+            const round2Demo =
+              round2Parsed && typeof round2Parsed.demographics === "object"
+                ? (round2Parsed.demographics as Record<string, unknown>)
+                : {};
+            const round2Normalized: typeof demo = {
+              ...demo,
+              total_students: toNum(round2Demo.total_students),
+              total_students_male: toNum(round2Demo.total_students_male),
+              total_students_female: toNum(round2Demo.total_students_female),
+              hostelites: toNum(round2Demo.hostelites),
+              day_scholars: toNum(round2Demo.day_scholars),
+              source:
+                typeof round2Demo.source === "string" && round2Demo.source
+                  ? round2Demo.source
+                  : "naac_or_university_disclosure",
+              data_quality: "partial",
+            };
+            if (hasAnyDemographicData(round2Normalized as Record<string, unknown>)) {
+              Object.assign(demo, round2Normalized);
+              demo.data_quality = "partial";
+              applyDemographicSanity(demo as Record<string, unknown>, uniName);
+              hasAnyData = true;
+              console.log(
+                `[GovData] Round-2 extraction found demographics for ${uniName}`,
+              );
+            }
+          }
+        }
+        if (!hasAnyData && apiKey) {
           // Last resort: Gemini Grounding search for NIRF/AISHE demographic data.
           // Works when government PDFs are unreachable (e.g., .gov.in IP-blocked).
           if (apiKey) {
@@ -859,26 +1008,43 @@ ${contextBlocks.join("\n\n")}
                 `nirf_total (number or null), nirf_male (number or null), nirf_female (number or null), ` +
                 `nirf_source (string or null, e.g. "NIRF 2024-25"). ` +
                 `Use null for missing values. Do not include any explanation.`;
-              const groundingResponse = await aiClient.models.generateContent({
-                model: MODELS.geminiFlash,
-                contents: {
-                  role: "user",
-                  parts: [
-                    {
-                      text: groundingPrompt,
+              // Retry once with a longer timeout (grounding often aborts on
+              // the first attempt for blocked/state sites).
+              let groundingResponse: Awaited<ReturnType<typeof aiClient.models.generateContent>> | null = null;
+              for (let attempt = 1; attempt <= 2 && !groundingResponse; attempt++) {
+                try {
+                  groundingResponse = await aiClient.models.generateContent({
+                    model: MODELS.geminiFlash,
+                    contents: {
+                      role: "user",
+                      parts: [
+                        {
+                          text: groundingPrompt,
+                        },
+                      ],
                     },
-                  ],
-                },
-                config: {
-                  systemInstruction:
-                    "You are a research assistant. Use Google Search to find official government enrollment data. Return ONLY valid JSON.",
-                  temperature: 0.0,
-                  maxOutputTokens: 1024,
-                  responseMimeType: "application/json",
-                  tools: [{ googleSearch: {} }],
-                  httpOptions: { timeout: 25000 },
-                },
-              });
+                    config: {
+                      systemInstruction:
+                        "You are a research assistant. Use Google Search to find official government enrollment data. Return ONLY valid JSON.",
+                      temperature: 0.0,
+                      maxOutputTokens: 1024,
+                      responseMimeType: "application/json",
+                      tools: [{ googleSearch: {} }],
+                      httpOptions: { timeout: 60000 },
+                    },
+                  });
+                } catch (groundingAttemptErr) {
+                  console.warn(
+                    `[GovData] Grounding attempt ${attempt} failed for ${uniName}:`,
+                    groundingAttemptErr instanceof Error
+                      ? groundingAttemptErr.message
+                      : String(groundingAttemptErr),
+                  );
+                }
+              }
+              if (!groundingResponse) {
+                throw new Error("Grounding recovery failed after 2 attempts");
+              }
               llmUsageEntries.push(
                 createLlmUsageEntry({
                   label: "gov_data_grounding_recovery",

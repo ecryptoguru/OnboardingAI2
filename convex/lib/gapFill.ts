@@ -13,6 +13,7 @@ import {
   createSerperBudget,
   runWithSerperBudget,
 } from "./serperBudget";
+import { internal } from "../_generated/api";
 
 const REQUIRED_SINGLETON_ROLES = [
   "Vice Chancellor",
@@ -277,7 +278,21 @@ async function trySerper(
       organic?: Array<{ link?: string; title?: string; snippet?: string }>;
     };
   });
-  if (!searchResult.ok) return null;
+  if (!searchResult.ok) {
+    if (searchResult.quotaExhausted) {
+      try {
+        await options.ctx.runMutation(internal.apiAlerts.recordInternal, {
+          api: "serper",
+          severity: "critical",
+          message: "Serper quota exhausted during gap-fill",
+          context: options.uniName,
+        });
+      } catch {
+        // alert recording must never break the pipeline
+      }
+    }
+    return null;
+  }
 
   const domain = options.domain.toLowerCase().replace(/^www\./, "");
   const links = (searchResult.value?.organic || [])

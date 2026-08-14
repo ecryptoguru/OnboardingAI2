@@ -886,6 +886,22 @@ export const scrapeUniversity = internalAction({
         stage: "enriched",
       });
 
+      if (
+        serperBudget.exhausted &&
+        (serperBudget.reason ?? "").includes("quota")
+      ) {
+        try {
+          await ctx.runMutation(internal.apiAlerts.recordInternal, {
+            api: "serper",
+            severity: "critical",
+            message: "Serper quota exhausted during scraping",
+            context: university.university_name,
+          });
+        } catch {
+          // alert recording must never break the pipeline
+        }
+      }
+
       return {
         success: true,
         serperQueriesUsed: serperBudget.used,

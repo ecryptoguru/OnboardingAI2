@@ -329,6 +329,16 @@ export default defineSchema({
     updated_at: v.number(),
   }).index("by_university", ["university_id"]).index("by_created_at", ["created_at"]),
 
+  // ─── API Alerts (quota exhaustion / provider errors surfaced in UI) ───────
+  apiAlerts: defineTable({
+    api: v.string(), // "gemini" | "firecrawl" | "serper"
+    severity: v.union(v.literal("warning"), v.literal("critical")),
+    message: v.string(),
+    context: v.optional(v.string()),
+    created_at: v.number(),
+    acknowledged_at: v.optional(v.number()),
+  }).index("by_created_at", ["created_at"]).index("by_acknowledged", ["acknowledged_at"]),
+
   // ─── Rate Limits ──────────────────────────────────────────────────────────
   rateLimits: defineTable({
     key: v.string(),

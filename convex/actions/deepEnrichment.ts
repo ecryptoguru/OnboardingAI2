@@ -1029,6 +1029,16 @@ export const runDeepEnrichment = internalAction({
           console.warn(
             `[DeepEnrichment] Firecrawl plan out of credits; running Jina-only for ${uniName}`,
           );
+          try {
+            await ctx.runMutation(internal.apiAlerts.recordInternal, {
+              api: "firecrawl",
+              severity: "critical",
+              message: "Firecrawl plan is out of credits — enrichment fell back to Jina Reader",
+              context: uniName,
+            });
+          } catch {
+            // alert recording must never break the pipeline
+          }
         }
       }
 
@@ -1130,6 +1140,21 @@ export const runDeepEnrichment = internalAction({
           );
         }
       }
+      if (
+        serperBudget.exhausted &&
+        (serperBudget.reason ?? "").includes("quota")
+      ) {
+        try {
+          await ctx.runMutation(internal.apiAlerts.recordInternal, {
+            api: "serper",
+            severity: "critical",
+            message: "Serper quota exhausted during external source discovery",
+            context: uniName,
+          });
+        } catch {
+          // alert recording must never break the pipeline
+        }
+      }
 
       // ─── Phase 2: Firecrawl Scrape → Get clean Markdown ──────────────────
       // Credit discipline: 1 map + up to MAX_FIRECRAWL_SCRAPES_PER_UNIVERSITY
@@ -1166,6 +1191,16 @@ export const runDeepEnrichment = internalAction({
               firecrawlCreditsUsed = maxFirecrawlTotal;
               if (/insufficient credits|not enough credits/i.test(msg)) {
                 firecrawlDisabled = true;
+                try {
+                  await ctx.runMutation(internal.apiAlerts.recordInternal, {
+                    api: "firecrawl",
+                    severity: "critical",
+                    message: "Firecrawl plan is out of credits during scraping",
+                    context: `${uniName} (${targetUrl})`,
+                  });
+                } catch {
+                  // alert recording must never break the pipeline
+                }
               }
               console.warn(
                 `[DeepEnrichment] Firecrawl ${/\b429\b|rate limit|ratelimit/i.test(msg) ? "rate limit" : "credit limit"} hit; switching remaining scrapes to Jina Reader`,
@@ -1318,6 +1353,21 @@ export const runDeepEnrichment = internalAction({
             `[DeepEnrichment] thin-site snippet fallback failed:`,
             e instanceof Error ? e.message : String(e),
           );
+        }
+      }
+      if (
+        thinSiteBudget.exhausted &&
+        (thinSiteBudget.reason ?? "").includes("quota")
+      ) {
+        try {
+          await ctx.runMutation(internal.apiAlerts.recordInternal, {
+            api: "serper",
+            severity: "critical",
+            message: "Serper quota exhausted during snippet fallback",
+            context: uniName,
+          });
+        } catch {
+          // alert recording must never break the pipeline
         }
       }
 

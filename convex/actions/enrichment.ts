@@ -747,6 +747,21 @@ export const discoverSocialAndMedia = internalAction({
       }
 
       const imagesAdded = 0; // image search removed (credit discipline)
+      if (
+        serperBudget.exhausted &&
+        (serperBudget.reason ?? "").includes("quota")
+      ) {
+        try {
+          await ctx.runMutation(internal.apiAlerts.recordInternal, {
+            api: "serper",
+            severity: "critical",
+            message: "Serper quota exhausted during social enrichment",
+            context: uni.university_name,
+          });
+        } catch {
+          // alert recording must never break the pipeline
+        }
+      }
       console.log(
         `[Enrichment] Completed for ${uni.university_name}. Updated ${updatedCount} stakeholders, added ${signalsAdded} signals (${imagesAdded} images).`,
       );

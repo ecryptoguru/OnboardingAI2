@@ -34,6 +34,7 @@ import type * as actions_stakeholderCleanup from "../actions/stakeholderCleanup.
 import type * as actions_ugcSeed from "../actions/ugcSeed.js";
 import type * as actions_ugcSync from "../actions/ugcSync.js";
 import type * as admin from "../admin.js";
+import type * as apiAlerts from "../apiAlerts.js";
 import type * as auth from "../auth.js";
 import type * as crons from "../crons.js";
 import type * as dbReset from "../dbReset.js";
@@ -116,6 +117,7 @@ declare const fullApi: ApiFromModules<{
   "actions/ugcSeed": typeof actions_ugcSeed;
   "actions/ugcSync": typeof actions_ugcSync;
   admin: typeof admin;
+  apiAlerts: typeof apiAlerts;
   auth: typeof auth;
   crons: typeof crons;
   dbReset: typeof dbReset;
