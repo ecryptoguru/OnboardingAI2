@@ -3,14 +3,17 @@
 import { action, internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
-import type { Doc } from "../_generated/dataModel";
+import type { Doc, Id } from "../_generated/dataModel";
 import { validateAuth } from "../lib/auth_utils";
 import { isSuspiciousWebsite } from "../lib/discoveryCandidates";
 import { LlmUsageEntry, LlmUsageSummary, summarizeLlmUsage } from "../lib/llm";
 import * as Sentry from "@sentry/node";
 
 export const runEnrichmentChainInternal = internalAction({
-  args: { universityId: v.id("universities") },
+  args: {
+    universityId: v.id("universities"),
+    queue: v.optional(v.array(v.string())),
+  },
   handler: async (
     ctx,
     args,
@@ -70,6 +73,8 @@ export const runEnrichmentChainInternal = internalAction({
         discovery: false,
       };
       const warnings: string[] = [];
+      let serperQueriesUsed = 0;
+      let firecrawlCreditsUsed = 0;
       const llmUsageEntries: LlmUsageEntry[] = [];
       const appendLlmUsage = (result: unknown) => {
         const entries =
@@ -177,12 +182,14 @@ export const runEnrichmentChainInternal = internalAction({
           const [scrapeRes, antiRagRes, socialRes] = await Promise.allSettled([
             ctx.runAction(internal.actions.scraper.scrapeUniversity, {
               universityId: args.universityId,
+              maxSerperQueries: 1,
             }),
             ctx.runAction(internal.actions.scrapeAntiRagging.scrapeAntiRagging, {
               universityId: args.universityId,
             }),
             ctx.runAction(internal.actions.enrichment.discoverSocialAndMedia, {
               universityId: args.universityId,
+              maxSerperQueries: 4,
             }),
           ]);
           results.scrape =
@@ -190,6 +197,9 @@ export const runEnrichmentChainInternal = internalAction({
             (scrapeRes.value as { success?: boolean })?.success === true;
           if (scrapeRes.status === "fulfilled") {
             appendLlmUsage(scrapeRes.value);
+            serperQueriesUsed +=
+              (scrapeRes.value as { serperQueriesUsed?: number })
+                ?.serperQueriesUsed ?? 0;
           }
           results.antiRagging =
             antiRagRes.status === "fulfilled" &&
@@ -199,6 +209,9 @@ export const runEnrichmentChainInternal = internalAction({
             (socialRes.value as { success?: boolean })?.success === true;
           if (socialRes.status === "fulfilled") {
             appendLlmUsage(socialRes.value);
+            serperQueriesUsed +=
+              (socialRes.value as { serperQueriesUsed?: number })
+                ?.serperQueriesUsed ?? 0;
           }
         } else {
           console.warn(
@@ -242,16 +255,21 @@ export const runEnrichmentChainInternal = internalAction({
       // Runs BEFORE deepEnrichment so that deepEnrichment can read and augment
       // government data rather than overwriting it.
       await trackProgress("phase-3-government-data");
+      let govOfficers: Array<{ name?: string; role?: string }> = [];
       try {
         console.log(
           `[Orchestrator] Phase 3: Running government data enrichment`,
         );
         const govRes = await ctx.runAction(
           internal.actions.enrichGovernmentData.enrichGovernmentData,
-          { universityId: args.universityId },
+          { universityId: args.universityId, maxSerperQueries: 3 },
         );
         results.governmentData =
           (govRes as { success?: boolean })?.success === true;
+        govOfficers = (govRes as { officers?: Array<{ name?: string; role?: string }> })
+          ?.officers ?? [];
+        serperQueriesUsed +=
+          (govRes as { serperQueriesUsed?: number })?.serperQueriesUsed ?? 0;
         appendLlmUsage(govRes);
       } catch (e) {
         console.error("[Orchestrator] Government data enrichment failed", e);
@@ -264,7 +282,11 @@ export const runEnrichmentChainInternal = internalAction({
           console.log(`[Orchestrator] Phase 4: Running deep enrichment`);
           const deepRes: unknown = await ctx.runAction(
             internal.actions.deepEnrichment.runDeepEnrichment,
-            { universityId: args.universityId },
+            {
+              universityId: args.universityId,
+              maxSerperQueries: 5,
+              preDiscoveredOfficers: govOfficers,
+            },
           );
           results.deepEnrichment =
             (deepRes as { success?: boolean })?.success === true;
@@ -280,6 +302,11 @@ export const runEnrichmentChainInternal = internalAction({
               `[Orchestrator] WARNING: deep enrichment returned 0 stakeholders for ${university.university_name}`,
             );
           }
+          serperQueriesUsed +=
+            (deepRes as { serperQueriesUsed?: number })?.serperQueriesUsed ?? 0;
+          firecrawlCreditsUsed +=
+            (deepRes as { firecrawlCreditsUsed?: number })
+              ?.firecrawlCreditsUsed ?? 0;
           appendLlmUsage(deepRes);
         }
       } catch (e) {
@@ -296,7 +323,7 @@ export const runEnrichmentChainInternal = internalAction({
         );
         const socialRefreshRes = await ctx.runAction(
           internal.actions.enrichment.discoverSocialAndMedia,
-          { universityId: args.universityId },
+          { universityId: args.universityId, maxSerperQueries: 0 },
         );
         results.socialMediaPostDeep =
           (socialRefreshRes as { success?: boolean })?.success === true;
@@ -335,6 +362,23 @@ export const runEnrichmentChainInternal = internalAction({
       console.log(
         `[Orchestrator] Enrichment chain completed for ${args.universityId}: scrape=${results.scrape} antiRagging=${results.antiRagging} govData=${results.governmentData} social=${results.socialMedia} socialPostDeep=${results.socialMediaPostDeep} infer=${results.inferContacts} deep=${results.deepEnrichment} score=${results.scoring}`,
       );
+      console.log(
+        `[CreditUsage] ${university?.university_name ?? args.universityId}: serper=${serperQueriesUsed}/14 firecrawl=${firecrawlCreditsUsed}/8`,
+      );
+
+      // Sequential batch chaining: continue the queue via the scheduler so each
+      // action stays within its own runtime limit.
+      if (args.queue && args.queue.length > 0) {
+        const [nextId, ...rest] = args.queue;
+        await ctx.scheduler.runAfter(
+          0,
+          internal.actions.orchestrator.runEnrichmentChainInternal,
+          { universityId: nextId as Id<"universities">, queue: rest },
+        );
+        console.log(
+          `[Orchestrator] Scheduled next university in queue: ${nextId} (${rest.length} remaining)`,
+        );
+      }
 
       await trackProgress(
         allOk ? "completed" : "failed",
@@ -382,6 +426,19 @@ export const runEnrichmentChainInternal = internalAction({
             universityId: args.universityId,
             stage: "new",
           },
+        );
+      }
+
+      // Continue the sequential batch queue even when one university fails.
+      if (args.queue && args.queue.length > 0) {
+        const [nextId, ...rest] = args.queue;
+        await ctx.scheduler.runAfter(
+          0,
+          internal.actions.orchestrator.runEnrichmentChainInternal,
+          { universityId: nextId as Id<"universities">, queue: rest },
+        );
+        console.log(
+          `[Orchestrator] Scheduled next university in queue after failure: ${nextId} (${rest.length} remaining)`,
         );
       }
 
@@ -444,6 +501,36 @@ export const scheduleEnrichmentInternal = internalAction({
       enqueued: true,
       message:
         "Enrichment scheduled. Poll universities:getInternal for enrichment_status/outreach_stage.",
+    };
+  },
+});
+
+/**
+ * Sequential batch runner: enqueues universities one at a time via the
+ * scheduler. Each chain schedules the next on completion, so no single action
+ * exceeds the runtime limit and Firecrawl/Serper are never hammered by
+ * concurrent runs.
+ */
+export const scheduleEnrichmentBatch = internalAction({
+  args: { queue: v.array(v.string()) },
+  handler: async (ctx, args): Promise<{
+    success: boolean;
+    enqueued: number;
+    message: string;
+  }> => {
+    if (args.queue.length === 0) {
+      return { success: false, enqueued: 0, message: "Empty queue" };
+    }
+    const [firstId, ...rest] = args.queue;
+    await ctx.scheduler.runAfter(
+      0,
+      internal.actions.orchestrator.runEnrichmentChainInternal,
+      { universityId: firstId as Id<"universities">, queue: rest },
+    );
+    return {
+      success: true,
+      enqueued: args.queue.length,
+      message: `Enrichment batch enqueued (${args.queue.length} universities, sequential).`,
     };
   },
 });

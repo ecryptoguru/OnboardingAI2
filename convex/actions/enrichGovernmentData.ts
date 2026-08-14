@@ -20,7 +20,10 @@ import {
 import {
   GOVERNMENT_DATA_SCHEMA,
   GOVERNMENT_DATA_SYSTEM_PROMPT,
+  OFFICER_EXTRACTION_SCHEMA,
+  OFFICER_EXTRACTION_SYSTEM_PROMPT,
 } from "../lib/prompts";
+import { TEMP } from "../lib/models";
 import {
   downloadPdfBuffer,
   extractPdfTables,
@@ -360,7 +363,10 @@ async function extractPdfViaGemini(
  * - NAAC SSR / Mandatory Disclosure → hostel capacity, student numbers
  */
 export const enrichGovernmentData = internalAction({
-  args: { universityId: v.id("universities") },
+  args: {
+    universityId: v.id("universities"),
+    maxSerperQueries: v.optional(v.number()),
+  },
   handler: async (
     ctx,
     args,
@@ -369,6 +375,8 @@ export const enrichGovernmentData = internalAction({
     reason?: string;
     error?: string;
     sourcesFound?: number;
+    officers?: Array<{ name?: string; role?: string }>;
+    serperQueriesUsed?: number;
     llmUsage?: LlmUsageSummary;
   }> => {
     try {
@@ -406,7 +414,20 @@ export const enrichGovernmentData = internalAction({
 
       const allUrls: { url: string; score: number }[] = [];
       const seen = new Set<string>();
-      const serperBudget = createSerperBudget({ maxQueries: 4 });
+      // Credit discipline: NIRF-first slice (2 NIRF + 1 AISHE). Existing known
+      // PDFs (from a previous run) are force-included below, so we never lose
+      // demographics data we already located.
+      const serperBudget = createSerperBudget({
+        maxQueries: args.maxSerperQueries ?? 4,
+      });
+      for (const knownUrl of (university.demographics?.source_urls ?? []).filter(
+        (u: string) => u.toLowerCase().endsWith(".pdf"),
+      )) {
+        if (!seen.has(knownUrl)) {
+          seen.add(knownUrl);
+          allUrls.push({ url: knownUrl, score: 100 });
+        }
+      }
 
       if (serperKey) {
         for (const q of queries) {
@@ -467,6 +488,7 @@ export const enrichGovernmentData = internalAction({
 
       // ─── Phase 2: Scrape discovered URLs via Jina Reader (free) ───────────
       const contextBlocks: string[] = [];
+      const pdfTexts: string[] = []; // raw PDF text for office-holder extraction
       for (const extUrl of topUrls) {
         try {
           if (extUrl.toLowerCase().endsWith(".pdf")) {
@@ -481,6 +503,7 @@ export const enrichGovernmentData = internalAction({
               combinedPdf = [pdfTables, pdfText]
                 .filter((value) => value && value.trim().length > 0)
                 .join("\n\n");
+              if (pdfText.trim().length > 200) pdfTexts.push(pdfText);
             } catch (pdfErr) {
               pdfParseFailed = true;
               console.warn(
@@ -647,6 +670,47 @@ export const enrichGovernmentData = internalAction({
       }
 
       console.log(`[GovData] Scraped ${contextBlocks.length} government sources (${contextBlocks.join("").length} chars).`);
+
+      // ─── Phase 2b: extract office-holders from PDF text (reuses PDFs) ────
+      let officers: Array<{ name?: string; role?: string }> = [];
+      if (pdfTexts.length > 0 && apiKey) {
+        try {
+          const officerResult = await callGeminiWithUsage({
+            apiKey,
+            model: MODELS.geminiFlash,
+            systemPrompt: OFFICER_EXTRACTION_SYSTEM_PROMPT,
+            userPrompt: `UNIVERSITY: ${uniName}\n\nExtract named office-holders from the official PDF text below.\n\n${pdfTexts
+              .join("\n\n")
+              .slice(0, 30_000)}`,
+            temperature: TEMP.deterministic,
+            responseAsJson: true,
+            responseSchema: OFFICER_EXTRACTION_SCHEMA,
+            maxOutputTokens: 1024,
+            label: "gov_data_officer_extraction",
+            ctx,
+          });
+          llmUsageEntries.push(officerResult.usage);
+          const parsedOfficers = JSON.parse(officerResult.text) as {
+            officers?: Array<{ name?: string | null; role?: string | null }>;
+          };
+          officers = (parsedOfficers.officers ?? [])
+            .filter((o) => o.name && o.role)
+            .map((o) => ({
+              name: o.name ?? undefined,
+              role: o.role ?? undefined,
+            }));
+          if (officers.length > 0) {
+            console.log(
+              `[GovData] Extracted ${officers.length} office-holder candidate(s) from PDFs for ${uniName}`,
+            );
+          }
+        } catch (e) {
+          console.warn(
+            `[GovData] Officer extraction failed for ${uniName}:`,
+            e instanceof Error ? e.message : String(e),
+          );
+        }
+      }
 
       // ─── Phase 3: Extract demographics via Gemini Flash-Lite ──────────────
       const prompt = `
@@ -916,6 +980,8 @@ ${contextBlocks.join("\n\n")}
       return {
         success: true,
         sourcesFound: contextBlocks.length,
+        officers,
+        serperQueriesUsed: serperBudget.used,
         llmUsage: summarizeLlmUsage(llmUsageEntries),
       };
     } catch (e) {

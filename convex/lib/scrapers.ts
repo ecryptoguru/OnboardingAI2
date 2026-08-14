@@ -48,7 +48,7 @@ export async function firecrawlMap(
   url: string,
   apiKey: string,
   limit = 5000,
-  maxAttempts = 4,
+  maxAttempts = 2,
 ): Promise<FirecrawlMapResult> {
   let lastText = "";
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {

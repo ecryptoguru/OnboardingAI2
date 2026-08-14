@@ -6,6 +6,11 @@
  * (e.g. a stakeholder with a number for a name, or nirf_programs with
  * missing totals).
  */
+import {
+  isSingletonRole,
+  namesEquivalent,
+  normalizeStakeholderRole,
+} from "./contactInference";
 
 export interface StakeholderLike {
   name?: string | null;
@@ -247,4 +252,86 @@ export function validateStakeholdersOutput(parsed: unknown): StakeholderLike[] {
   }
 
   return stakeholders;
+}
+
+const LEADERSHIP_LEAF_URL_RE =
+  /\/(vc|vice-?chancellor|registrar|chancellor|pro-?vice-?chancellor|officers?|dean|deans|controller|director|finance-?officer)(\.|\/|$)/i;
+
+function isLeadershipLeafSource(sourceUrl: string | null | undefined): boolean {
+  if (!sourceUrl) return false;
+  return LEADERSHIP_LEAF_URL_RE.test(sourceUrl);
+}
+
+/**
+ * Group key for singleton roles: normalizes "(Offg.)", "(Acting)", "(I/c)",
+ * "(Officiating)" variants down to the canonical role so an acting VC and the
+ * VC itself compete for the same singleton slot.
+ */
+function singletonGroupKey(role: string | null | undefined): string | undefined {
+  const base = (role || "")
+    .replace(/\s*\((?:offg|acting|i\/c|ic|officiating)\.?\s*\)\s*$/i, "")
+    .replace(/\s*-\s*(?:offg|acting|i\/c|ic|officiating)\.?\s*$/i, "")
+    .replace(/^(?:offg|acting|officiating)\.?\s+/i, "")
+    .trim();
+  const canonical = normalizeStakeholderRole(base);
+  return canonical && isSingletonRole(canonical) ? canonical.toLowerCase() : undefined;
+}
+
+/**
+ * Deterministic singleton-role enforcement after merge: for canonical
+ * singleton roles (Vice Chancellor, Registrar, ...) keep exactly one distinct
+ * person — preferring the record from a leadership leaf page, then the higher
+ * contact confidence. Same-person duplicates are left for the upsert dedup.
+ */
+export function enforceSingletonRoles(
+  stakeholders: StakeholderLike[],
+): { kept: StakeholderLike[]; dropped: StakeholderLike[] } {
+  const kept: StakeholderLike[] = [];
+  const dropped: StakeholderLike[] = [];
+  const byRole = new Map<string, StakeholderLike[]>();
+
+  for (const st of stakeholders) {
+    const key = singletonGroupKey(st.role);
+    if (!key) {
+      kept.push(st);
+      continue;
+    }
+    const list = byRole.get(key) ?? [];
+    list.push(st);
+    byRole.set(key, list);
+  }
+
+  for (const [role, group] of byRole) {
+    if (group.length <= 1) {
+      kept.push(...group);
+      continue;
+    }
+    const unique = group.filter(
+      (st, i) =>
+        group.findIndex((other) => namesEquivalent(other.name, st.name)) === i,
+    );
+    if (unique.length <= 1) {
+      // Same person across sources — upsert dedup handles merging.
+      kept.push(...group);
+      continue;
+    }
+    const best = unique.sort((a, b) => {
+      const aLeaf = isLeadershipLeafSource(a.source_url) ? 1 : 0;
+      const bLeaf = isLeadershipLeafSource(b.source_url) ? 1 : 0;
+      if (aLeaf !== bLeaf) return bLeaf - aLeaf;
+      return (b.contact_confidence ?? 0) - (a.contact_confidence ?? 0);
+    })[0];
+    for (const st of group) {
+      if (st === best) {
+        kept.push(st);
+      } else {
+        console.warn(
+          `[SingletonEnforce] Dropping ${st.name ?? "?"} (${role}); keeping ${best.name ?? "?"}`,
+        );
+        dropped.push(st);
+      }
+    }
+  }
+
+  return { kept, dropped };
 }

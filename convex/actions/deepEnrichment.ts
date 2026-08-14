@@ -17,9 +17,11 @@ import {
 } from "../lib/utils";
 import {
   augmentStakeholderSources,
+  enforceSingletonRoles,
   linkedinMatchesName,
   type StakeholderLike,
 } from "../lib/validateDeepEnrichment";
+import { gapFillMissingRoles } from "../lib/gapFill";
 import {
   extractPartialsFromSources,
   mergePartialExtractions,
@@ -60,7 +62,7 @@ const MAX_URLS_TO_SCRAPE = 6; // Limit first-pass Firecrawl API calls per enrich
 const MAX_FOLLOWUP_URLS = 8; // Free Jina-based recursive follow-up from menu pages
 const MAX_CHARS_PER_SOURCE = 6_000; // Truncate each scraped source
 const MIN_BLOCK_LENGTH = 200; // Minimum length for a block to be considered valid
-const MAX_FIRECRAWL_SCRAPES_PER_UNIVERSITY = 15; // Cap Firecrawl credits per run; Jina takes over after
+const MAX_FIRECRAWL_SCRAPES_PER_UNIVERSITY = 7; // Cap Firecrawl scrape credits per run; Jina takes over after
 const MAX_REGEX_CONTACTS = 30; // Cap to avoid bloating the prompt
 const MAX_COST_ESTIMATE = 30_000; // Firecrawl credits * 100 + Gemini input tokens.
 // A typical run: 1 map + 6 scrapes = 7 * 100 = 700.
@@ -301,11 +303,11 @@ async function discoverExternalSources(
  * official-domain / gov.in results are kept, and every block still flows
  * through the normal per-source extraction + evidence sanitisation.
  */
-async function discoverGovInSnippetBlocks(
+async function discoverThinSiteSnippetBlocks(
   uniName: string,
   domain: string,
   serperKey: string,
-  serperBudget = createSerperBudget({ maxQueries: 8 }),
+  serperBudget = createSerperBudget({ maxQueries: 2 }),
 ): Promise<string[]> {
   const queries = [
     `${uniName} vice chancellor registrar`,
@@ -328,12 +330,12 @@ async function discoverGovInSnippetBlocks(
       if (!searchResult.ok) {
         if (searchResult.quotaExhausted) {
           console.warn(
-            `[DeepEnrichment] gov.in Serper quota exhausted after "${q}"`,
+            `[DeepEnrichment] thin-site Serper quota exhausted after "${q}"`,
           );
           break;
         }
         console.warn(
-          `[DeepEnrichment] gov.in Serper query failed for "${q}": ${searchResult.reason || "unknown"}`,
+          `[DeepEnrichment] thin-site Serper query failed for "${q}": ${searchResult.reason || "unknown"}`,
         );
         continue;
       }
@@ -362,11 +364,11 @@ async function discoverGovInSnippetBlocks(
         }
       }
       console.log(
-        `[DeepEnrichment] gov.in Serper "${q}" → ${results.length} results, ${accepted} snippet blocks`,
+        `[DeepEnrichment] thin-site Serper "${q}" → ${results.length} results, ${accepted} snippet blocks`,
       );
     } catch (e) {
       console.warn(
-        `[DeepEnrichment] gov.in Serper query failed: "${q}"`,
+        `[DeepEnrichment] thin-site Serper query failed: "${q}"`,
         e instanceof Error ? e.message : String(e),
       );
     }
@@ -890,6 +892,15 @@ export const runDeepEnrichment = internalAction({
   args: {
     universityId: v.id("universities"),
     dryRun: v.optional(v.boolean()),
+    maxSerperQueries: v.optional(v.number()),
+    preDiscoveredOfficers: v.optional(
+      v.array(
+        v.object({
+          name: v.optional(v.string()),
+          role: v.optional(v.string()),
+        }),
+      ),
+    ),
   },
   handler: async (
     ctx,
@@ -901,6 +912,8 @@ export const runDeepEnrichment = internalAction({
     stakeholdersSynthesized?: number;
     contextChars?: number;
     estimatedTokens?: { flash: number; pro: number };
+    serperQueriesUsed?: number;
+    firecrawlCreditsUsed?: number;
     llmUsage?: LlmUsageSummary;
     stakeholders?: unknown[];
     error?: string;
@@ -946,7 +959,11 @@ export const runDeepEnrichment = internalAction({
         internal.settings.getInternalSerperKey,
       );
       const serperKey = rawSerperKey ? rawSerperKey.trim() : null;
-      const serperBudget = createSerperBudget({ maxQueries: 6 });
+      // Credit discipline: external discovery gets 3 queries, thin-site snippet
+      // fallback gets 2 (fresh budgets, sequential phases).
+      const serperBudget = createSerperBudget({
+        maxQueries: Math.min(3, args.maxSerperQueries ?? 6),
+      });
 
       // ─── Domain extraction ────────────────────────────────────────────────
       const rawDomain = normalizedUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
@@ -957,49 +974,46 @@ export const runDeepEnrichment = internalAction({
       );
 
       // ─── Phase 1: Firecrawl Map → Discover high-yield URLs ───────────────
+      // Credit discipline: exactly ONE map attempt (no http/https variant
+      // loop — each attempt consumes a credit). On failure we fall back to
+      // free Jina-only guessed paths.
       let highYieldUrls: string[] = [];
       let mapResult: Awaited<ReturnType<typeof firecrawlMap>> | null = null;
-      let workingUrl = normalizedUrl;
+      const workingUrl = normalizedUrl;
+      let firecrawlCreditsUsed = 0;
+      let firecrawlMapCount = 0;
+      let firecrawlScrapeCount = 0;
 
-      const urlVariants = [normalizedUrl];
-      if (normalizedUrl.startsWith("http://")) {
-        urlVariants.push(normalizedUrl.replace("http://", "https://"));
-      } else if (normalizedUrl.startsWith("https://")) {
-        urlVariants.push(normalizedUrl.replace("https://", "http://"));
-      }
-
-      for (const tryUrl of urlVariants) {
-        try {
-          mapResult = await withRetry(
-            async () => firecrawlMap(tryUrl, firecrawlKey),
-            { maxRetries: 2 },
+      try {
+        firecrawlCreditsUsed += 1;
+        firecrawlMapCount += 1;
+        mapResult = await withRetry(
+          async () => firecrawlMap(workingUrl, firecrawlKey),
+          { maxRetries: 1 },
+        );
+        if (mapResult.links && mapResult.links.length > 0) {
+          highYieldUrls = filterHighYieldUrls(mapResult, MAX_URLS_TO_SCRAPE);
+          const branchPriorityUrls = buildBranchScopedPriorityUrls(
+            workingUrl,
+            (mapResult.links || []).map((link) => link.url),
+            MAX_URLS_TO_SCRAPE,
           );
-          if (mapResult.links && mapResult.links.length > 0) {
-            workingUrl = tryUrl;
-            highYieldUrls = filterHighYieldUrls(mapResult, MAX_URLS_TO_SCRAPE);
-            const branchPriorityUrls = buildBranchScopedPriorityUrls(
-              workingUrl,
-              (mapResult.links || []).map((link) => link.url),
-              MAX_URLS_TO_SCRAPE,
-            );
-            if (branchPriorityUrls.length > 0) {
-              highYieldUrls = [
-                ...branchPriorityUrls,
-                ...highYieldUrls,
-              ].filter((url, index, arr) => arr.indexOf(url) === index)
-                .slice(0, MAX_URLS_TO_SCRAPE);
-            }
-            console.log(
-              `[DeepEnrichment] Firecrawl map success with ${tryUrl}: ${mapResult.links.length} URLs; selected ${highYieldUrls.length} high-yield targets: ${highYieldUrls.join(", ")}`,
-            );
-            break;
+          if (branchPriorityUrls.length > 0) {
+            highYieldUrls = [
+              ...branchPriorityUrls,
+              ...highYieldUrls,
+            ].filter((url, index, arr) => arr.indexOf(url) === index)
+              .slice(0, MAX_URLS_TO_SCRAPE);
           }
-        } catch (e) {
-          console.warn(
-            `[DeepEnrichment] Firecrawl map failed for ${tryUrl}:`,
-            e instanceof Error ? e.message : String(e),
+          console.log(
+            `[DeepEnrichment] Firecrawl map success with ${workingUrl}: ${mapResult.links.length} URLs; selected ${highYieldUrls.length} high-yield targets: ${highYieldUrls.join(", ")}`,
           );
         }
+      } catch (e) {
+        console.warn(
+          `[DeepEnrichment] Firecrawl map failed for ${workingUrl}:`,
+          e instanceof Error ? e.message : String(e),
+        );
       }
 
       if (!highYieldUrls.length) {
@@ -1102,14 +1116,17 @@ export const runDeepEnrichment = internalAction({
       }
 
       // ─── Phase 2: Firecrawl Scrape → Get clean Markdown ──────────────────
-      // Firecrawl credit cap: once MAX_FIRECRAWL_SCRAPES_PER_UNIVERSITY is
-      // reached, remaining URLs go straight to the free Jina Reader fallback.
-      let firecrawlUsed = 0;
+      // Credit discipline: 1 map + up to MAX_FIRECRAWL_SCRAPES_PER_UNIVERSITY
+      // scrapes (≤8 total). Once the cap is reached — or a 429 /
+      // insufficient-credits error is seen — remaining URLs go straight to the
+      // free Jina Reader fallback.
+      const maxFirecrawlTotal = 1 + MAX_FIRECRAWL_SCRAPES_PER_UNIVERSITY;
       const scrapeTasks = highYieldUrls.map((targetUrl) => async () => {
         let markdown = "";
         let firecrawlAttempted = false;
-        if (firecrawlUsed < MAX_FIRECRAWL_SCRAPES_PER_UNIVERSITY) {
-          firecrawlUsed++;
+        if (firecrawlCreditsUsed < maxFirecrawlTotal) {
+          firecrawlCreditsUsed += 1;
+          firecrawlScrapeCount += 1;
           firecrawlAttempted = true;
           try {
             const result = await withRetry(
@@ -1123,12 +1140,16 @@ export const runDeepEnrichment = internalAction({
               `[DeepEnrichment] Firecrawl failed for ${targetUrl}, trying Jina Reader fallback:`,
               msg,
             );
-            // Rate-limited: stop burning time on backoff sleeps and route the
-            // remaining URLs through the free Jina Reader path.
-            if (/\b429\b|rate limit|ratelimit/i.test(msg)) {
-              firecrawlUsed = MAX_FIRECRAWL_SCRAPES_PER_UNIVERSITY;
+            // Rate-limited or out of credits: stop burning attempts and route
+            // the remaining URLs through the free Jina Reader path.
+            if (
+              /\b429\b|rate limit|ratelimit|insufficient credits|not enough credits/i.test(
+                msg,
+              )
+            ) {
+              firecrawlCreditsUsed = maxFirecrawlTotal;
               console.warn(
-                `[DeepEnrichment] Firecrawl rate limit hit; switching remaining scrapes to Jina Reader`,
+                `[DeepEnrichment] Firecrawl ${/\b429\b|rate limit|ratelimit/i.test(msg) ? "rate limit" : "credit limit"} hit; switching remaining scrapes to Jina Reader`,
               );
             }
           }
@@ -1245,41 +1266,37 @@ export const runDeepEnrichment = internalAction({
       // already handles NIRF/AISHE/NAAC PDFs via Jina Reader + Gemini Flash-Lite.
       // Keeping deep enrichment focused on stakeholder contacts + website data.
 
-      // ─── Phase 2d: gov.in / IP-blocked snippet fallback ──────────────────
-      // .gov.in sites (e.g. nmi.gov.in) often block Firecrawl/Jina entirely.
-      // When the assembled context is thin, supplement with Serper snippets
-      // (official-domain / gov.in results only) so per-source extraction still
-      // has evidence to work with.
+      // ─── Phase 2d: thin-site snippet fallback (any university) ──────────
+      // Sites that block Firecrawl/Jina (e.g. .gov.in) or are simply thin
+      // produce little context. When the assembled context is below threshold,
+      // supplement with Serper snippets (official-domain results only) so
+      // per-source extraction still has evidence to work with.
       const totalContextChars = validBlocks.reduce(
         (sum, b) => sum + b.length,
         0,
       );
-      if (
-        totalContextChars < 15_000 &&
-        serperKey &&
-        domain.toLowerCase().endsWith(".gov.in")
-      ) {
+      const thinSiteBudget = createSerperBudget({ maxQueries: 2 });
+      if (totalContextChars < 15_000 && serperKey) {
         try {
-          // Fresh Serper budget: the shared budget is usually exhausted by
-          // external-source discovery by this point.
-          const snippetBlocks = await discoverGovInSnippetBlocks(
+          const snippetBlocks = await discoverThinSiteSnippetBlocks(
             uniName,
             domain,
             serperKey,
+            thinSiteBudget,
           );
           if (snippetBlocks.length > 0) {
             validBlocks = validBlocks.concat(snippetBlocks);
             console.log(
-              `[DeepEnrichment] gov.in snippet fallback added ${snippetBlocks.length} blocks (total: ${validBlocks.length}).`,
+              `[DeepEnrichment] thin-site snippet fallback added ${snippetBlocks.length} blocks (total: ${validBlocks.length}).`,
             );
           } else {
             console.warn(
-              `[DeepEnrichment] gov.in snippet fallback produced 0 blocks for ${uniName}`,
+              `[DeepEnrichment] thin-site snippet fallback produced 0 blocks for ${uniName}`,
             );
           }
         } catch (e) {
           console.warn(
-            `[DeepEnrichment] gov.in snippet fallback failed:`,
+            `[DeepEnrichment] thin-site snippet fallback failed:`,
             e instanceof Error ? e.message : String(e),
           );
         }
@@ -1424,13 +1441,13 @@ export const runDeepEnrichment = internalAction({
       // Replaces the old 12× Flash + Pro two-phase pipeline.
 
       // ─── Cost ceiling guard ─────────────────────────────────────────────
-      // Rough estimate: Firecrawl credits * 100 + Gemini input tokens. Abort if too high.
-      // External sources use Jina Reader (free) — only count Firecrawl-based blocks.
+      // Rough estimate: REAL Firecrawl credits * 100 + Gemini input tokens.
+      // Abort if too high. Jina-fallback blocks are free and not counted.
       const firecrawlBasedBlocks = validBlocks.filter(
         (b) =>
           !b.includes("EXTERNAL SOURCE:") && !b.includes("FOLLOWUP SOURCE:"),
       );
-      const firecrawlCreditsConsumed = 1 + firecrawlBasedBlocks.length;
+      const firecrawlCreditsConsumed = firecrawlCreditsUsed;
       const estimatedGeminiTokens = Math.round(finalContext.length / 4);
       const costEstimate =
         firecrawlCreditsConsumed * 100 + estimatedGeminiTokens;
@@ -1478,6 +1495,24 @@ export const runDeepEnrichment = internalAction({
             `[DeepEnrichment] Extracted ${partials.length} partial extractions`,
           );
 
+          // Inject government-data officers (NIRF PDFs etc.) as a synthetic
+          // partial so the merge can reconcile them with website data.
+          if (args.preDiscoveredOfficers && args.preDiscoveredOfficers.length > 0) {
+            partials.push({
+              source_url: "government_data",
+              stakeholders: args.preDiscoveredOfficers.map((o) => ({
+                name: o.name,
+                role: o.role,
+                source_url: "government_data",
+                contact_confidence: 0.5,
+              })),
+              raw: "",
+            });
+            console.log(
+              `[DeepEnrichment] Injected ${args.preDiscoveredOfficers.length} government-data officer candidate(s) into merge`,
+            );
+          }
+
           synthesizedJson = await mergePartialExtractions(
             partials,
             {
@@ -1497,6 +1532,41 @@ export const runDeepEnrichment = internalAction({
             synthesizedJson.stakeholders,
             validBlocks,
           );
+
+          // Deterministic singleton-role enforcement: competing holders of the
+          // same singleton role are reduced to the leaf-page/highest-confidence
+          // record.
+          const singletonResult = enforceSingletonRoles(
+            synthesizedJson.stakeholders,
+          );
+          if (singletonResult.dropped.length > 0) {
+            console.warn(
+              `[DeepEnrichment] Singleton enforcement dropped ${singletonResult.dropped.length} duplicate holder(s) for ${uniName}`,
+            );
+          }
+          synthesizedJson.stakeholders = singletonResult.kept;
+
+          // Gap-fill still-missing singleton leadership roles (free passes
+          // first, then ≤1 Serper query per role, max 3 roles).
+          const gapFilled = await gapFillMissingRoles(
+            synthesizedJson.stakeholders,
+            validBlocks,
+            {
+              uniName,
+              website: url,
+              domain,
+              apiKey,
+              ctx,
+              llmUsageEntries,
+              serperKey,
+            },
+          );
+          if (gapFilled.length > 0) {
+            synthesizedJson.stakeholders = [
+              ...synthesizedJson.stakeholders,
+              ...gapFilled,
+            ];
+          }
 
           console.log(
             `[DeepEnrichment] Gemini latency: ${Date.now() - startMs}ms`,
@@ -1970,12 +2040,12 @@ export const runDeepEnrichment = internalAction({
 
       // ─── Cost / Usage Logging ─────────────────────────────────────────────
       const llmUsage = summarizeLlmUsage(llmUsageEntries);
-      const firecrawlCredits = 1 + firecrawlBasedBlocks.length; // 1 map + N scrapes
+      const firecrawlCredits = firecrawlCreditsUsed; // real API calls
       const flashInputChars = finalContext.length;
       const estimatedFlashTokens = Math.round(flashInputChars / 4);
       console.log(
         `[DeepEnrichment] COST SUMMARY for ${uniName}:\n` +
-          `  Firecrawl credits: ${firecrawlCredits} (1 map + ${firecrawlBasedBlocks.length} scrapes)\n` +
+          `  Firecrawl credits: ${firecrawlCredits} (map: ${firecrawlMapCount}, scrapes: ${firecrawlScrapeCount}) | Jina fallback blocks: ${firecrawlBasedBlocks.length}\n` +
           `  LLM exact tokens: in=${llmUsage.inputTokens.toLocaleString()} out=${llmUsage.outputTokens.toLocaleString()} total=${llmUsage.totalTokens.toLocaleString()}\n` +
           `  LLM exact cost: $${llmUsage.totalCostUsd.toFixed(6)} across ${llmUsage.calls} call(s)\n` +
           `  Estimated input tokens for context guard: ${estimatedFlashTokens.toLocaleString()}\n` +
@@ -1990,6 +2060,8 @@ export const runDeepEnrichment = internalAction({
           flash: estimatedFlashTokens,
           pro: 0, // legacy field — we no longer use Pro
         },
+        serperQueriesUsed: serperBudget.used + thinSiteBudget.used,
+        firecrawlCreditsUsed: firecrawlCredits,
         llmUsage,
         stakeholders: dryRun ? finalStakeholders : undefined,
       };

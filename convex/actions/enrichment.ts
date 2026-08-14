@@ -13,7 +13,6 @@ import {
 } from "../lib/llm";
 import {
   withRetry,
-  cosineSimilarity,
   withConcurrencyLimit,
 } from "../lib/utils";
 import {
@@ -24,11 +23,13 @@ import {
 import { isDecisionMakerRole } from "../lib/stakeholderQuality";
 import { extractContactsWithContext } from "../lib/scrapers";
 import { linkedinMatchesName } from "../lib/validateDeepEnrichment";
+import {
+  createSerperBudget,
+  runWithSerperBudget,
+} from "../lib/serperBudget";
 import * as Sentry from "@sentry/node";
 
 // ─── Constants ─────────────────────────────────────────────────────────────
-const IMAGE_RESULTS = 3; // Limit image search results
-const DEDUP_THRESHOLD = 0.92; // Cosine similarity threshold for deduplication
 const NEWS_MAX_AGE_MONTHS = 18; // Discard news signals older than this
 const REENRICH_COOLDOWN_DAYS = 30; // Skip news/image enrichment if last run was within this window
 const TOP_DECISION_MAKER_ROLES = new Set([
@@ -195,7 +196,7 @@ interface LinkedInBatchResult {
   extraSignals?: Array<{ content: string; source_url?: string }>;
 }
 
-const LINKEDIN_SEARCH_BATCH_SIZE = 3;
+const LINKEDIN_SEARCH_BATCH_SIZE = 5;
 
 /**
  * Search Serper once for a batch of stakeholders, returning any LinkedIn
@@ -389,7 +390,10 @@ function isNewsRecent(text: string): boolean {
 }
 
 export const discoverSocialAndMedia = internalAction({
-  args: { universityId: v.id("universities") },
+  args: {
+    universityId: v.id("universities"),
+    maxSerperQueries: v.optional(v.number()),
+  },
   handler: async (
     ctx,
     args,
@@ -400,6 +404,7 @@ export const discoverSocialAndMedia = internalAction({
     stakeholdersUpdated?: number;
     signalsAdded?: number;
     imagesAdded?: number;
+    serperQueriesUsed?: number;
     llmUsage?: LlmUsageSummary;
   }> => {
     try {
@@ -429,6 +434,9 @@ export const discoverSocialAndMedia = internalAction({
         };
       }
       const cleanSerperKey = serperKey.trim();
+      const serperBudget = createSerperBudget({
+        maxQueries: args.maxSerperQueries ?? 14,
+      });
 
       // Check for recent signals to avoid redundant re-enrichment
       const existingSignals = await ctx.runQuery(
@@ -441,13 +449,13 @@ export const discoverSocialAndMedia = internalAction({
           (a: Doc<"universitySignals">, b: Doc<"universitySignals">) =>
             (b.created_at ?? 0) - (a.created_at ?? 0),
         );
-      const skipNewsAndImage =
+      const skipSerperRefresh =
         recentNewsSignals.length > 0 &&
         (recentNewsSignals[0].created_at ?? 0) >
           Date.now() - REENRICH_COOLDOWN_DAYS * 24 * 60 * 60 * 1000;
-      if (skipNewsAndImage) {
+      if (skipSerperRefresh) {
         console.log(
-          `[Enrichment] Skipping news/image enrichment for ${uni.university_name}: last enriched ${new Date(recentNewsSignals[0].created_at ?? 0).toISOString()}.`,
+          `[Enrichment] Skipping Serper refresh for ${uni.university_name}: last enriched ${new Date(recentNewsSignals[0].created_at ?? 0).toISOString()}.`,
         );
       }
 
@@ -474,20 +482,26 @@ export const discoverSocialAndMedia = internalAction({
       }[] = [];
 
       // 1. LinkedIn searches for stakeholders (batched to reduce Serper queries)
-      const liTargets = stakeholders.filter(
-        (st: Doc<"stakeholders">) =>
-          ((st.name && st.name.trim().length > 2) ||
-            (st.role &&
-              isSingletonRole(st.role) &&
-              !!normalizeStakeholderRole(st.role) &&
-              TOP_DECISION_MAKER_ROLES.has(
-                normalizeStakeholderRole(st.role)!,
-              )) ||
-            !!(st.email && hasRoleBasedInstitutionEmail(st.email))) &&
-          // Skip stakeholders whose existing LinkedIn URL already matches their name
-          (!st.linkedin_url ||
-            !linkedinMatchesName(st.name, st.linkedin_url)),
-      );
+      // Credit discipline: skip entirely within the re-enrichment cooldown and
+      // cap targets to the top-10 decision-makers (2 queries at batch 5).
+      const liTargets = skipSerperRefresh
+        ? []
+        : stakeholders
+            .filter(
+              (st: Doc<"stakeholders">) =>
+                ((st.name && st.name.trim().length > 2) ||
+                  (st.role &&
+                    isSingletonRole(st.role) &&
+                    !!normalizeStakeholderRole(st.role) &&
+                    TOP_DECISION_MAKER_ROLES.has(
+                      normalizeStakeholderRole(st.role)!,
+                    )) ||
+                  !!(st.email && hasRoleBasedInstitutionEmail(st.email))) &&
+                // Skip stakeholders whose existing LinkedIn URL already matches their name
+                (!st.linkedin_url ||
+                  !linkedinMatchesName(st.name, st.linkedin_url)),
+            )
+            .slice(0, 10);
 
       // Clear mismatched LinkedIn URLs before searching
       for (const st of liTargets) {
@@ -510,14 +524,26 @@ export const discoverSocialAndMedia = internalAction({
 
       const liBatchTasks = liBatches.map((batch) => async () => {
         try {
-          const batchResults = await searchStakeholderLinkedInBatch(
-            batch.map((st) => ({ _id: st._id, name: st.name, role: st.role })),
-            uni.university_name,
-            uni.city,
-            cleanSerperKey,
+          if (serperBudget.exhausted || serperBudget.used >= serperBudget.max) {
+            return;
+          }
+          const batchResults = await runWithSerperBudget(
+            serperBudget,
+            () =>
+              searchStakeholderLinkedInBatch(
+                batch.map((st) => ({
+                  _id: st._id,
+                  name: st.name,
+                  role: st.role,
+                })),
+                uni.university_name,
+                uni.city,
+                cleanSerperKey,
+              ),
           );
+          if (!batchResults.ok) return;
 
-          for (const match of batchResults) {
+          for (const match of batchResults.value || []) {
             if (match.linkedin_url) {
               await ctx.runMutation(internal.stakeholders.updateLinkedinInternal, {
                 id: match.stakeholderId,
@@ -562,24 +588,34 @@ export const discoverSocialAndMedia = internalAction({
 
       await withConcurrencyLimit(liBatchTasks, 3);
 
-      // 2. Search external sources for missing email/phone contacts (top 3 per uni)
-      const contactSearchTargets = stakeholders
-        .filter(
-          (st: Doc<"stakeholders">) =>
-            st.name && !st.email && !st.phone && isDecisionMakerRole(st.role),
-        )
-        .slice(0, 3);
+      // 2. Search external sources for missing email/phone contacts (top 1 per uni)
+      // Credit discipline: one query, skipped within the re-enrichment cooldown.
+      const contactSearchTargets = skipSerperRefresh
+        ? []
+        : stakeholders
+            .filter(
+              (st: Doc<"stakeholders">) =>
+                st.name && !st.email && !st.phone && isDecisionMakerRole(st.role),
+            )
+            .slice(0, 1);
 
       const contactTasks = contactSearchTargets.map(
         (st: Doc<"stakeholders">) => async () => {
           try {
-            const found = await searchStakeholderEmailPhone(
-              st.name,
-              st.role,
-              uni.university_name,
-              normalizeInstitutionDomain(uni.website),
-              cleanSerperKey,
+            if (serperBudget.exhausted || serperBudget.used >= serperBudget.max) {
+              return;
+            }
+            const foundResult = await runWithSerperBudget(serperBudget, () =>
+              searchStakeholderEmailPhone(
+                st.name,
+                st.role,
+                uni.university_name,
+                normalizeInstitutionDomain(uni.website),
+                cleanSerperKey,
+              ),
             );
+            if (!foundResult.ok) return;
+            const found = foundResult.value || {};
             if (found.email || found.phone) {
               await ctx.runMutation(internal.stakeholders.updateContactInternal, {
                 id: st._id,
@@ -604,134 +640,93 @@ export const discoverSocialAndMedia = internalAction({
       await withConcurrencyLimit(contactTasks, 3);
 
       // 3. Discover News Signals via Serper (cheaper than Gemini Grounding)
-      if (!skipNewsAndImage) {
+      // Credit discipline: one query, skipped within the re-enrichment cooldown.
+      if (!skipSerperRefresh) {
         try {
           const newsQuery = `${uni.university_name} India news partnerships collaborations MOU campus placement`;
-          const newsData = await withRetry(async () => {
-            const response = await fetch("https://google.serper.dev/search", {
-              method: "POST",
-              headers: {
-                "X-API-KEY": cleanSerperKey,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ q: newsQuery, num: 8 }),
-              signal: AbortSignal.timeout(15000),
-            });
-            if (!response.ok) {
-              throw new Error(
-                `Serper news search failed: ${response.status} ${response.statusText}`,
-              );
-            }
-            return await response.json();
-          });
-
-          const newsResults = (newsData.organic || []).filter(
-            (r: { link?: string; snippet?: string; title?: string }) =>
-              r.link &&
-              (r.snippet || r.title) &&
-              r.title?.toLowerCase() !== uni.university_name.toLowerCase(),
+          const newsSearch = await runWithSerperBudget(serperBudget, () =>
+            withRetry(async () => {
+              const response = await fetch("https://google.serper.dev/search", {
+                method: "POST",
+                headers: {
+                  "X-API-KEY": cleanSerperKey,
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ q: newsQuery, num: 8 }),
+                signal: AbortSignal.timeout(15000),
+              });
+              if (!response.ok) {
+                throw new Error(
+                  `Serper news search failed: ${response.status} ${response.statusText}`,
+                );
+              }
+              return await response.json();
+            }),
           );
 
-          if (newsResults.length > 0) {
-            const newsSynthesis = newsResults
-              .slice(0, 5)
-              .map(
-                (r: { title?: string; snippet?: string; date?: string }) =>
-                  `- ${r.title || ""}: ${r.snippet || ""}${r.date ? ` (${r.date})` : ""}`,
-              )
-              .join("\n");
+          if (!newsSearch.ok) {
+            console.warn(
+              `[Enrichment] Serper news skipped (budget/quota): ${newsSearch.reason ?? ""}`,
+            );
+          } else {
+            const newsData = newsSearch.value as {
+              organic?: Array<{
+                link?: string;
+                snippet?: string;
+                title?: string;
+                date?: string;
+              }>;
+            };
+            const newsResults = (newsData.organic || []).filter(
+              (r) =>
+                r.link &&
+                (r.snippet || r.title) &&
+                r.title?.toLowerCase() !== uni.university_name.toLowerCase(),
+            );
 
-            if (isNewsRecent(newsSynthesis)) {
-              const contentHash = hashString(newsSynthesis);
-              const cachedEmbedding = existingEmbeddingCache.get(contentHash);
-              const embedding =
-                cachedEmbedding ?? (await embed(newsSynthesis, apiKey));
-              allSignals.push({
-                university_id: args.universityId,
-                signal_type: "news",
-                content: newsSynthesis,
-                source_url: newsResults[0].link,
-                embedding,
-              });
-              console.log(
-                `[Enrichment] Serper news for ${uni.university_name}: ${newsResults.length} results, ${newsSynthesis.length} chars`,
-              );
+            if (newsResults.length > 0) {
+              const newsSynthesis = newsResults
+                .slice(0, 5)
+                .map(
+                  (r) =>
+                    `- ${r.title || ""}: ${r.snippet || ""}${r.date ? ` (${r.date})` : ""}`,
+                )
+                .join("\n");
+
+              if (isNewsRecent(newsSynthesis)) {
+                const contentHash = hashString(newsSynthesis);
+                const cachedEmbedding = existingEmbeddingCache.get(contentHash);
+                const embedding =
+                  cachedEmbedding ?? (await embed(newsSynthesis, apiKey));
+                allSignals.push({
+                  university_id: args.universityId,
+                  signal_type: "news",
+                  content: newsSynthesis,
+                  source_url: newsResults[0].link,
+                  embedding,
+                });
+                console.log(
+                  `[Enrichment] Serper news for ${uni.university_name}: ${newsResults.length} results, ${newsSynthesis.length} chars`,
+                );
+              } else {
+                const staleYear = extractLatestYear(newsSynthesis);
+                console.warn(
+                  `[Enrichment] Discarding stale news for ${uni.university_name}: latest year ${staleYear} is older than ${NEWS_MAX_AGE_MONTHS} months.`,
+                );
+              }
             } else {
-              const staleYear = extractLatestYear(newsSynthesis);
-              console.warn(
-                `[Enrichment] Discarding stale news for ${uni.university_name}: latest year ${staleYear} is older than ${NEWS_MAX_AGE_MONTHS} months.`,
+              console.log(
+                `[Enrichment] No recent Serper news for ${uni.university_name}`,
               );
             }
-          } else {
-            console.log(
-              `[Enrichment] No recent Serper news for ${uni.university_name}`,
-            );
           }
         } catch (e) {
           console.error(`[Enrichment] Serper news search failed:`, e);
         }
       }
 
-      // 3. Discover Images (University Logo/Buildings) — skipped if recently enriched
-      let imagesAdded = 0;
-      if (!skipNewsAndImage) {
-        try {
-          const q = `"${uni.university_name}" official logo OR campus building`;
-          const data = await withRetry(async () => {
-            const response = await fetch("https://google.serper.dev/images", {
-              method: "POST",
-              headers: {
-                "X-API-KEY": cleanSerperKey,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ q, num: IMAGE_RESULTS }),
-              signal: AbortSignal.timeout(15000),
-            });
-            if (!response.ok) {
-              throw new Error(
-                `Serper image search failed: ${response.status} ${response.statusText}`,
-              );
-            }
-            return await response.json();
-          });
-
-          const imageResults = data.images || [];
-          const selectedImages = imageResults.slice(0, IMAGE_RESULTS);
-          // Pre-compute all embeddings in parallel
-          const imageSnippets = selectedImages.map(
-            (img: { title?: string }) =>
-              `Image of ${uni.university_name}: ${img.title || "Campus"}`,
-          );
-          const imageEmbeddings = await Promise.all(
-            imageSnippets.map((snippet: string) => embed(snippet, apiKey)),
-          );
-          for (let i = 0; i < selectedImages.length; i++) {
-            const img = selectedImages[i];
-            const embedding = imageEmbeddings[i];
-
-            // Deduplicate: skip if this batch already has a near-identical image signal
-            const isDuplicate = allSignals.some(
-              (s) =>
-                s.signal_type === "image" &&
-                cosineSimilarity(s.embedding, embedding) > DEDUP_THRESHOLD,
-            );
-            if (isDuplicate) continue;
-
-            const imgTitle = (img as { title?: string }).title || "Campus";
-            const imgUrl = (img as { imageUrl: string }).imageUrl;
-            allSignals.push({
-              university_id: args.universityId,
-              signal_type: "image",
-              content: `${imgTitle} | ${imgUrl}`,
-              source_url: (img as { link?: string }).link,
-              embedding,
-            });
-            imagesAdded++;
-          }
-        } catch (e) {
-          console.error(`[Enrichment] Serper.dev Image search failed:`, e);
-        }
-      }
+      // Image search removed: low value for outreach and costs a Serper query.
+      // Logo/campus images can be fetched directly from the website (free).
 
       // 4. Batch Insert Signals
       if (allSignals.length > 0) {
@@ -751,6 +746,7 @@ export const discoverSocialAndMedia = internalAction({
         signalsAdded = allSignals.length;
       }
 
+      const imagesAdded = 0; // image search removed (credit discipline)
       console.log(
         `[Enrichment] Completed for ${uni.university_name}. Updated ${updatedCount} stakeholders, added ${signalsAdded} signals (${imagesAdded} images).`,
       );
@@ -760,6 +756,7 @@ export const discoverSocialAndMedia = internalAction({
         stakeholdersUpdated: updatedCount,
         signalsAdded,
         imagesAdded,
+        serperQueriesUsed: serperBudget.used,
         llmUsage: summarizeLlmUsage(llmUsageEntries),
       };
     } catch (e) {

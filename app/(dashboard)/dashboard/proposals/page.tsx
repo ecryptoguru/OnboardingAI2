@@ -18,6 +18,8 @@ import { useState, useMemo, useRef, useEffect } from "react";
 import { useRequireGeminiKey } from "../../../../components/ApiKeyModal";
 import { useToast } from "../../../../components/Toast";
 
+const STALE_CUTOFF_MS = 90 * 24 * 60 * 60 * 1000;
+
 interface ProposalContent {
   executive_summary?:
     | { hook?: string; why_now?: string; vision_statement?: string }
@@ -50,7 +52,6 @@ export default function ProposalsPage() {
 
   const { withKeyCheck, keyModal: pageKeyModal } = useRequireGeminiKey();
 
-  const STALE_CUTOFF_MS = 90 * 24 * 60 * 60 * 1000;
   // Query args must stay referentially stable across renders — Date.now() in
   // args re-subscribes every render and triggers an infinite update loop.
   const enrichedAfter = useMemo(() => Date.now() - STALE_CUTOFF_MS, []);
@@ -327,7 +328,6 @@ function ProposalCard({
   // Default to stakeholders enriched within the last 90 days so legacy records are hidden.
   // Query args must stay referentially stable across renders — Date.now() in
   // args re-subscribes every render and triggers an infinite update loop.
-  const STALE_CUTOFF_MS = 90 * 24 * 60 * 60 * 1000;
   const enrichedAfter = useMemo(() => Date.now() - STALE_CUTOFF_MS, []);
   const allStakeholders = useQuery(api.stakeholders.listByUniversity, {
     university_id: proposal.university_id,

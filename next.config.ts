@@ -32,8 +32,9 @@ const nextConfig: NextConfig = {
   },
 };
 
-export default withSentryConfig(nextConfig, {
-  silent: true,
-  org: "fretbox",
-  project: "outreach-ai",
-});
+// withSentryConfig adds ~900 MB to the dev server and enables the
+// clientTraceMetadata experiment, which compounds the webpack memory leak.
+// Only enable it for production builds where source maps are uploaded.
+export default process.env.NODE_ENV === "development"
+  ? nextConfig
+  : withSentryConfig(nextConfig, { silent: true, org: "fretbox", project: "outreach-ai" });

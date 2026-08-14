@@ -289,6 +289,47 @@ RULES:
 - Do not invent, infer or round numbers.
 `.trim();
 
+/**
+ * Lightweight office-holder extraction from government PDFs (NIRF/NAAC SSR),
+ * which frequently name the Vice Chancellor / Registrar / Director in the
+ * header pages. Feeds deep enrichment so thin sites still get leadership data.
+ */
+export const OFFICER_EXTRACTION_SCHEMA: Schema = {
+  type: Type.OBJECT,
+  properties: {
+    officers: {
+      type: Type.ARRAY,
+      maxItems: "10",
+      items: {
+        type: Type.OBJECT,
+        properties: {
+          name: {
+            type: Type.STRING,
+            nullable: true,
+            description: "Full name with title, e.g. Dr. Asha Sharma",
+          },
+          role: {
+            type: Type.STRING,
+            nullable: true,
+            description:
+              "Official role exactly as written, e.g. Vice Chancellor, Registrar, Director",
+          },
+        },
+      },
+    },
+  },
+  required: ["officers"],
+};
+
+export const OFFICER_EXTRACTION_SYSTEM_PROMPT = `
+You extract university office-holders from official documents.
+Find the CURRENT named holder of roles like Vice Chancellor, Pro Vice
+Chancellor, Registrar, Chancellor, Finance Officer, Controller of
+Examinations, Director. Preserve "Offg." / "Acting" / "(I/c)" labels.
+Only include people whose name is explicitly present. Return ONLY JSON
+matching the schema with an "officers" array (empty if none found).
+`.trim();
+
 export const STAKEHOLDERS_SCHEMA: Schema = {
   type: Type.OBJECT,
   properties: {

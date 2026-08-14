@@ -284,6 +284,7 @@ async function discoverOfficialAdminPages(
 export const scrapeUniversity = internalAction({
   args: {
     universityId: v.id("universities"),
+    maxSerperQueries: v.optional(v.number()),
   },
   handler: async (
     ctx,
@@ -292,6 +293,7 @@ export const scrapeUniversity = internalAction({
     success: boolean;
     reason?: string;
     error?: string;
+    serperQueriesUsed?: number;
     llmUsage?: LlmUsageSummary;
   }> => {
     try {
@@ -305,7 +307,9 @@ export const scrapeUniversity = internalAction({
       const apiKey = await ctx.runQuery(internal.settings.getInternalGeminiKey);
       const rawSerperKey = await ctx.runQuery(internal.settings.getInternalSerperKey);
       const serperKey = rawSerperKey ? rawSerperKey.trim() : null;
-      const serperBudget = createSerperBudget({ maxQueries: 6 });
+      const serperBudget = createSerperBudget({
+        maxQueries: args.maxSerperQueries ?? 6,
+      });
       const allowSerper = !!serperKey && !serperBudget.exhausted;
 
       if (!university) throw new Error("University not found");
@@ -882,7 +886,11 @@ export const scrapeUniversity = internalAction({
         stage: "enriched",
       });
 
-      return { success: true, llmUsage: summarizeLlmUsage(llmUsageEntries) };
+      return {
+        success: true,
+        serperQueriesUsed: serperBudget.used,
+        llmUsage: summarizeLlmUsage(llmUsageEntries),
+      };
     } catch (e) {
       console.error("[Scraper] Fatal error:", e);
       Sentry.captureException(e, {

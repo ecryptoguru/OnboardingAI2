@@ -200,6 +200,42 @@ async function extractOnePartial(
   }
 }
 
+const LEADERSHIP_URL_RE =
+  /(?<![a-zA-Z])(officer|officers|administration|registrar|vice[-_ ]?chancellor|chancellor|dean|deans|director|controller|warden|leadership|contact|telephone[-_ ]?directory)(?![a-zA-Z])/i;
+const LEADERSHIP_BODY_RE =
+  /\b(vice[- ]?chancellor|registrar|chancellor|dean|director|controller of examinations|finance officer|warden|pro[- ]?vice[- ]?chancellor)\b/gi;
+
+/**
+ * Rank scraped source blocks so the officers/administration table is always
+ * among the blocks sent to per-source extraction (we only extract
+ * MAX_PARTIAL_SOURCES blocks — previously the first 6 in array order, which
+ * could skip the highest-value page if it arrived late).
+ */
+export function rankBlocksForExtraction(blocks: string[]): string[] {
+  const scored = blocks.map((block) => {
+    const headerMatch = block.match(
+      /=== (?:SOURCE|EXTERNAL SOURCE|FOLLOWUP SOURCE): ([^=\n]+) ===/,
+    );
+    const url = headerMatch?.[1]?.toLowerCase() ?? "";
+    const body = block.slice(0, 4000);
+
+    let score = 0;
+    if (LEADERSHIP_URL_RE.test(url)) score += 8;
+    if (/\b(anti[-_]?ragging|iqac|mandatory[-_ ]?disclosure)\b/i.test(url))
+      score += 3;
+    const roleHits = (body.match(LEADERSHIP_BODY_RE) || []).length;
+    score += Math.min(roleHits, 6) * 1.5;
+    if (/\b(email|phone|telephone|mobile)\b/i.test(body)) score += 2;
+    score += Math.min(body.length / 500, 6);
+
+    return { block, score };
+  });
+
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .map((s) => s.block);
+}
+
 export async function extractPartialsFromSources(
   blocks: string[],
   options: PerSourceOptions,
@@ -209,7 +245,10 @@ export async function extractPartialsFromSources(
 ): Promise<PartialExtraction[]> {
   if (blocks.length === 0) return [];
 
-  const selected = blocks.slice(0, MAX_PARTIAL_SOURCES);
+  const selected = rankBlocksForExtraction(blocks).slice(
+    0,
+    MAX_PARTIAL_SOURCES,
+  );
   const tasks = selected.map(
     (block) => () => extractOnePartial(block, options, apiKey, ctx, llmUsageEntries),
   );

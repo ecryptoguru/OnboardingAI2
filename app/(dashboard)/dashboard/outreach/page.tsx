@@ -22,6 +22,8 @@ import { useRequireGeminiKey } from "../../../../components/ApiKeyModal";
 import { useToast } from "../../../../components/Toast";
 import { DocumentMailerModal } from "../../../../components/DocumentMailerModal";
 
+const STALE_CUTOFF_MS = 90 * 24 * 60 * 60 * 1000;
+
 const COLUMNS = [
   { id: "enriched", label: "Ready to Sequence", color: "sky" },
   { id: "outreach_active", label: "Outreach Active", color: "blue" },
@@ -735,7 +737,6 @@ function SimulateReplyModal({
   // Default to recently enriched stakeholders; hide legacy records.
   // Query args must stay referentially stable across renders — Date.now() in
   // args re-subscribes every render and triggers an infinite update loop.
-  const STALE_CUTOFF_MS = 90 * 24 * 60 * 60 * 1000;
   const enrichedAfter = useMemo(
     () => Date.now() - STALE_CUTOFF_MS,
     [],
