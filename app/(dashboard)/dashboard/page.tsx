@@ -297,7 +297,7 @@ export default function UniversitiesPage() {
                             : uni.type === "Deemed"
                               ? "bg-orange-500/10 text-orange-400 border border-orange-500/20"
                               : uni.type === "INI"
-                                ? "bg-purple-500/10 text-purple-400 border border-purple-500/20"
+                                ? "bg-cyan-500/10 text-cyan-400 border border-cyan-500/20"
                                 : "bg-muted text-muted-foreground border border-card-border/50"
                       }`}
                     >
