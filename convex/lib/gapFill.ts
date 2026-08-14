@@ -77,6 +77,46 @@ function focusedSystemPrompt(role: string): string {
   );
 }
 
+const NON_LEADERSHIP_URL_RE =
+  /\/(departments?|faculty|staff|people|profile|profiles|teams?|alumni|students?)\//i;
+
+/**
+ * Verifies the extracted name actually belongs to the role: the role keyword
+ * and the person's surname must appear within ±1 line of each other in the
+ * source block. Prevents "Vice Chancellor" appearing in a nav/menu/committee
+ * list from capturing an unrelated name on the page.
+ */
+export function verifyNameRoleProximity(
+  role: string,
+  name: string | undefined | null,
+  block: string,
+): boolean {
+  if (!name) return false;
+  const roleRe = ROLE_KEYWORD_RE[role] ?? new RegExp(`\\b${role}\\b`, "i");
+  const tokens = name
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length > 2);
+  if (tokens.length === 0) return false;
+  const surname = tokens[tokens.length - 1];
+
+  const lines = block.split("\n");
+  let roleLine = -1;
+  let nameLine = -1;
+  lines.forEach((line, i) => {
+    if (roleRe.test(line) && roleLine < 0) roleLine = i;
+    if (line.toLowerCase().includes(surname) && nameLine < 0) nameLine = i;
+  });
+  if (roleLine < 0 || nameLine < 0) return false;
+  return Math.abs(roleLine - nameLine) <= 1;
+}
+
+function isNonLeadershipSource(block: string): boolean {
+  const url = block.match(/=== (?:SOURCE|EXTERNAL SOURCE|FOLLOWUP SOURCE): ([^=\n]+) ===/)?.[1] ?? "";
+  return NON_LEADERSHIP_URL_RE.test(url.toLowerCase());
+}
+
 function sanitiseForBlock(stakeholders: StakeholderLike[], block: string): StakeholderLike[] {
   const lowerBlock = block.toLowerCase();
   return stakeholders.map((st) => {
@@ -129,7 +169,14 @@ async function extractRoleFromBlock(
       block,
     );
     options.llmUsageEntries.push(result.usage);
-    return stakeholders.find((st) => st.name) ?? null;
+    const candidate = stakeholders.find((st) => st.name) ?? null;
+    if (candidate && !verifyNameRoleProximity(role, candidate.name, block)) {
+      console.warn(
+        `[GapFill] Rejecting ${role} candidate "${candidate.name}": name not adjacent to role keyword in source`,
+      );
+      return null;
+    }
+    return candidate;
   } catch (e) {
     console.warn(
       `[GapFill] Extraction failed for ${role}:`,
@@ -147,6 +194,7 @@ async function scanExistingBlocks(
 ): Promise<StakeholderLike | null> {
   const roleRe = ROLE_KEYWORD_RE[role] ?? new RegExp(role, "i");
   const candidates = blocks
+    .filter((block) => !isNonLeadershipSource(block))
     .map((block) => {
       const lines = block.split("\n");
       const hitLines: string[] = [];

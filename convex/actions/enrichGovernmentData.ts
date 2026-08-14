@@ -585,26 +585,43 @@ export const enrichGovernmentData = internalAction({
             `nirf_total (number or null), nirf_male (number or null), nirf_female (number or null), ` +
             `nirf_source (string or null, e.g. "NIRF 2024-25"). ` +
             `Use null for missing values. Do not include any explanation.`;
-          const groundingResponse = await aiClient.models.generateContent({
-            model: MODELS.geminiFlash,
-            contents: {
-              role: "user",
-              parts: [
-                {
-                  text: groundingPrompt,
+          // Retry once with a longer timeout: grounding calls frequently
+          // abort on the first attempt for blocked/state sites.
+          let groundingResponse: Awaited<ReturnType<typeof aiClient.models.generateContent>> | null = null;
+          for (let attempt = 1; attempt <= 2 && !groundingResponse; attempt++) {
+            try {
+              groundingResponse = await aiClient.models.generateContent({
+                model: MODELS.geminiFlash,
+                contents: {
+                  role: "user",
+                  parts: [
+                    {
+                      text: groundingPrompt,
+                    },
+                  ],
                 },
-              ],
-            },
-            config: {
-              systemInstruction:
-                "Use Google Search to find official government enrollment data. Return ONLY valid JSON.",
-              temperature: 0.0,
-              maxOutputTokens: 1024,
-              responseMimeType: "application/json",
-              tools: [{ googleSearch: {} }],
-              httpOptions: { timeout: 25000 },
-            },
-          });
+                config: {
+                  systemInstruction:
+                    "Use Google Search to find official government enrollment data. Return ONLY valid JSON.",
+                  temperature: 0.0,
+                  maxOutputTokens: 1024,
+                  responseMimeType: "application/json",
+                  tools: [{ googleSearch: {} }],
+                  httpOptions: { timeout: 60000 },
+                },
+              });
+            } catch (groundingAttemptErr) {
+              console.warn(
+                `[GovData] Grounding fallback attempt ${attempt} failed for ${uniName}:`,
+                groundingAttemptErr instanceof Error
+                  ? groundingAttemptErr.message
+                  : String(groundingAttemptErr),
+              );
+            }
+          }
+          if (!groundingResponse) {
+            throw new Error("Grounding fallback failed after 2 attempts");
+          }
           llmUsageEntries.push(
             createLlmUsageEntry({
               label: "gov_data_grounding_only_fallback",

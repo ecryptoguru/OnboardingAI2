@@ -901,6 +901,12 @@ export const runDeepEnrichment = internalAction({
         }),
       ),
     ),
+    // Scheduled-orchestration continuation: when set, deep schedules the
+    // post-deep phases (social refresh + scoring) itself instead of returning,
+    // so it never runs as a nested child action with a tighter runtime cap.
+    continuation: v.optional(v.boolean()),
+    queue: v.optional(v.array(v.string())),
+    serperUsedBefore: v.optional(v.number()),
   },
   handler: async (
     ctx,
@@ -983,6 +989,9 @@ export const runDeepEnrichment = internalAction({
       let firecrawlCreditsUsed = 0;
       let firecrawlMapCount = 0;
       let firecrawlScrapeCount = 0;
+      // Set when the Firecrawl plan reports no credits left: the rest of the
+      // run goes Jina-only without wasting scrape attempts.
+      let firecrawlDisabled = false;
 
       try {
         firecrawlCreditsUsed += 1;
@@ -1010,10 +1019,17 @@ export const runDeepEnrichment = internalAction({
           );
         }
       } catch (e) {
+        const mapErr = e instanceof Error ? e.message : String(e);
         console.warn(
           `[DeepEnrichment] Firecrawl map failed for ${workingUrl}:`,
-          e instanceof Error ? e.message : String(e),
+          mapErr,
         );
+        if (/insufficient credits|not enough credits/i.test(mapErr)) {
+          firecrawlDisabled = true;
+          console.warn(
+            `[DeepEnrichment] Firecrawl plan out of credits; running Jina-only for ${uniName}`,
+          );
+        }
       }
 
       if (!highYieldUrls.length) {
@@ -1124,7 +1140,7 @@ export const runDeepEnrichment = internalAction({
       const scrapeTasks = highYieldUrls.map((targetUrl) => async () => {
         let markdown = "";
         let firecrawlAttempted = false;
-        if (firecrawlCreditsUsed < maxFirecrawlTotal) {
+        if (!firecrawlDisabled && firecrawlCreditsUsed < maxFirecrawlTotal) {
           firecrawlCreditsUsed += 1;
           firecrawlScrapeCount += 1;
           firecrawlAttempted = true;
@@ -1148,6 +1164,9 @@ export const runDeepEnrichment = internalAction({
               )
             ) {
               firecrawlCreditsUsed = maxFirecrawlTotal;
+              if (/insufficient credits|not enough credits/i.test(msg)) {
+                firecrawlDisabled = true;
+              }
               console.warn(
                 `[DeepEnrichment] Firecrawl ${/\b429\b|rate limit|ratelimit/i.test(msg) ? "rate limit" : "credit limit"} hit; switching remaining scrapes to Jina Reader`,
               );
@@ -1562,10 +1581,18 @@ export const runDeepEnrichment = internalAction({
             },
           );
           if (gapFilled.length > 0) {
-            synthesizedJson.stakeholders = [
+            // Re-run singleton enforcement so a gap-fill match can never create
+            // competing holders of the same singleton role.
+            const finalSingleton = enforceSingletonRoles([
               ...synthesizedJson.stakeholders,
               ...gapFilled,
-            ];
+            ]);
+            if (finalSingleton.dropped.length > 0) {
+              console.warn(
+                `[DeepEnrichment] Singleton enforcement (post gap-fill) dropped ${finalSingleton.dropped.length} duplicate holder(s) for ${uniName}`,
+              );
+            }
+            synthesizedJson.stakeholders = finalSingleton.kept;
           }
 
           console.log(
@@ -2052,6 +2079,30 @@ export const runDeepEnrichment = internalAction({
           `  Context: ${finalContext.length.toLocaleString()} chars (raw: ${rawContext.length.toLocaleString()})`,
       );
 
+      const serperUsedDeep = serperBudget.used + thinSiteBudget.used;
+
+      // Scheduled-orchestration continuation: hand off to the post-deep
+      // phases via the scheduler (each scheduled action gets its full runtime
+      // budget, avoiding the tighter nested child-action cap).
+      if (args.continuation && !dryRun) {
+        await ctx.scheduler.runAfter(
+          0,
+          internal.actions.orchestrator.finishEnrichmentChainInternal,
+          {
+            universityId: args.universityId,
+            queue: args.queue ?? [],
+            serperUsedBefore: args.serperUsedBefore ?? 0,
+            serperUsedDeep,
+            firecrawlCreditsUsed: firecrawlCredits,
+            deepSuccess: true,
+            stakeholdersSynthesized: finalStakeholders.length,
+          },
+        );
+        console.log(
+          `[DeepEnrichment] Scheduled post-deep continuation for ${uniName}`,
+        );
+      }
+
       return {
         success: true,
         stakeholdersSynthesized: finalStakeholders.length,
@@ -2060,7 +2111,7 @@ export const runDeepEnrichment = internalAction({
           flash: estimatedFlashTokens,
           pro: 0, // legacy field — we no longer use Pro
         },
-        serperQueriesUsed: serperBudget.used + thinSiteBudget.used,
+        serperQueriesUsed: serperUsedDeep,
         firecrawlCreditsUsed: firecrawlCredits,
         llmUsage,
         stakeholders: dryRun ? finalStakeholders : undefined,
@@ -2070,6 +2121,29 @@ export const runDeepEnrichment = internalAction({
       Sentry.captureException(e, {
         extra: { universityId: args.universityId },
       });
+      // Even on failure, continue the sequential batch.
+      if (args.continuation && !args.dryRun) {
+        try {
+          await ctx.scheduler.runAfter(
+            0,
+            internal.actions.orchestrator.finishEnrichmentChainInternal,
+            {
+              universityId: args.universityId,
+              queue: args.queue ?? [],
+              serperUsedBefore: args.serperUsedBefore ?? 0,
+              serperUsedDeep: 0,
+              firecrawlCreditsUsed: 0,
+              deepSuccess: false,
+              stakeholdersSynthesized: 0,
+            },
+          );
+        } catch (scheduleErr) {
+          console.error(
+            "[DeepEnrichment] Failed to schedule continuation:",
+            scheduleErr,
+          );
+        }
+      }
       return {
         success: false,
         error: String(e),

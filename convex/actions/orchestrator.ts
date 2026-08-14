@@ -23,6 +23,7 @@ export const runEnrichmentChainInternal = internalAction({
     warnings?: string[];
     llmUsage?: LlmUsageSummary;
     error?: string;
+    message?: string;
   }> => {
     let university: Doc<"universities"> | null = null;
 
@@ -74,7 +75,6 @@ export const runEnrichmentChainInternal = internalAction({
       };
       const warnings: string[] = [];
       let serperQueriesUsed = 0;
-      let firecrawlCreditsUsed = 0;
       const llmUsageEntries: LlmUsageEntry[] = [];
       const appendLlmUsage = (result: unknown) => {
         const entries =
@@ -275,140 +275,45 @@ export const runEnrichmentChainInternal = internalAction({
         console.error("[Orchestrator] Government data enrichment failed", e);
       }
 
-      // Phase 4: Deep Enrichment (uses data from all previous phases)
+      // Phase 4: Deep Enrichment — scheduled as a TOP-LEVEL action so it gets
+      // its full runtime budget (nested ctx.runAction children are killed at
+      // ~5 min, which lost Anna/Adamas in Jina-only mode). Deep schedules
+      // finishEnrichmentChainInternal (phases 5-6 + queue chaining) on
+      // completion.
       await trackProgress("phase-4-deep-enrichment");
       try {
         if (websiteReady) {
-          console.log(`[Orchestrator] Phase 4: Running deep enrichment`);
-          const deepRes: unknown = await ctx.runAction(
+          console.log(
+            `[Orchestrator] Phase 4: Scheduling deep enrichment (background) for ${university.university_name}`,
+          );
+          await ctx.scheduler.runAfter(
+            0,
             internal.actions.deepEnrichment.runDeepEnrichment,
             {
               universityId: args.universityId,
               maxSerperQueries: 5,
               preDiscoveredOfficers: govOfficers,
-            },
-          );
-          results.deepEnrichment =
-            (deepRes as { success?: boolean })?.success === true;
-          if (
-            results.deepEnrichment &&
-            (deepRes as { stakeholdersSynthesized?: number })
-              ?.stakeholdersSynthesized === 0
-          ) {
-            warnings.push(
-              `deepEnrichment returned 0 stakeholders for ${university.university_name}`,
-            );
-            console.warn(
-              `[Orchestrator] WARNING: deep enrichment returned 0 stakeholders for ${university.university_name}`,
-            );
-          }
-          serperQueriesUsed +=
-            (deepRes as { serperQueriesUsed?: number })?.serperQueriesUsed ?? 0;
-          firecrawlCreditsUsed +=
-            (deepRes as { firecrawlCreditsUsed?: number })
-              ?.firecrawlCreditsUsed ?? 0;
-          appendLlmUsage(deepRes);
-        }
-      } catch (e) {
-        console.error("[Orchestrator] Deep Enrichment failed", e);
-      }
-
-      // Phase 5: Refresh social/profile enrichment after deep extraction
-      // Deep enrichment may add better stakeholders; run LinkedIn/news/image enrichment
-      // again so these newly extracted contacts also get profile/signal coverage.
-      await trackProgress("phase-5-social-refresh");
-      try {
-        console.log(
-          `[Orchestrator] Phase 5: Refreshing social/profile enrichment`,
-        );
-        const socialRefreshRes = await ctx.runAction(
-          internal.actions.enrichment.discoverSocialAndMedia,
-          { universityId: args.universityId, maxSerperQueries: 0 },
-        );
-        results.socialMediaPostDeep =
-          (socialRefreshRes as { success?: boolean })?.success === true;
-        appendLlmUsage(socialRefreshRes);
-      } catch (e) {
-        console.error(
-          "[Orchestrator] Post-deep social/profile refresh failed",
-          e,
-        );
-      }
-
-      // Phase 6: Scoring (depends on demographics and stakeholders being populated)
-      await trackProgress("phase-6-scoring");
-      try {
-        if (websiteReady) {
-          await ctx.runMutation(
-            internal.stakeholders.dedupeSingletonRoleContactsInternal,
-            {
-              university_id: args.universityId,
+              continuation: true,
+              queue: args.queue ?? [],
+              serperUsedBefore: serperQueriesUsed,
             },
           );
         }
-        console.log(`[Orchestrator] Phase 6: Running scoring`);
-        const scoreRes = await ctx.runAction(
-          internal.actions.scoring.scoreUniversity,
-          { universityId: args.universityId },
-        );
-        results.scoring = (scoreRes as { success?: boolean })?.success === true;
       } catch (e) {
-        console.error("[Orchestrator] Scoring failed", e);
+        console.error("[Orchestrator] Deep Enrichment scheduling failed", e);
       }
 
-      // The chain is only successful if the final scoring phase completed,
-      // because that is the deliverable the rest of the pipeline consumes.
-      const allOk: boolean = results.scoring;
-      console.log(
-        `[Orchestrator] Enrichment chain completed for ${args.universityId}: scrape=${results.scrape} antiRagging=${results.antiRagging} govData=${results.governmentData} social=${results.socialMedia} socialPostDeep=${results.socialMediaPostDeep} infer=${results.inferContacts} deep=${results.deepEnrichment} score=${results.scoring}`,
-      );
-      console.log(
-        `[CreditUsage] ${university?.university_name ?? args.universityId}: serper=${serperQueriesUsed}/14 firecrawl=${firecrawlCreditsUsed}/8`,
-      );
+      await trackProgress("phase-4-deep-enrichment", "completed");
 
-      // Sequential batch chaining: continue the queue via the scheduler so each
-      // action stays within its own runtime limit.
-      if (args.queue && args.queue.length > 0) {
-        const [nextId, ...rest] = args.queue;
-        await ctx.scheduler.runAfter(
-          0,
-          internal.actions.orchestrator.runEnrichmentChainInternal,
-          { universityId: nextId as Id<"universities">, queue: rest },
-        );
-        console.log(
-          `[Orchestrator] Scheduled next university in queue: ${nextId} (${rest.length} remaining)`,
-        );
-      }
-
-      await trackProgress(
-        allOk ? "completed" : "failed",
-        allOk ? "completed" : "failed",
-      );
-      await ctx.runMutation(
-        internal.universities.updateEnrichmentProgressInternal,
-        {
-          universityId: args.universityId,
-          completed_at: Date.now(),
-        },
-      );
-
-      // If scoring did not finish, clear the "enriching" stage so the UI does
-      // not get stuck and the record can be retried.
-      if (!allOk) {
-        await ctx.runMutation(
-          internal.universities.updateOutreachStageInternal,
-          {
-            universityId: args.universityId,
-            stage: "new",
-          },
-        );
-      }
-
+      // Phases 5-6 (social refresh + scoring) run inside
+      // finishEnrichmentChainInternal, scheduled by deep on completion.
       return {
-        success: allOk,
+        success: true,
         steps: results,
         warnings,
         llmUsage: summarizeLlmUsage(llmUsageEntries),
+        message:
+          "Deep enrichment scheduled; post-deep phases run via scheduler continuation.",
       };
     } catch (e) {
       console.error("[Orchestrator] Fatal error:", e);
@@ -531,6 +436,143 @@ export const scheduleEnrichmentBatch = internalAction({
       success: true,
       enqueued: args.queue.length,
       message: `Enrichment batch enqueued (${args.queue.length} universities, sequential).`,
+    };
+  },
+});
+
+/**
+ * Post-deep continuation (scheduled by runDeepEnrichment): phase 5 social
+ * refresh, phase 6 scoring, credit telemetry, progress completion, and
+ * sequential queue chaining. Runs as its own scheduled action so each stage
+ * gets a full runtime budget.
+ */
+export const finishEnrichmentChainInternal = internalAction({
+  args: {
+    universityId: v.id("universities"),
+    queue: v.optional(v.array(v.string())),
+    serperUsedBefore: v.optional(v.number()),
+    serperUsedDeep: v.optional(v.number()),
+    firecrawlCreditsUsed: v.optional(v.number()),
+    deepSuccess: v.optional(v.boolean()),
+    stakeholdersSynthesized: v.optional(v.number()),
+  },
+  handler: async (ctx, args): Promise<{
+    success: boolean;
+    deepSuccess?: boolean;
+    scoring?: boolean;
+    warnings?: string[];
+    llmUsage?: LlmUsageSummary;
+    message?: string;
+  }> => {
+    const warnings: string[] = [];
+    const llmUsageEntries: LlmUsageEntry[] = [];
+    const appendLlmUsage = (result: unknown) => {
+      const entries =
+        (result as { llmUsage?: { entries?: LlmUsageEntry[] } })?.llmUsage
+          ?.entries || [];
+      llmUsageEntries.push(...entries);
+    };
+    const university = await ctx.runQuery(internal.universities.getInternal, {
+      universityId: args.universityId,
+    });
+    const uniName = university?.university_name ?? args.universityId;
+    const websiteReady = !!university?.website;
+    const results: Record<string, boolean> = {
+      deepEnrichment: args.deepSuccess ?? false,
+      socialMediaPostDeep: false,
+      scoring: false,
+    };
+
+    if ((args.deepSuccess ?? false) && (args.stakeholdersSynthesized ?? 0) === 0) {
+      warnings.push(`deepEnrichment returned 0 stakeholders for ${uniName}`);
+      console.warn(
+        `[Orchestrator] WARNING: deep enrichment returned 0 stakeholders for ${uniName}`,
+      );
+    }
+
+    // Phase 5: Refresh social/profile enrichment (cooldown-gated; 0 Serper).
+    try {
+      console.log(`[Orchestrator] Phase 5: Refreshing social/profile enrichment`);
+      const socialRefreshRes = await ctx.runAction(
+        internal.actions.enrichment.discoverSocialAndMedia,
+        { universityId: args.universityId, maxSerperQueries: 0 },
+      );
+      results.socialMediaPostDeep =
+        (socialRefreshRes as { success?: boolean })?.success === true;
+      appendLlmUsage(socialRefreshRes);
+    } catch (e) {
+      console.error("[Orchestrator] Post-deep social/profile refresh failed", e);
+    }
+
+    // Phase 6: Scoring.
+    try {
+      if (websiteReady) {
+        await ctx.runMutation(
+          internal.stakeholders.dedupeSingletonRoleContactsInternal,
+          { university_id: args.universityId },
+        );
+      }
+      console.log(`[Orchestrator] Phase 6: Running scoring`);
+      const scoreRes = await ctx.runAction(
+        internal.actions.scoring.scoreUniversity,
+        { universityId: args.universityId },
+      );
+      results.scoring = (scoreRes as { success?: boolean })?.success === true;
+    } catch (e) {
+      console.error("[Orchestrator] Scoring failed", e);
+    }
+
+    const allOk = results.scoring;
+    const serperTotal =
+      (args.serperUsedBefore ?? 0) + (args.serperUsedDeep ?? 0);
+    console.log(
+      `[CreditUsage] ${uniName}: serper=${serperTotal}/14 firecrawl=${args.firecrawlCreditsUsed ?? 0}/8 deep=${results.deepEnrichment} score=${results.scoring}`,
+    );
+    console.log(
+      `[Orchestrator] Enrichment chain completed for ${args.universityId}: deep=${results.deepEnrichment} socialPostDeep=${results.socialMediaPostDeep} score=${results.scoring}`,
+    );
+
+    await ctx.runMutation(
+      internal.universities.updateEnrichmentProgressInternal,
+      {
+        universityId: args.universityId,
+        completed_at: Date.now(),
+      },
+    );
+    await ctx.runMutation(
+      internal.universities.updateEnrichmentProgressInternal,
+      {
+        universityId: args.universityId,
+        status: allOk ? "completed" : "failed",
+        phase: allOk ? "completed" : "failed",
+      },
+    );
+    if (!allOk) {
+      await ctx.runMutation(internal.universities.updateOutreachStageInternal, {
+        universityId: args.universityId,
+        stage: "new",
+      });
+    }
+
+    // Sequential batch chaining.
+    if (args.queue && args.queue.length > 0) {
+      const [nextId, ...rest] = args.queue;
+      await ctx.scheduler.runAfter(
+        0,
+        internal.actions.orchestrator.runEnrichmentChainInternal,
+        { universityId: nextId as Id<"universities">, queue: rest },
+      );
+      console.log(
+        `[Orchestrator] Scheduled next university in queue: ${nextId} (${rest.length} remaining)`,
+      );
+    }
+
+    return {
+      success: allOk,
+      deepSuccess: results.deepEnrichment,
+      scoring: results.scoring,
+      warnings,
+      llmUsage: summarizeLlmUsage(llmUsageEntries),
     };
   },
 });

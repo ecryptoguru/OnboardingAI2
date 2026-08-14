@@ -3,6 +3,33 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import { enforceSingletonRoles } from "../../convex/lib/validateDeepEnrichment";
+import { verifyNameRoleProximity } from "../../convex/lib/gapFill";
+
+describe("verifyNameRoleProximity", () => {
+  it("accepts a name on the role line", () => {
+    const block = "Vice Chancellor: Dr. Asha Sharma\nRegistrar: Mr. R. Mehta";
+    assert.strictEqual(verifyNameRoleProximity("Vice Chancellor", "Dr. Asha Sharma", block), true);
+  });
+
+  it("accepts a name on the line directly below the role heading", () => {
+    const block = "Vice Chancellor\nDr. Asha Sharma\nContact: vc@uni.edu";
+    assert.strictEqual(verifyNameRoleProximity("Vice Chancellor", "Dr. Asha Sharma", block), true);
+  });
+
+  it("rejects a name far from the role keyword (nav/committee noise)", () => {
+    const block =
+      "Menu: Vice Chancellor | Registrar | Deans\n" +
+      "Department of English\n" +
+      "Prof. Raja Sekhar Patteti, Head\n" +
+      "Research interests: modern poetry";
+    assert.strictEqual(verifyNameRoleProximity("Vice Chancellor", "Prof. Raja Sekhar Patteti", block), false);
+  });
+
+  it("rejects when the name is absent", () => {
+    const block = "Vice Chancellor: Dr. A\n";
+    assert.strictEqual(verifyNameRoleProximity("Vice Chancellor", "Dr. Nobody", block), false);
+  });
+});
 
 describe("enforceSingletonRoles", () => {
   it("keeps a single holder per singleton role", () => {
