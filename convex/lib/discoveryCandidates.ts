@@ -56,11 +56,29 @@ function getSignificantWords(universityName: string): string[] {
 }
 
 function getUniversityAcronyms(universityName: string): string[] {
-  const tokens = tokenizeUniversityName(universityName).filter(
-    (word) => !["of", "and"].includes(word),
-  );
+  const rawTokens = tokenizeUniversityName(universityName);
+  const tokens = rawTokens.filter((word) => !["of", "and"].includes(word));
   const acronym = tokens.map((word) => word[0]).join("");
-  return acronym.length >= 2 ? [acronym] : [];
+  const acronyms: string[] = acronym.length >= 2 ? [acronym] : [];
+
+  // Capture dotted initialisms like "S.R.M" / "I.I.T" as well as short
+  // leading tokens like "SRM" / "VIT" that are effectively brand acronyms.
+  const dotted = universityName.match(/^([A-Z](?:\.[A-Z]){1,4})/);
+  if (dotted) {
+    acronyms.push(dotted[1].replace(/\./g, "").toLowerCase());
+  }
+
+  const first = rawTokens[0];
+  if (
+    first &&
+    first.length >= 2 &&
+    first.length <= 5 &&
+    /^[a-z]+$/.test(first)
+  ) {
+    acronyms.push(first);
+  }
+
+  return [...new Set(acronyms)];
 }
 
 function matchesAcronymDomainRoot(acronym: string, domainRoot: string): boolean {
