@@ -40,6 +40,10 @@ function tokenizeUniversityName(universityName: string): string[] {
   return tokenizeText(universityName);
 }
 
+function isCommonWord(word: string): boolean {
+  return ["the", "and", "for", "but", "with"].includes(word);
+}
+
 function getSignificantWords(universityName: string): string[] {
   return tokenizeUniversityName(universityName).filter(
     (word) =>
@@ -65,15 +69,19 @@ function getUniversityAcronyms(universityName: string): string[] {
   // leading tokens like "SRM" / "VIT" that are effectively brand acronyms.
   const dotted = universityName.match(/^([A-Z](?:\.[A-Z]){1,4})/);
   if (dotted) {
-    acronyms.push(dotted[1].replace(/\./g, "").toLowerCase());
+    const initialism = dotted[1].replace(/\./g, "").toLowerCase();
+    if (initialism.length >= 3 && !isCommonWord(initialism)) {
+      acronyms.push(initialism);
+    }
   }
 
   const first = rawTokens[0];
   if (
     first &&
-    first.length >= 2 &&
+    first.length >= 3 &&
     first.length <= 5 &&
-    /^[a-z]+$/.test(first)
+    /^[a-z]+$/.test(first) &&
+    !isCommonWord(first)
   ) {
     acronyms.push(first);
   }
