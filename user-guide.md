@@ -138,21 +138,21 @@ Click any table row to open a detail panel. The panel shows:
 
 ## 5. Enrichment
 
-Enrichment is the multi-phase process of using AI to research a university and extract valuable signals.
+Enrichment is the multi-phase process of using AI to research a university and extract valuable signals. Long-running enrichment is scheduled in the background so the dashboard never blocks waiting for it.
 
 ### The enrichment chain
 
-For each selected university, the system runs the following phases in order:
+For each selected university, the system runs the following phases in order. Long chains are split across scheduled actions so no single run exceeds the server runtime limit.
 
 | Phase | What it does |
 | ------- | -------------- |
-| **Discovery** | Finds and validates the official website when one is missing or suspicious. |
+| **Discovery** | Finds and validates the official website when one is missing or suspicious. Uses Serper (≤14 queries) with owned-domain heuristics; aggregators and unrelated social/company pages are rejected. |
 | **Scraping** | Extracts website data, including anti-ragging and contact pages. |
-| **Social & media discovery** | Searches LinkedIn, Google News, Google Images, and Serper results. |
+| **Social & media discovery** | Searches LinkedIn and Google News via Serper (cooldown-gated, no image search). |
 | **Contact inference** | Infers role-based contacts from the scraped site. |
-| **Government data enrichment** | Pulls AISHE, NAAC, SSR, and NIRF demographic data. |
-| **Deep enrichment** | Uses all gathered signals to build a richer university profile. |
-| **Social refresh** | Re-runs profile and signal discovery after new contacts are found. |
+| **Government data enrichment** | Pulls NIRF, AISHE, NAAC, and SSR demographic data. PDFs are parsed with `unpdf`. Falls back to a deterministic regex, then a Round-2 NAAC/university-site search, then Gemini grounding as a last resort. Does not fabricate data when no official numeric values exist. |
+| **Deep enrichment** | Firecrawl map (≤8 credits) → Serper external search → bounded fetches → per-source Gemini 3.7 Flash extraction → Flash merge. Singleton-role enforcement preserves `Offg.` / `I/c` / `Acting` labels and deduplicates same-person acting variants. Gap-fill runs free passes first, Serper last, with proximity verification to prevent false-positive VCs/Registrars. |
+| **Social refresh** | Re-runs profile and signal discovery after new contacts are found (cooldown-gated). |
 | **Scoring** | Generates a **Priority Score** and a **lead tier** (High / Medium / Low). |
 
 ### How to run enrichment
@@ -163,7 +163,17 @@ For each selected university, the system runs the following phases in order:
 4. Click **Run Deep Enrichment** (the button shows how many are selected).
 5. Universities move to **In Progress**, then to **Enriched** when complete.
 
-> **Tip:** Start with a small batch (5–10) to see how the AI personalizes signals before scaling. The system runs selected enrichments in parallel.
+> **Tip:** Start with a small batch (5–10) to see how the AI personalizes signals before scaling. Enrichment runs as scheduled background work — the dashboard does not block while it runs. Poll the university's status to see progress.
+
+### Provider alerts
+
+If Gemini, Firecrawl, or Serper hits quota exhaustion or an error during any background activity, a **Provider Issue** modal appears in the dashboard with the provider name, severity, and message. Use **Dismiss** to hide it for this session or **Got it** to acknowledge it permanently. Background enrichment continues in degraded mode where possible (e.g., Firecrawl falls back to Jina). Alerts are deduplicated for 6 hours to avoid spam.
+
+### What enrichment will not invent
+
+- A Vice-Chancellor or Registrar who is not published on an official reachable page (the pipeline reports the gap rather than guessing).
+- Demographic numbers when no official NIRF/AISHE/NAAC source publishes them.
+- Phone numbers or LinkedIn URLs that are not explicitly associated with the correct person or role.
 
 ### Results
 
@@ -474,11 +484,12 @@ The app matches webhooks using the `client_reference` (the email record ID) and 
 If a feature is not working as expected:
 
 1. **Check Settings** — Ensure all required API keys are valid and have active quotas.
-2. **Check Analytics** — Look for bounced emails or failed enrichments.
-3. **Check Approvals** — Make sure pending drafts are not stuck awaiting review.
-4. **Check Outreach** — Review unclassified replies that may need manual attention.
-5. **Check the University detail view** — Verify the university has a discovered website and at least one stakeholder with an email before running outreach.
-6. **Check reply/thread matching** — If a reply is not auto-processed, confirm it was sent in reply to a tracked email and that the sender address matches a known stakeholder.
+2. **Watch for the Provider Issue modal** — If Gemini, Firecrawl, or Serper runs out of credits or errors during background enrichment, a modal appears in the dashboard. Acknowledge it and top up the affected provider in Settings.
+3. **Check Analytics** — Look for bounced emails or failed enrichments.
+4. **Check Approvals** — Make sure pending drafts are not stuck awaiting review.
+5. **Check Outreach** — Review unclassified replies that may need manual attention.
+6. **Check the University detail view** — Verify the university has a discovered website and at least one stakeholder with an email before running outreach.
+7. **Check reply/thread matching** — If a reply is not auto-processed, confirm it was sent in reply to a tracked email and that the sender address matches a known stakeholder.
 
 > **Still stuck?** Capture any error messages from the browser console and share them with your team.
 

@@ -61,8 +61,10 @@ Each key can be **saved, tested, and removed** independently.
 
 - Three columns: **Pending / New**, **In Progress**, **Enriched**.
 - Select universities, then click **Run Deep Enrichment**.
-- The AI runs discovery, scraping, social/news discovery, government data, deep enrichment, and scoring.
+- The AI runs discovery, scraping, social/news discovery, government data (NIRF/AISHE/NAAC, PDFs via `unpdf`), deep enrichment, and scoring — as scheduled background work, so the dashboard never blocks.
+- Singleton roles (VC / Registrar) preserve `Offg.` / `I/c` / `Acting` labels; gap-fill searches for missing officers but will not invent names that are not published officially.
 - The result is a **lead tier** (High / Medium / Low) and a **priority score**.
+- If Gemini / Firecrawl / Serper runs out of credits or errors, a **Provider Issue** modal appears. Acknowledge it and top up the provider in Settings.
 
 ---
 

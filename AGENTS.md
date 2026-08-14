@@ -18,8 +18,12 @@ Convex agent skills for common tasks can be installed by running
 
 ### Tech stack
 
-- Convex + Next.js 15 + React 19 + Tailwind CSS v3.4.1
-- Convex backend: queries, mutations, actions, crons, HTTP routes, vector search, and a `systemSettings` key-value store for API keys
+- Convex `^1.42.1` + Next.js 16.3.1 (Webpack-pinned) + React 19 + Tailwind CSS v3.4.1
+- Auth: `@convex-dev/auth` `^0.0.95` + `@auth/core` `^0.41.3`
+- AI: Google Gemini `@google/genai` `^1.43.0` — `gemini-3.7-flash` (complex / per-source / merge), `gemini-3.5-flash-lite` (scraper / scoring / personalization), `gemini-embedding-001` (768-dim). Constants in `convex/lib/models.ts`.
+- PDF: `unpdf` `^1.8.1` (serverless-safe; replaces `pdfjs-dist`).
+- Convex backend: queries, mutations, actions, crons, HTTP routes, vector search, scheduler, and a `systemSettings` key-value store for API keys
+- Next.js 16 notes: `middleware.ts` renamed to `proxy.ts`; `dev`/`build` scripts pass `--webpack` to preserve the custom webpack config; the obsolete `eslint` config property was removed from `next.config.ts`.
 
 ### Data seeding
 
@@ -38,14 +42,24 @@ Convex agent skills for common tasks can be installed by running
 - Master checklist script: `python3 .devin/scripts/checklist.py .`
 - Type check: `npx tsc --noEmit`
 - Lint: `npm run lint`
-- Unit tests: `npm run test:unit`
+- Unit tests: `npm run test:unit` (~496 tests, hermetic — no API keys required)
 - E2E tests: `npm test` (Playwright; requires dev server on port 3000)
+- Build: `npm run build` (`next build --webpack`)
+- Security audit: `npm audit --audit-level=high`
+- Convex codegen: `npx convex codegen` — **required** after adding any new Convex module/function to regenerate TypeScript bindings.
 
 ### Configuration findings
 
 - Playwright `baseURL` is `http://localhost:3000`
 - ZeptoMail webhooks live on `.convex.site`, not `.convex.cloud`
 - Email sending requires all three of: ZeptoMail API key, From Email, and From Name
+- Production Convex deployment: `energetic-raven-535` (URL `https://energetic-raven-535.convex.cloud`). Run production enrichment via `npx convex run --deployment prod 'actions/orchestrator:scheduleEnrichmentInternal' '{"universityId":"<id>"}'` — do not await long chains inline (CLI ~5-min wait).
+- Long-running enrichment is split across scheduled actions (`scheduleEnrichmentInternal` → `runEnrichmentChainInternal` → `finishEnrichmentChainInternal`); sequential batches chain via the scheduler.
+- Provider quota/errors (Gemini / Firecrawl / Serper) are recorded in the `apiAlerts` table (6h dedup) and surfaced in the frontend via `components/ApiAlertModal.tsx`.
+- Singleton-role deduplication normalizes `Offg.` / `I/c` / `Acting` suffixes (including punctuation inside parentheses and space-separated suffixes) while preserving the original role label.
+- Gap-fill for missing VC/Registrar runs free passes first, Serper last, with `verifyNameRoleProximity` + URL/department guards to prevent false positives.
+- PDF extraction uses `unpdf` (serverless-safe); do not reintroduce `pdfjs-dist`.
+- Do not fabricate missing VC/Registrar/demographic data — preserve `null` and emit warnings when no official data exists.
 
 ## Documentation update reminders
 

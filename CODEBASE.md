@@ -8,22 +8,26 @@ This document is the central reference for navigating the `fretbox-outreach-v2` 
 
 ## Tech Stack
 
-- **Framework:** Next.js 15, React 19, App Router
-- **Backend & Database:** Convex `^1.42.1` (serverless queries/mutations/actions, real-time DB, HTTP actions, crons, vector search)
-- **Auth:** `@convex-dev/auth` `^0.0.90` with Password provider and password-reset email config
+- **Framework:** Next.js 16.3.1 (Webpack-pinned via `--webpack`), React 19, App Router. `middleware.ts` renamed to `proxy.ts` per Next.js 16 migration.
+- **Backend & Database:** Convex `^1.42.1` (serverless queries/mutations/actions, real-time DB, HTTP actions, crons, vector search, scheduler)
+- **Auth:** `@convex-dev/auth` `^0.0.95` with Password provider and password-reset email config; `@auth/core` `^0.41.3`
 - **Styling:** Tailwind CSS `^3.4.1`, glassmorphism / flat design system in `design-system/onboardingai/MASTER.md`
 - **Icons:** Heroicons React
-- **AI Models:** Google Gemini via `@google/genai` (`gemini-3.7-flash`, `gemini-3.5-flash-lite`, `gemini-embedding-001`); model constants live in `convex/lib/models.ts`.
-- **LLM Guardrails:** Daily budget tracking (`llmBudget` table) + deterministic response cache (`llmCache` table). Default budget `$50/day`; configurable via `LLM_DAILY_BUDGET_USD`.
+- **AI Models:** Google Gemini via `@google/genai` `^1.43.0`. Model allocation in `convex/lib/models.ts`:
+  - `gemini-3.7-flash` — complex reasoning, per-source extraction, partial-merge, proposals, general Gemini calls (thinking level `LOW`; `MINIMAL` is rejected by 3.7).
+  - `gemini-3.5-flash-lite` — scraper extraction, government-data extraction, scoring, personalization, and other high-volume/low-cost paths.
+  - `gemini-embedding-001` — 768-dim embeddings (unchanged).
+- **LLM Guardrails:** Daily budget tracking (`llmBudget` table) + deterministic response cache (`llmCache` table). Default budget `$50/day`; configurable via `LLM_DAILY_BUDGET_USD`. Gemini 3.7 pricing: `$0.75/$3.75` per million (input/output) through 2026-12-31; thinking tokens counted in `candidatesTokenCount` + `thoughtsTokenCount`.
+- **PDF extraction:** `unpdf` `^1.8.1` (serverless-safe PDF.js build). Replaces worker-dependent `pdfjs-dist`. Used by `convex/lib/scrapers.ts` (`extractPdfText`, `extractPdfTables`) and `convex/actions/enrichGovernmentData.ts`.
 - **External Services:**
   - ZeptoMail (transactional email, delivery tracking, inbound reply routing)
-  - Serper (web search)
-  - Firecrawl (scraping / site maps)
+  - Serper (web search, ≤14 queries/university, budget-enforced via `convex/lib/serperBudget.ts`)
+  - Firecrawl (scraping / site maps, ≤8 credits/university, Jina fallback on exhaustion)
   - Jina Reader / `fetch` (scraping fallback)
   - Google Calendar API (events, Meet links, push notifications)
   - UGC.gov.in (Indian university dataset proxy via `app/api/sync-ugc/route.ts`)
 - **Proposal rendering:** Rich HTML emails (legacy `pdf_storage_id` field in schema)
-- **Testing:** Playwright E2E (`tests/e2e`, baseURL `http://localhost:3000`) + tsx unit tests (`tests/unit/*.test.ts`)
+- **Testing:** Playwright E2E (`tests/e2e`, baseURL `http://localhost:3000`) + tsx unit tests (`tests/unit/*.test.ts`, ~496 tests)
 - **Monitoring:** Sentry (`@sentry/nextjs` frontend, `@sentry/node` backend)
 
 ## Core Directory Structure
@@ -61,14 +65,15 @@ Next.js 15 App Router frontend.
 The entire backend ecosystem (queries, mutations, actions, HTTP routes, crons).
 
 - **Core Entities:**
-  - `universities.ts`: CRUD, search, filtering, ingestion, UGC sync, discovery triggers, and internal helpers (`listAllInternal`, `patchInternal`, `deleteInternal`, `bulkSyncUgcInternal`, `bulkSyncCuratedInternal`). Curated INI records are protected from UGC sync.
-  - `stakeholders.ts`: Contact management, enrichment, deduplication, email/LinkedIn tracking. Includes `dedupeSingletonRoleContactsInternal` and filters out UGC placeholder stakeholders with no real contact info.
+  - `universities.ts`: CRUD, search, filtering, ingestion, UGC sync, discovery triggers, and internal helpers (`listAllInternal`, `patchInternal`, `deleteInternal`, `bulkSyncUgcInternal`, `bulkSyncCuratedInternal`, `updateOutreachStageInternal`, `updateEnrichmentProgressInternal`, `getInternal`). Curated INI records are protected from UGC sync.
+  - `stakeholders.ts`: Contact management, enrichment, deduplication, email/LinkedIn tracking. Includes `dedupeSingletonRoleContactsInternal` (singleton-role enforcement with `Offg.` / `I/c` / `Acting` suffix normalization) and filters out UGC placeholder stakeholders with no real contact info.
   - `signals.ts`: Signal ingestion, vector search, semantic retrieval
   - `proposals.ts`: Proposal CRUD, rich HTML proposal generation, Calendar event linking
   - `sequences.ts`: Outreach sequence state machine (`active` / `paused` / `pending_approval` / `completed` / `opted_out`)
   - `emails.ts`: Email log CRUD, delivery status tracking, HITL approval queue (`pendingCount`, `listPending`, `updateDraft`, `rejectDraft`, `updateStatusByZeptomailIdInternal`)
   - `replies.ts`: Reply log management, classification review
   - `priorityScores.ts`: Lead scoring storage (deterministic + AI + final composite)
+  - `apiAlerts.ts`: Provider quota/error alert store. `recordInternal` (internalMutation) deduplicates identical unacknowledged alerts for 6 hours. `list` / `acknowledge` / `acknowledgeAll` are public + `validateAuth`-gated. Surfaced in the frontend by `components/ApiAlertModal.tsx`.
   - `settings.ts`: System settings key-value store. API keys are stored in the `systemSettings` table with XOR obfuscation (`SETTINGS_OBFUSCATION_SECRET`). Provides `getObfuscationSecretStatus`, status queries, set/remove mutations, test actions, and internal getters with env fallbacks.
   - `rateLimits.ts`: Distributed persistent rate limiter used by external API calls and email dispatch
   - `admin.ts`: Admin operations (e.g., `resetUniversityEnrichment`)
@@ -80,23 +85,24 @@ The entire backend ecosystem (queries, mutations, actions, HTTP routes, crons).
   - `test.ts`: Test endpoints / helpers
 
 - **Infrastructure:**
-  - `schema.ts`: Full database schema with auth tables, indexes, search indexes, vector index (`gemini-embedding-001`, 768-dim). Defines `llmBudget`, `llmCache`, `universities.category` (`IIT` | `NIT` | `IIIT`), and `universities.data_source` (`ugc` | `curated` | `csv` | `manual`).
+  - `schema.ts`: Full database schema with auth tables, indexes, search indexes, vector index (`gemini-embedding-001`, 768-dim). Defines `llmBudget`, `llmCache`, `apiAlerts` (provider quota/error alerts, 6h dedup), `universities.category` (`IIT` | `NIT` | `IIIT`), `universities.data_source` (`ugc` | `curated` | `csv` | `manual`), and enrichment-progress fields on `universities` (`enrichment_status`, `enrichment_phase`, `enrichment_started_at`, `enrichment_finished_at`).
   - `crons.ts`: Scheduled jobs — outreach sequence processing every **15 minutes**, weekly proposal cleanup (30 days)
-  - `dispatcher.ts`: Staggered job scheduling for website validation / discovery
+  - `dispatcher.ts` / `dispatcherInternal.ts`: Staggered job scheduling for website validation / discovery
   - `http.ts`: Convex HTTP actions. Webhooks run on the **Convex site URL** (`https://*.convex.site`, `NEXT_PUBLIC_CONVEX_SITE_URL`), not the API URL.
   - `auth.ts` / `auth.config.ts`: Convex Auth configuration (Password provider with a `reset` email provider for password-reset codes, plus `checkEmailExists` query)
 
-- **`/actions/` (23 files)**
+- **`/actions/` (24 files)**
   Heavy / side-effect serverless operations. **All action files must start with `"use node"`**:
   - `iniSeed.ts`: Seeds the 80-curated Institutes of National Importance (IIT/NIT/IIIT) list from `convex/lib/institutesOfNationalImportance.ts`. Exports `syncInstitutesOfNationalImportance` (public) and `syncInstitutesOfNationalImportanceInternal` (internal). Curated records get `data_source: "curated"` and are protected from UGC sync.
-  - `deepEnrichment.ts`: AI-based deep enrichment — external source discovery (Serper + Firecrawl), stakeholder extraction, demographics synthesis via Gemini.
+  - `deepEnrichment.ts`: AI-based deep enrichment — Firecrawl map (≤8 credits) + Serper external search (≤14 queries) + bounded fetches + per-source Gemini 3.7 Flash extraction + Flash merge. Singleton-role enforcement and gap-fill are applied post-extraction. Splits into a scheduled `finishEnrichmentChainInternal` for phases 5–6 to stay within Convex action runtime limits. Records Firecrawl/Serper quota errors to `apiAlerts`.
   - `discovery.ts`: University website discovery via Serper, validation via HEAD/GET + Jina fallback, candidate ranking with owned-domain heuristics.
-  - `scraper.ts`: Web content extraction via Jina Reader, Firecrawl fallback, Gemini Grounding fallback. Primary stakeholder extraction with regex fallback.
-  - `enrichment.ts`: Social & media enrichment — LinkedIn, news, image signal discovery via Serper.
+  - `scraper.ts`: Web content extraction via Jina Reader, Firecrawl fallback, Gemini Grounding fallback. Primary stakeholder extraction with regex fallback. Records Serper quota errors to `apiAlerts`.
+  - `enrichment.ts`: Social & media enrichment — LinkedIn, news, image signal discovery via Serper (cooldown-gated, no image search). Records Serper quota errors to `apiAlerts`.
   - `inferContacts.ts`: Role-based contact inference from scraped email patterns.
   - `scrapeAntiRagging.ts`: Anti-ragging committee page scraping for additional stakeholder discovery.
-  - `enrichGovernmentData.ts`: Government data enrichment — NIRF/AISHE/NAAC source discovery, PDF extraction, structured demographic extraction.
-  - `orchestrator.ts`: Orchestrates the full enrichment chain in strict phase order.
+  - `enrichGovernmentData.ts`: Government data enrichment — NIRF/AISHE/NAAC source discovery, `unpdf` PDF extraction (`extractPdfText` / `extractPdfTables`), deterministic regex fallback, Round-2 NAAC/university-site search, Gemini grounding last-resort fallback. Records Serper quota errors to `apiAlerts`. Does not fabricate demographics when no official numeric data exists.
+  - `orchestrator.ts`: Orchestrates the full enrichment chain in strict phase order. Exports the scheduler-based entrypoints `scheduleEnrichmentInternal` (single university), `scheduleEnrichmentBatch` (sequential queue), `runEnrichmentChainInternal` (phases 1–4), and `finishEnrichmentChainInternal` (phases 5–6 + queue chaining). See "Enrichment Pipeline" below for the full phase list and the rationale for splitting long runs across scheduled actions.
+  - `stakeholderCleanup.ts`: Cleanup actions for stale/scraper-only records and provenance self-consistency (sets `phone_source` / `linkedin_source` to `"none"` when values are stripped).
   - `outreach.ts`: Multi-stage email sequence dispatch. `processDueSequences` batches up to **100** sequences with **250 ms** stagger. Emails are drafted as `pending_approval` (HITL); they are not sent until a human approves.
   - `personalize.ts`: AI email copy generation with prompt injection sanitization and output cleaning.
   - `scoring.ts`: Lead potential scoring using university-specific signals.
@@ -120,19 +126,19 @@ The entire backend ecosystem (queries, mutations, actions, HTTP routes, crons).
 - **Avoid circular type inference:** extract shared action logic into `do*` helper functions (`doSendEmail`, `doGenerateProposal`) called by both the internal and public wrappers.
 - `actions/outreach.ts` schedules `processSequenceStep` recursively for multi-step sequences, using `ctx.scheduler.runAfter(0, internal.actions.outreach.processSequenceStep, ...)`. Batch cap is 100 sequences per cron run with 250 ms stagger.
 
-### `/lib/` (21 files)
+### `/lib/` (24 files)
 
 Shared backend utilities:
 
-- `models.ts`: Centralized model, temperature, and thinking-budget constants (`MODELS`, `TEMP`, `THINKING`). Imported by `llm.ts` and `settings.ts` (both can safely reference it because it has no `"use node"` directives).
-- `llm.ts`: Gemini SDK wrappers (`callGemini`, `callGeminiWithUsage`, `callGeminiWithGrounding`, `callGeminiWithGroundingAndUsage`, `callFlash`, `embed`). Exact cost tracking, 48h `llmCache`, daily `llmBudget` guard. All calls use `httpOptions: { timeout: 25000 }`.
+- `models.ts`: Centralized model, temperature, and thinking-budget constants (`MODELS`, `TEMP`, `THINKING`, `THINKING_LEVEL`). Imported by `llm.ts` and `settings.ts` (both can safely reference it because it has no `"use node"` directives).
+- `llm.ts`: Gemini SDK wrappers (`callGemini`, `callGeminiWithUsage`, `callGeminiWithGrounding`, `callGeminiWithGroundingAndUsage`, `callFlash`, `embed`). Exact cost tracking (Gemini 3.7 pricing `$0.75/$3.75` per million; thinking tokens counted via `thoughtsTokenCount`), 48h `llmCache`, daily `llmBudget` guard. Gemini 3.x models get `thinkingConfig: { thinkingBudget: "LOW" }` (3.7 rejects `MINIMAL`). All calls use `httpOptions: { timeout: 25000 }`. Gemini quota/rate-limit errors are caught centrally and recorded to `apiAlerts`.
 - `llmBudget.ts`: Internal queries/mutations for daily LLM budget and response cache.
 - `prompts.ts`: Centralized prompt library.
 - `emailTemplates.ts`: Typed email template functions (intro, follow-up, auto-reply, proposal).
 - `proposalPdf.tsx`: Legacy React-PDF components (proposals are now sent as rich HTML emails).
 - `googleCalendar.ts`: Google Calendar API integration (events, Meet links, watch channels).
 - `moduleRecommender.ts`: AI-driven module recommendation logic.
-- `scrapers.ts`: Shared scraping helpers — `firecrawlMap`, `firecrawlScrape`, `downloadPdfBuffer`, `extractPdfText`, `extractPdfTables`.
+- `scrapers.ts`: Shared scraping helpers — `firecrawlMap`, `firecrawlScrape`, `downloadPdfBuffer`, `extractPdfText` (unpdf), `extractPdfTables` (unpdf). PDF extraction uses `unpdf` (serverless-safe PDF.js build); the legacy `pdfPolyfills.ts` and `pdfjs-dist` dependency have been removed.
 - `scoring.ts`: Scoring algorithm utilities.
 - `cadence.ts`: Outreach timing/cadence rules.
 - `universityUtils.ts`: `namesMatch()` — normalized fuzzy name matcher for university deduplication, with stop-word, acronym, and campus/branch filtering.
@@ -143,17 +149,24 @@ Shared backend utilities:
 - `contactInference.ts`: Role-based institutional email inference and canonical singleton roles.
 - `discoveryCandidates.ts`: Website discovery candidate ranking.
 - `phone.ts`: Indian phone validation & normalization.
-- `serperBudget.ts`: Serper query budget enforcement.
+- `serperBudget.ts`: Serper query budget enforcement (`createSerperBudget` / `runWithSerperBudget`).
 - `stakeholderQuality.ts`: Stakeholder quality scoring and regex fallback extraction.
+- `roleRegistry.ts`: Canonical role names, aliases, and decision/singleton flags used by singleton enforcement and gap-fill.
+- `perSourceExtraction.ts`: Map-reduce per-source extraction used by `deepEnrichment.ts`.
+- `validateDeepEnrichment.ts`: Structured output validation, provenance helpers, and acting-suffix normalization (`Offg.` / `I/c` / `Acting`) for singleton-role deduplication.
+- `gapFill.ts`: Gap-fill for missing VC/Registrar roles. Free passes first (officers-table extraction, NIRF officer extraction, thin-site snippet fallback), Serper last. `verifyNameRoleProximity` guards against false positives from department pages.
 
 ### `/components`
 
 Shared React UI components:
 
 - `ApiKeyModal.tsx`: API key input modal
+- `ApiAlertModal.tsx`: Global modal surfaced when a provider (Gemini / Firecrawl / Serper) hits quota exhaustion or an error during any background activity. Subscribes to `api.apiAlerts.list`, shows the latest unacknowledged alert, and offers Dismiss (session-only) / Got-it (persists `acknowledged_at`). Mounted in `app/(dashboard)/layout.tsx`.
 - `ConvexClientProvider.tsx`: Convex client context provider
+- `DocumentMailerModal.tsx`: Upload a `.docx`, optionally attach extra files, choose a stakeholder or custom email per university, and draft to the HITL queue.
 - `Sidebar.tsx`: Dashboard navigation sidebar with badge counts (approvals + unclassified replies)
 - `ErrorBoundary.tsx`: React error boundary
+- `RedirectIfAuthenticated.tsx`: Redirects authenticated users away from auth pages.
 - `SyncIniButton.tsx`: `Sync IITs / NITs / IIITs` trigger (`api.actions.iniSeed.syncInstitutesOfNationalImportance`)
 - `SyncUgcButton.tsx`: UGC sync trigger
 - `ThemeProvider.tsx` / `ThemeToggle.tsx`: Dark/light mode support
@@ -164,7 +177,7 @@ Shared React UI components:
 ### `/tests`
 
 - `e2e/`: Playwright E2E specs (22 files, baseURL `http://localhost:3000`). Includes `approvals`, `auth`, `dashboard`, `enrichment`, `landing`, `navigation`, `proposals`, `settings`, `responsive`, `smoke`, `thorough`, and authenticated workflows.
-- `unit/`: 39 hermetic unit test files covering:
+- `unit/`: 39+ hermetic unit test files (~496 tests, no API keys required) covering:
   - Admin auth, anti-ragging persistence
   - `async.test.ts` — `raceWithTimeout`, `serperBudget` caps
   - `budgetEnvVar.test.ts` — `LLM_DAILY_BUDGET_USD` parsing
@@ -214,8 +227,8 @@ Shared React UI components:
 
 ### Root Config & Scripts
 
-- `middleware.ts`: Next.js middleware — protects `/dashboard` routes and redirects authenticated users away from `/sign-in` / `/sign-up`.
-- `next.config.ts`: Next.js configuration
+- `proxy.ts`: Next.js 16 middleware (renamed from `middleware.ts` per the Next.js 16 migration guide) — protects `/dashboard` routes and redirects authenticated users away from `/sign-in` / `/sign-up`. `/forgot-password` and `/reset-password` are public.
+- `next.config.ts`: Next.js 16 configuration. The obsolete `eslint` config property was removed (lint is enforced via the npm script). Custom webpack config is preserved; `dev` and `build` scripts pass `--webpack` to avoid Turbopack.
 - `tailwind.config.ts`: Tailwind theme config (blue brand scale; banned violet references removed)
 - `playwright.config.ts`: Playwright E2E config (`testDir: "./tests/e2e"`, `baseURL: "http://localhost:3000"`, `workers: 1`)
 - `instrumentation.ts` / `instrumentation-client.ts`: Sentry instrumentation
@@ -237,9 +250,10 @@ All prompts are centralized in `convex/lib/prompts.ts`. Do not inline prompts in
 
 Every Gemini call is tracked via `createLlmUsageEntry()` and `summarizeLlmUsage()` in `convex/lib/llm.ts`:
 
-- Reads exact token counts from Gemini `usageMetadata` (`promptTokenCount`, `candidatesTokenCount`)
+- Reads exact token counts from Gemini `usageMetadata` (`promptTokenCount`, `candidatesTokenCount`, and `thoughtsTokenCount` for Gemini 3.x thinking tokens)
 - Falls back to char-length estimates only when metadata is absent
-- Costs computed from `MODEL_PRICING_USD_PER_MILLION` (Flash-Lite: `$0.25/$1.50` per million; Flash: `$1.50/$9.00` per million)
+- Costs computed from `MODEL_PRICING_USD_PER_MILLION` (Gemini 3.7 Flash: `$0.75/$3.75` per million through 2026-12-31, then `$1.50/$7.50`; Flash-Lite: `$0.25/$1.50` per million). Thinking tokens are billed at the output rate.
+- Gemini 3.x models receive `thinkingConfig: { thinkingBudget: "LOW" }` (3.7 rejects `MINIMAL`).
 - Aggregated at the orchestrator level
 
 Three guardrails are applied automatically when `ctx` is passed to any LLM wrapper:
@@ -254,17 +268,34 @@ Three guardrails are applied automatically when `ctx` is passed to any LLM wrapp
 
 ### 4. Enrichment Pipeline
 
-`convex/actions/orchestrator.ts` runs enrichment in strict phase order to prevent write races:
+`convex/actions/orchestrator.ts` runs enrichment in strict phase order to prevent write races. Long runs are split across scheduled actions so no single action exceeds the Convex runtime limit and the CLI client (~5-minute wait) never blocks the chain.
+
+**Entrypoints (scheduler-based):**
+
+- `scheduleEnrichmentInternal` (single university) — marks `outreach_stage: "enriching"`, sets `enrichment_status: "running"`, schedules `runEnrichmentChainInternal`, returns immediately.
+- `scheduleEnrichmentBatch` (sequential queue) — schedules the first university's `runEnrichmentChainInternal` with the rest of the queue; each chain schedules the next on completion so Firecrawl/Serper are never hit concurrently.
+- `runEnrichmentChainInternal` — phases 1–4 (below), then schedules `finishEnrichmentChainInternal`.
+- `finishEnrichmentChainInternal` — phases 5–6, credit telemetry, progress completion, and sequential queue chaining.
+
+**Phase order:**
 
 1. **Discovery** — find website if missing
 2. **Phase 1** — scrape, anti-ragging, social discovery (parallel)
 3. **Phase 2** — contact inference
-4. **Phase 3** — government data enrichment (writes demographics)
-5. **Phase 4** — deep enrichment (can augment demographics)
-6. **Phase 5** — social refresh post-deep enrichment
+4. **Phase 3** — government data enrichment (writes demographics; `unpdf` for PDFs; NIRF → AISHE → Round-2 NAAC/site → Gemini grounding fallback)
+5. **Phase 4** — deep enrichment (Firecrawl map ≤8 credits → Serper ≤14 queries → bounded fetches → per-source Gemini 3.7 Flash extraction → Flash merge → singleton enforcement → gap-fill for missing VC/Registrar)
+6. **Phase 5** — social refresh post-deep enrichment (cooldown-gated, no image search)
 7. **Phase 6** — scoring
 
 Government data **must** run before deep enrichment because both write to `demographics`.
+
+**Singleton-role enforcement** (`stakeholders.dedupeSingletonRoleContactsInternal` + `lib/validateDeepEnrichment.ts`): normalizes `Offg.` / `Officiating` / `Acting` / `i/c` suffixes (including punctuation inside parentheses and space-separated suffixes like `Registrar i/c`) so acting duplicates of the same person collapse into one record while the original role label is preserved.
+
+**Gap-fill** (`lib/gapFill.ts`): when VC/Registrar is missing after deep enrichment, runs free passes first (officers-table extraction, NIRF officer extraction, thin-site snippet fallback for any blocked/thin site), then a final Serper pass. `verifyNameRoleProximity` plus URL/department-page guards prevent false positives (e.g., a department-page person being promoted to VC). Post-gap-fill singleton enforcement catches any new duplicates.
+
+**Provenance discipline:** `phone_source` / `linkedin_source` are set to `"none"` when values are stripped; a nonempty value must never have `"none"` provenance; existing valid provenance is not overwritten by a new `"none"`; scraper-only records without evidence lose unverified phone/LinkedIn values. `actions/stakeholderCleanup.ts` makes this self-consistent and idempotent.
+
+**Provider alerts:** Firecrawl 429/insufficient-credit, Serper quota exhaustion, and Gemini quota/rate-limit errors are recorded to `apiAlerts` (6h dedup) and surfaced in the frontend via `components/ApiAlertModal.tsx`. Firecrawl switches to Jina after insufficient credits instead of retrying.
 
 ### 5. Outreach Orchestrator (HITL)
 
@@ -331,9 +362,9 @@ ZeptoMail response `request_id` is stored in `emailsSent.zeptomail_message_id` a
 
 ### 10. Auth & Middleware
 
-- `@convex-dev/auth` with Password provider (`convex/auth.ts`). Password reset uses a custom `reset` email provider that generates a 32-character code and sends it through `internal.actions.email.sendEmail`.
+- `@convex-dev/auth` `^0.0.95` with Password provider (`convex/auth.ts`). Password reset uses a custom `reset` email provider that generates a 32-character code and sends it through `internal.actions.email.sendEmail`.
 - Password reset flow: `/forgot-password` submits email → reset code is stored in `authVerificationCodes` and emailed → `/reset-password` verifies code and sets a new password.
-- `middleware.ts` protects `/dashboard` routes and redirects authenticated users away from `/sign-in` / `/sign-up`. `/forgot-password` and `/reset-password` are public.
+- `proxy.ts` (renamed from `middleware.ts` in the Next.js 16 migration) protects `/dashboard` routes and redirects authenticated users away from `/sign-in` / `/sign-up`. `/forgot-password` and `/reset-password` are public.
 
 ### 11. Design System
 
@@ -377,18 +408,30 @@ Flat design with glassmorphism accents. Fonts: Poppins (headings) + Open Sans (b
 18. **Proposal Status Values:** The `proposals` table supports `status` values: `draft`, `ready`, `sent`, `meeting_confirmed`, and `cancelled`. Update `convex/schema.ts` and `convex/proposals.ts` union validators when adding statuses.
 19. **Accurate Analytics Counts:** `getFunnelStats` in `convex/universities.ts` uses full `collect()` queries instead of `take(limit)` so stage counts and totals are accurate.
 20. **Curated Record Immunity:** Any sync or import logic must preserve records with `data_source: "curated"`. UGC sync and duplicate cleanup skip these records.
+21. **Provider Alert Surfacing:** When Gemini / Firecrawl / Serper hit quota exhaustion or an error during any background activity, record it via `apiAlerts.recordInternal` (6h dedup). The frontend `ApiAlertModal` surfaces unacknowledged alerts. Do not crash unrelated processing on a single provider failure — degrade gracefully (e.g., Firecrawl → Jina fallback).
+22. **Scheduled Long-Running Enrichment:** Long enrichment chains must not be awaited inline from `npx convex run` (the CLI client waits ~5 minutes). Use `scheduleEnrichmentInternal` / `scheduleEnrichmentBatch` to enqueue via the scheduler, then poll `universities:getInternal`. Deep enrichment and finish phases run as separate scheduled actions; sequential batches chain via the scheduler so providers are never hit concurrently.
+23. **Acting-Suffix Normalization:** Singleton-role deduplication must normalize `Offg.` / `Officiating` / `Acting` / `i/c` (including punctuation inside parentheses and space-separated suffixes like `Registrar i/c`) while preserving the original role label. Same-person acting duplicates collapse; same-name people with conflicting roles do not merge unless contact evidence connects them.
+24. **Gap-Fill Guards:** Gap-fill for missing VC/Registrar must run free passes first (officers-table, NIRF officer, thin-site snippet) and Serper last. `verifyNameRoleProximity` plus URL/department-page guards must prevent department-page people from being promoted into singleton roles. Post-gap-fill singleton enforcement must run.
+25. **Provenance Self-Consistency:** When a phone/LinkedIn value is stripped, set `phone_source` / `linkedin_source` to `"none"`. A nonempty value must never have `"none"` provenance. Existing valid provenance must not be overwritten by a new `"none"`. Scraper-only records without evidence lose unverified phone/LinkedIn values.
+26. **No Fabricated Data:** Do not invent missing VC, Registrar, or demographic data. When no official numeric enrollment data exists across all fallback tiers (NIRF → AISHE → Round-2 NAAC/site → Gemini grounding), preserve `null` and emit an explicit warning. The pipeline reports what it cannot find rather than hallucinating.
+27. **unpdf for PDFs:** Use `unpdf` (`extractPdfText` / `extractPdfTables` in `convex/lib/scrapers.ts`) for serverless-safe PDF extraction. Do not reintroduce `pdfjs-dist` or worker-dependent PDF libraries. Distinguish parser success from data availability — a parsed PDF with no numeric enrollment values is not a demographic success.
+28. **Next.js 16 Webpack Pin:** `dev` and `build` scripts pass `--webpack` to preserve the custom webpack config in `next.config.ts`. Do not switch to Turbopack without re-evaluating the webpack config. The middleware file is `proxy.ts` (renamed from `middleware.ts` per the Next.js 16 migration).
 
 ## Useful Commands
 
-- **Dev Console:** `npm run dev` starts both Convex and Next.js concurrently.
-- **Dev Split:** `npm run dev:next` or `npm run dev:convex` for individual services.
+- **Dev Console:** `npm run dev` starts both Convex and Next.js concurrently (Next uses `--webpack`).
+- **Dev Split:** `npm run dev:next` (`next dev --webpack`) or `npm run dev:convex` (`npx convex dev`) for individual services.
 - **Test (E2E):** `npm run test` — Playwright tests (`tests/e2e`, baseURL `http://localhost:3000`).
-- **Test (Unit):** `npm run test:unit` — tsx unit tests (`441` tests, `90` suites, hermetic — no API keys required).
+- **Test (Unit):** `npm run test:unit` — tsx unit tests (~496 tests, hermetic — no API keys required).
 - **Lint:** `npm run lint` — ESLint.
-- **Build:** `npm run build` — Next.js production build.
+- **Build:** `npm run build` — `next build --webpack` production build.
 - **Master Checklist:** `python3 .devin/scripts/checklist.py .` — runs security, lint, schema, tests, UX, SEO in priority order.
 - **Convex Dashboard:** `npx convex dev` opens the Convex dashboard for manual review of events, logs, and cron jobs.
 - **Type Check:** `npx tsc --noEmit` — full project TypeScript check. For backend-only: `npx tsc --noEmit --project convex/tsconfig.json`.
+- **Convex Codegen:** `npx convex codegen` — regenerate TypeScript bindings after schema or action changes. **Required** whenever a new Convex module/function is added.
+- **Production enrichment (single):** `npx convex run --deployment prod 'actions/orchestrator:scheduleEnrichmentInternal' '{"universityId":"<id>"}'` — enqueues and returns immediately; poll with `universities:getInternal`.
+- **Production enrichment (batch):** `npx convex run --deployment prod 'actions/orchestrator:scheduleEnrichmentBatch' '{"queue":["<id1>","<id2>"]}'` — sequential queue, each university schedules the next on completion.
+- **Security audit:** `npm audit --audit-level=high`.
 
 ## More Documentation
 

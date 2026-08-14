@@ -1,6 +1,6 @@
 # Fretbox Outreach AI v2 — Roadmap
 
-Powered by **Convex + Next.js 15**
+Powered by **Convex + Next.js 16.3.1**
 AI-Native Backend | Real-Time Reactive | Zero DevOps
 
 ---
@@ -19,23 +19,26 @@ webhooks — all in TypeScript with zero infrastructure to manage.
 
 | Layer | Technology |
 | ------- | ------------ |
-| Backend | Convex (TypeScript) — Queries, Mutations, Actions, HTTP Actions |
+| Backend | Convex `^1.42.1` (TypeScript) — Queries, Mutations, Actions, HTTP Actions, Scheduler |
 | Database | Convex DB (Document-Relational, reactive) |
-| Task Queue | Convex Scheduled Functions + Cron Jobs |
-| High-Tier LLM | Gemini 3.5 Flash (Google AI API) — reasoning, proposals, reply classification |
-| Fast-Tier LLM | Gemini 3.1 Flash-Lite (Google AI API) — scoring, email, vision |
+| Task Queue | Convex Scheduled Functions + Cron Jobs (scheduler-chained for long enrichment) |
+| High-Tier LLM | `gemini-3.7-flash` (Google AI API, thinking `LOW`) — per-source extraction, partial-merge, proposals, complex reasoning |
+| Fast-Tier LLM | `gemini-3.5-flash-lite` (Google AI API) — scraper, government-data, scoring, personalization |
 | Vector Embeddings | `gemini-embedding-001` (Google AI API) — 768-dim, same key as Gemini |
 | Vector Search | Convex Native Vector Search (768-dim) |
-| Web Scraping | Firecrawl + Jina Reader + `fetch()` HTML parse fallback |
+| PDF Extraction | `unpdf` `^1.8.1` (serverless-safe PDF.js build; replaces `pdfjs-dist`) |
+| Web Scraping | Firecrawl (≤8 credits/university, Jina fallback on exhaustion) + Jina Reader + `fetch()` HTML parse fallback |
+| Discovery | Serper (≤14 queries/university, budget-enforced via `convex/lib/serperBudget.ts`) |
 | File Storage | Convex File Storage (PDFs, CSVs) |
 | Email Delivery | ZeptoMail REST API (called from Convex Actions) |
 | Inbound Email | ZeptoMail Inbound Parse → Convex HTTP Action webhook on `*.convex.site` |
 | Proposal Rendering | Rich HTML emails (legacy `pdf_storage_id` field remains unused) |
-| Frontend | Next.js 15 (App Router) + React 19 + Tailwind CSS |
+| Frontend | Next.js 16.3.1 (App Router, Webpack-pinned) + React 19 + Tailwind CSS |
 | Data Fetching | Convex React hooks (`useQuery`, `useMutation`, `useAction`) |
-| Auth | Convex Native Auth with Password provider |
-| Deployment | Vercel (frontend) + Convex Cloud (backend) |
-| Monitoring | Convex Dashboard + Sentry SDK |
+| Auth | `@convex-dev/auth` `^0.0.95` + `@auth/core` `^0.41.3` with Password provider |
+| Deployment | Vercel (frontend) + Convex Cloud (backend, production: `energetic-raven-535`) |
+| Monitoring | Convex Dashboard + Sentry SDK (`@sentry/nextjs` / `@sentry/node`) |
+| Provider Alerts | `apiAlerts` table + `components/ApiAlertModal.tsx` (6h dedup, surfaced in dashboard) |
 
 ### AI & Service Keys
 
@@ -260,6 +263,88 @@ The following are grounded next steps and continuous improvements, not aspiratio
 | P3 | Monitoring | LLM cost dashboard and per-university spend attribution. | `llmUsage` already records this; surface it in Analytics. |
 | P4 | Compliance | Opt-out and suppression-list management with audit log. | Required for scaling outbound volume safely. |
 | P4 | DevEx | Expand E2E coverage for settings test buttons and UGC sync. | Increase regression confidence. |
+
+---
+
+## PART 5: AS-BUILT — PRODUCTION RELIABILITY & ENRICHMENT HARDENING
+
+This section records the production-reliability work completed after the initial build. It is kept here as an as-built record so future work does not regress these guarantees.
+
+### 5.1 Gemini 3.7 upgrade and model allocation
+
+- `convex/lib/models.ts` now uses `gemini-3.7-flash` for complex / per-source extraction / partial-merge / proposals / general Gemini calls, and `gemini-3.5-flash-lite` for scraper / government-data / scoring / personalization. Embeddings remain `gemini-embedding-001`.
+- `convex/lib/llm.ts` was updated for Gemini 3.x model detection, `thinkingConfig: { thinkingBudget: "LOW" }` (3.7 rejects `MINIMAL`), Gemini 3.7 pricing (`$0.75/$3.75` per million through 2026-12-31, then `$1.50/$7.50`), and `thoughtsTokenCount` billing.
+- Production SDK path verified (not just raw API): Jamia Hamdard test extracted Prof. Asgar Ali (VC Offg.) and Col. Tahir Mustafa (Registrar) with correct institution emails.
+
+### 5.2 Scheduled long-running enrichment
+
+- Long enrichment chains no longer depend on a caller waiting synchronously (~5-minute CLI client limit).
+- `scheduleEnrichmentInternal` (single) and `scheduleEnrichmentBatch` (sequential queue) enqueue via the Convex scheduler and return immediately.
+- `runEnrichmentChainInternal` (phases 1–4) schedules `finishEnrichmentChainInternal` (phases 5–6 + queue chaining). Each stage gets a full Convex action runtime budget.
+- Sequential batches chain via the scheduler so Firecrawl/Serper are never hit concurrently.
+
+### 5.3 Firecrawl and Serper discipline
+
+- Firecrawl: ≤8 credits/university, real counter, immediate Jina fallback on insufficient-credit detection, bounded retry/backoff, per-university caps.
+- Serper: ≤14 queries/university via `convex/lib/serperBudget.ts`, cooldown-gated social refresh, no image search, controlled discovery with institution-specific validation.
+- Both record quota/error conditions to `apiAlerts`.
+
+### 5.4 API provider alert modal
+
+- New `apiAlerts` table (`convex/schema.ts`) and `convex/apiAlerts.ts` (`recordInternal` with 6h dedup, `list` / `acknowledge` / `acknowledgeAll` with `validateAuth`).
+- `components/ApiAlertModal.tsx` mounted in `app/(dashboard)/layout.tsx` surfaces unacknowledged alerts with Dismiss / Got-it actions.
+- Gemini quota/rate-limit errors caught centrally in `convex/lib/llm.ts`; Firecrawl 429/insufficient-credit in `deepEnrichment.ts`; Serper exhaustion in `deepEnrichment.ts`, `enrichGovernmentData.ts`, `scraper.ts`, `enrichment.ts`, `lib/gapFill.ts`.
+
+### 5.5 unpdf PDF extraction
+
+- Replaced worker-dependent `pdfjs-dist` with `unpdf` `^1.8.1` (serverless-safe PDF.js build).
+- `extractPdfText` and `extractPdfTables` in `convex/lib/scrapers.ts`; legacy `convex/lib/pdfPolyfills.ts` removed.
+- Production-verified against a real NIRF PDF (43,322 bytes → 13,861 chars text / 15,860 chars tables, no worker error).
+
+### 5.6 Government data enrichment fallbacks
+
+- NIRF/AISHE/NAAC source discovery → deterministic regex fallback → Round-2 NAAC/university-site search → Gemini grounding last-resort fallback.
+- No fabricated demographics: Adamas University exercised all four tiers and preserved `null` because no reliable public enrollment figures exist.
+
+### 5.7 Singleton-role enforcement and acting-suffix normalization
+
+- `stakeholders.dedupeSingletonRoleContactsInternal` + `convex/lib/validateDeepEnrichment.ts` normalize `Offg.` / `Officiating` / `Acting` / `i/c` (including punctuation inside parentheses and space-separated suffixes like `Registrar i/c`).
+- Same-person acting duplicates collapse; the original role label is preserved; same-name people with conflicting roles do not merge unless contact evidence connects them.
+
+### 5.8 Gap-fill guards
+
+- `convex/lib/gapFill.ts` runs free passes first (officers-table extraction, NIRF officer extraction, thin-site snippet fallback for any blocked/thin site), Serper last.
+- `verifyNameRoleProximity` plus URL/department-page guards prevent false positives (e.g., the Nagarjuna false VC Prof. Raja Sekhar Patteti from an English-department page was caught and deleted).
+- Post-gap-fill singleton enforcement catches any new duplicates.
+
+### 5.9 Provenance self-consistency
+
+- `phone_source` / `linkedin_source` set to `"none"` when values are stripped; a nonempty value must never have `"none"` provenance; existing valid provenance is not overwritten by a new `"none"`.
+- `convex/actions/stakeholderCleanup.ts` makes cleanup self-consistent and idempotent. Verified across multiple production universities.
+
+### 5.10 Next.js 16 migration
+
+- Next.js 15 → 16.3.1. `middleware.ts` renamed to `proxy.ts`. `next.config.ts` lost the obsolete `eslint` property. `dev`/`build` scripts pass `--webpack` to preserve the custom webpack config.
+- Auth packages upgraded: `@convex-dev/auth` → `0.0.95`, `@auth/core` → `0.41.3`.
+- Build, lint, and TypeScript pass after migration. `npm audit` clean.
+
+### 5.11 Verified production universities
+
+| University | VC | Registrar | Notes |
+| --- | --- | --- | --- |
+| Jamia Hamdard | Prof. Asgar Ali (Offg.) | Col. Tahir Mustafa | Correct institution emails; unverified phones/LinkedIn removed; 40 stakeholders after cleanup. |
+| Gondwana University | Dr. Prashant Bokare | Dr. Anil Hirekhan | Pro VC deduped; 22 stakeholders after cleanup; 1,101 students. |
+| Indian Institute of Heritage | Dr. Sachchidanand Joshi | (record exists, name may be absent) | Difficult to scrape; deep enrichment can return zero new stakeholders with explicit warnings. |
+| Anna University | (not found — not published) | Dr. V. Kumaresan | Duplicate `Registrar i/c` merged; 11,940 students (NIRF 2024-25). |
+| Acharya Nagarjuna University | Prof. Kancharla Gangadhara Rao (I/c) | — | False-positive VC Patteti deleted; 5,433 students (NIRF 2025-26). |
+| Adamas University | — | Dr. Rajat Ray (Acting) | Deep enrichment succeeds after scheduled-action split; demographics unavailable (no public data). |
+
+### 5.12 Honest limits
+
+- No pipeline can extract data that is not published. Anna University's VC and Adamas's demographics are absent from reachable official sources; the pipeline reports this honestly rather than hallucinating.
+- Firecrawl depends on account credits; Jina-only mode works but is slower/lower-quality for JS-rendered sites.
+- Gap-fill false-positive guards are robust against the known Nagarjuna pattern but new ambiguous department-page patterns may emerge.
+- Frontend deployment to Vercel was not completed in this work cycle; the backend and component are deployed and ready.
 
 ---
 

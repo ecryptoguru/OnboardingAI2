@@ -112,23 +112,88 @@ python3 .devin/scripts/checklist.py .
 
 `convex/actions/deepEnrichment.ts` runs a source-partitioned extraction flow:
 
-1. **Firecrawl map** discovers high-yield pages, scored by URL and page title.
-2. **External search** finds leadership/LinkedIn/contact pages (government data is intentionally handled by `enrichGovernmentData.ts`).
+1. **Firecrawl map** (≤8 credits/university) discovers high-yield pages, scored by URL and page title. Switches to Jina after insufficient-credit detection.
+2. **External search** (Serper, ≤14 queries/university, budget-enforced) finds leadership/LinkedIn/contact pages (government data is intentionally handled by `enrichGovernmentData.ts`).
 3. **Bounded fetches** with retries and concurrency limits populate page content.
-4. **Per-source LLM extraction** (Flash-Lite) extracts stakeholders and demographics for each top source.
-5. **Merge LLM** (Flash) deduplicates partials and resolves conflicts.
-6. **Runtime validation** (`lib/validateDeepEnrichment.ts`) sanitizes output before persistence.
-7. **Provenance** is attached: stakeholder `source_url`/`sources` and demographics `source_urls`/`data_quality`.
-8. **Dry-run mode** on `runDeepEnrichment` returns extracted data without writing to the DB.
+4. **Per-source LLM extraction** (`gemini-3.7-flash`, fallback to `gemini-3.5-flash-lite`) extracts stakeholders and demographics for each top source.
+5. **Merge LLM** (`gemini-3.7-flash`, fallback to `gemini-3.5-flash-lite`) deduplicates partials and resolves conflicts.
+6. **Runtime validation** (`lib/validateDeepEnrichment.ts`) sanitizes output before persistence, including acting-suffix normalization (`Offg.` / `I/c` / `Acting`).
+7. **Singleton-role enforcement** (`stakeholders.dedupeSingletonRoleContactsInternal`) collapses same-person acting duplicates while preserving the original role label.
+8. **Gap-fill** (`lib/gapFill.ts`) runs when VC/Registrar is missing: free passes first (officers-table, NIRF officer, thin-site snippet), Serper last. `verifyNameRoleProximity` plus URL/department guards prevent false positives.
+9. **Provenance** is attached: stakeholder `source_url`/`sources` and demographics `source_urls`/`data_quality`. `phone_source` / `linkedin_source` are set to `"none"` when values are stripped.
+10. **Dry-run mode** on `runDeepEnrichment` returns extracted data without writing to the DB.
 
 Key shared helpers:
 
 - `convex/lib/roleRegistry.ts` — canonical role names, aliases, decision/singleton flags.
-- `convex/lib/scrapers.ts` — URL scoring, contact extraction, phone-to-stakeholder matching.
+- `convex/lib/scrapers.ts` — URL scoring, contact extraction, phone-to-stakeholder matching, `unpdf`-based `extractPdfText` / `extractPdfTables`.
 - `convex/lib/perSourceExtraction.ts` — map-reduce per-source extraction.
-- `convex/lib/validateDeepEnrichment.ts` — structured output validation and provenance helpers.
+- `convex/lib/validateDeepEnrichment.ts` — structured output validation, provenance helpers, acting-suffix normalization.
+- `convex/lib/gapFill.ts` — gap-fill for missing VC/Registrar with proximity verification.
+- `convex/actions/stakeholderCleanup.ts` — stale/scraper-only record cleanup and provenance self-consistency.
 
-Government PDFs and official demographic data are intentionally owned by `convex/actions/enrichGovernmentData.ts` (which uses `extractPdfTables`) so `deepEnrichment` focuses on website stakeholders and contacts.
+Government PDFs and official demographic data are intentionally owned by `convex/actions/enrichGovernmentData.ts` (which uses `unpdf` `extractPdfText` / `extractPdfTables`) so `deepEnrichment` focuses on website stakeholders and contacts.
+
+## Scheduled long-running enrichment
+
+Long enrichment chains must not be awaited inline from `npx convex run` (the CLI client waits ~5 minutes). Use the scheduler-based entrypoints in `convex/actions/orchestrator.ts`:
+
+- `scheduleEnrichmentInternal` (single university) — marks `outreach_stage: "enriching"`, schedules `runEnrichmentChainInternal`, returns immediately.
+- `scheduleEnrichmentBatch` (sequential queue) — schedules the first university with the rest of the queue; each chain schedules the next on completion so Firecrawl/Serper are never hit concurrently.
+- `runEnrichmentChainInternal` — phases 1–4 (discovery, scrape/anti-ragging/social, contact inference, government data, deep enrichment), then schedules `finishEnrichmentChainInternal`.
+- `finishEnrichmentChainInternal` — phases 5–6 (social refresh, scoring), credit telemetry, progress completion, and sequential queue chaining.
+
+Production commands:
+
+```bash
+npx convex run --deployment prod \
+  'actions/orchestrator:scheduleEnrichmentInternal' \
+  '{"universityId":"<id>"}'
+
+npx convex run --deployment prod \
+  'actions/orchestrator:scheduleEnrichmentBatch' \
+  '{"queue":["<id1>","<id2>","<id3>"]}'
+
+npx convex run --deployment prod \
+  'universities:getInternal' \
+  '{"universityId":"<id>"}'
+```
+
+## API provider alerts
+
+When Gemini / Firecrawl / Serper hit quota exhaustion or an error during any background activity, the backend records an alert via `apiAlerts.recordInternal` (internalMutation, 6h dedup on identical unacknowledged alerts). The frontend `components/ApiAlertModal.tsx` (mounted in `app/(dashboard)/layout.tsx`) surfaces unacknowledged alerts with Dismiss (session-only) / Got-it (persists `acknowledged_at`) actions.
+
+- `apiAlerts.list` (query, `validateAuth`-gated) — latest 50 alerts, newest first.
+- `apiAlerts.acknowledge` / `apiAlerts.acknowledgeAll` (mutations, `validateAuth`-gated) — mark alerts acknowledged.
+- `apiAlerts.recordInternal` (internalMutation) — deduplicated insert.
+- `apiAlerts.removeInternal` (internalMutation) — delete.
+
+Provider error handling:
+
+- Gemini quota/rate-limit errors are caught centrally in `convex/lib/llm.ts`.
+- Firecrawl 429/insufficient-credit errors are recorded in `deepEnrichment.ts`; Firecrawl switches to Jina after insufficient credits instead of retrying.
+- Serper quota exhaustion is detected in `deepEnrichment.ts`, `enrichGovernmentData.ts`, `scraper.ts`, `enrichment.ts`, and `lib/gapFill.ts`.
+
+## PDF extraction (unpdf)
+
+PDF extraction uses [`unpdf`](https://github.com/web-infra-dev/unpdf) `^1.8.1` (serverless-safe PDF.js build) instead of the worker-dependent `pdfjs-dist`. The legacy `convex/lib/pdfPolyfills.ts` has been removed.
+
+- `extractPdfText(buffer)` — plain-text extraction.
+- `extractPdfTables(buffer)` — table-like extraction.
+
+Both are in `convex/lib/scrapers.ts` and used by `convex/actions/enrichGovernmentData.ts` for NIRF/AISHE/NAAC PDFs. Distinguish parser success from data availability — a parsed PDF with no numeric enrollment values is not a demographic success.
+
+## Model allocation
+
+`convex/lib/models.ts` defines the model constants. Current allocation:
+
+| Pipeline path | Model |
+| --- | --- |
+| Per-source extraction, partial-merge, complex reasoning, proposals | `gemini-3.7-flash` (thinking `LOW`) |
+| Scraper extraction, government-data extraction, scoring, personalization | `gemini-3.5-flash-lite` |
+| Embeddings (768-dim) | `gemini-embedding-001` |
+
+Gemini 3.7 Flash pricing: `$0.75/$3.75` per million (input/output) through 2026-12-31, then `$1.50/$7.50`. Thinking tokens are counted in `thoughtsTokenCount` and billed at the output rate. `MINIMAL` thinking is rejected by 3.7; use `LOW` / `MEDIUM` / `HIGH`.
 
 ---
 

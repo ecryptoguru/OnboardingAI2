@@ -1,6 +1,6 @@
 # Fretbox Outreach AI v2
 
-AI-native outreach engine for university hostel management. Built on **Convex**, **Next.js 15**, **React 19**, and **Tailwind CSS 3.4.1**.
+AI-native outreach engine for university hostel management. Built on **Convex**, **Next.js 16.3.1**, **React 19**, and **Tailwind CSS 3.4.1**.
 
 ## Quick Start
 
@@ -16,9 +16,11 @@ The app runs at `http://localhost:3000` (Playwright `baseURL` is `http://localho
 Run the frontend and backend separately if needed:
 
 ```bash
-npm run dev:next   # next dev
+npm run dev:next   # next dev --webpack
 npm run dev:convex # npx convex dev
 ```
+
+> Next.js 16 defaults to Turbopack. This project pins **Webpack** for both `dev` and `build` (`--webpack` flag) to preserve the existing custom webpack config in `next.config.ts`. The legacy `middleware.ts` was renamed to `proxy.ts` per the Next.js 16 migration guide.
 
 ## Environment Setup
 
@@ -64,20 +66,26 @@ API keys and sender details are managed in **Settings → API Keys**. Values are
 
 ## Tech Stack
 
-- **Backend / DB**: [Convex](https://convex.dev) (queries, mutations, actions, crons, HTTP, vector search)
-- **Frontend**: [Next.js 15](https://nextjs.org) + [React 19](https://react.dev) + [Tailwind CSS 3.4.1](https://tailwindcss.com)
-- **Auth**: `@convex-dev/auth` with Password provider
-- **AI**: Google Gemini (`gemini-3.7-flash`, `gemini-3.5-flash-lite`, `gemini-embedding-001`)
+- **Backend / DB**: [Convex](https://convex.dev) `^1.42.1` (queries, mutations, actions, crons, HTTP, vector search, scheduler)
+- **Frontend**: [Next.js 16.3.1](https://nextjs.org) (Webpack) + [React 19](https://react.dev) + [Tailwind CSS 3.4.1](https://tailwindcss.com)
+- **Auth**: `@convex-dev/auth` `^0.0.95` with Password provider; `@auth/core` `^0.41.3`
+- **AI**: Google Gemini via `@google/genai` `^1.43.0` — `gemini-3.7-flash` (complex / per-source extraction / merge), `gemini-3.5-flash-lite` (scraper / scoring / personalization), `gemini-embedding-001` (768-dim vectors). Constants in `convex/lib/models.ts`.
+- **PDF extraction**: [`unpdf`](https://github.com/web-infra-dev/unpdf) `^1.8.1` — serverless-safe PDF.js build (replaces worker-dependent `pdfjs-dist`).
 - **Email**: [ZeptoMail](https://www.zoho.com/zeptomail/) REST API
-- **Scraping**: Firecrawl + Jina Reader + `fetch` fallback
-- **Testing**: Playwright E2E (`tests/e2e`, baseURL `http://localhost:3000`) + tsx unit tests (`tests/unit/*.test.ts`)
+- **Scraping**: Firecrawl (≤8 credits/university, Jina fallback on exhaustion) + Jina Reader + `fetch` fallback
+- **Discovery**: Serper (≤14 queries/university, budget-enforced)
+- **Testing**: Playwright E2E (`tests/e2e`, baseURL `http://localhost:3000`) + tsx unit tests (`tests/unit/*.test.ts`, ~496 tests)
 - **Monitoring**: Sentry (`@sentry/nextjs` frontend, `@sentry/node` backend)
 
 ## Core Features
 
 - **University Ingestion**: CSV upload, UGC.gov.in sync, and 80 curated Institutes of National Importance (IIT/NIT/IIIT) seeded via `convex/actions/iniSeed.ts`.
 - **INI Seed Protection**: Curated records are marked `data_source: "curated"` and are skipped by the UGC sync, preventing overwrites.
-- **Automated Discovery**: AI finds and validates university websites, then enriches signals.
+- **Automated Discovery**: AI finds and validates university websites, then enriches signals. Serper is used for controlled discovery (≤14 queries/university); aggregators and unrelated social/company pages are rejected unless explicitly relevant.
+- **Deep Enrichment Pipeline**: Source-partitioned extraction (Firecrawl map ≤8 credits → Serper external search → bounded fetches → per-source Gemini 3.7 Flash extraction → Flash merge). Singleton-role enforcement preserves `Offg.` / `I/c` / `Acting` labels and deduplicates same-person acting variants. Gap-fill runs free passes first, Serper last, with name/role proximity verification and URL/department guards to prevent false-positive VCs/Registrars.
+- **Government Data Enrichment**: NIRF/AISHE/NAAC source discovery with deterministic regex fallback, Round-2 NAAC/university-site search, and Gemini grounding as a last-resort fallback. PDF parsing uses `unpdf` (serverless-safe). No demographic values are fabricated when no official numeric data exists.
+- **Scheduled Long-Running Enrichment**: Public enqueue action schedules internal orchestration via the Convex scheduler and returns immediately, avoiding the ~5-minute CLI client wait. Deep enrichment and finish phases run as separate scheduled actions; sequential batches chain via the scheduler so Firecrawl/Serper are never hit concurrently. See "Running enrichment in production" below.
+- **API Provider Alert Modal**: When Gemini / Firecrawl / Serper hit quota exhaustion or an error during any background activity, the backend records an alert in the `apiAlerts` table (deduplicated for 6 hours). The frontend `<ApiAlertModal />` (mounted in `app/(dashboard)/layout.tsx`) surfaces these to the user with Dismiss / Got-it actions.
 - **Outreach Orchestrator**: Multi-step, personalized email sequences with Gemini.
 - **HITL Approval**: Outreach emails are drafted with `status: "pending_approval"`. A human must approve each draft via the dashboard before it is sent.
 - **Document Mailer**: Upload a `.docx` on the Outreach page, extract its text as the email body, optionally attach the original and additional files, choose a stakeholder or enter a custom email per university, and send via the HITL approvals queue.
@@ -114,11 +122,35 @@ Webhook endpoints are disabled until their specific secret is configured; unconf
 ```bash
 npx tsc --noEmit          # Type check
 npm run lint              # Lint
-npm run test:unit         # Unit tests (~440 tests)
+npm run test:unit         # Unit tests (~496 tests, hermetic — no API keys required)
 npm test                  # E2E tests (Playwright, baseURL http://localhost:3000)
 python3 .devin/scripts/checklist.py .  # Full master checklist
-npm run build             # Production build
+npm run build             # Production build (next build --webpack)
+npm audit --audit-level=high  # Security audit
 ```
+
+## Running enrichment in production
+
+Long-running enrichment must not be awaited inline from `npx convex run` (the CLI client waits ~5 minutes). Use the scheduler-based entrypoints instead:
+
+```bash
+# Single university — enqueues and returns immediately
+npx convex run --deployment prod \
+  'actions/orchestrator:scheduleEnrichmentInternal' \
+  '{"universityId":"<id>"}'
+
+# Sequential batch — each university schedules the next on completion
+npx convex run --deployment prod \
+  'actions/orchestrator:scheduleEnrichmentBatch' \
+  '{"queue":["<id1>","<id2>","<id3>"]}'
+
+# Poll status (one-shot, no long wait)
+npx convex run --deployment prod \
+  'universities:getInternal' \
+  '{"universityId":"<id>"}'
+```
+
+The chain runs as: `scheduleEnrichmentInternal` → `runEnrichmentChainInternal` (phases 1–4) → `finishEnrichmentChainInternal` (phases 5–6 + queue chaining). Each stage gets a full Convex action runtime budget.
 
 ## More Documentation
 
