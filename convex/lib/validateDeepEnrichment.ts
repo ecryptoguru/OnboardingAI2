@@ -271,6 +271,7 @@ function singletonGroupKey(role: string | null | undefined): string | undefined 
   const base = (role || "")
     .replace(/\s*\((?:offg|acting|i\/c|ic|officiating)\.?\s*\)\s*$/i, "")
     .replace(/\s*-\s*(?:offg|acting|i\/c|ic|officiating)\.?\s*$/i, "")
+    .replace(/\s+(?:offg|acting|i\/c|ic|officiating)\.?\s*$/i, "")
     .replace(/^(?:offg|acting|officiating)\.?\s+/i, "")
     .trim();
   const canonical = normalizeStakeholderRole(base);

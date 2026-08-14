@@ -783,15 +783,24 @@ export const dedupeSingletonRoleContactsInternal = internalMutation({
         });
       }
       const role = normalizedRole?.trim();
-      if (!role || !isSingletonRole(role)) continue;
-      const bucket = grouped.get(role) ?? [];
+      if (!role) continue;
+      // Group "Registrar i/c" / "Vice Chancellor (Offg.)" with their canonical
+      // singleton roles so acting/officiating duplicates merge.
+      const groupKey = role
+        .replace(/\s*\((?:offg|acting|i\/c|ic|officiating)\.?\s*\)\s*$/i, "")
+        .replace(/\s*-\s*(?:offg|acting|i\/c|ic|officiating)\.?\s*$/i, "")
+        .replace(/\s+(?:offg|acting|i\/c|ic|officiating)\.?\s*$/i, "")
+        .replace(/^(?:offg|acting|officiating)\.?\s+/i, "")
+        .trim();
+      if (!groupKey || !isSingletonRole(groupKey)) continue;
+      const bucket = grouped.get(groupKey) ?? [];
       bucket.push({
         ...stakeholder,
         role,
         phone: normalizedPhone,
         email: normalizedEmail,
       });
-      grouped.set(role, bucket);
+      grouped.set(groupKey, bucket);
     }
 
     for (const [role, group] of grouped) {

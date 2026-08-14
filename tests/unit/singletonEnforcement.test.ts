@@ -72,6 +72,16 @@ describe("enforceSingletonRoles", () => {
     assert.strictEqual(kept[0].name, "Dr. B");
   });
 
+  it("groups space-separated acting suffixes (Registrar i/c) with the canonical role", () => {
+    const { kept, dropped } = enforceSingletonRoles([
+      { name: "Dr. V. Kumaresan", role: "Registrar", contact_confidence: 1 },
+      { name: "Prof. Dr. V. Kumaresan", role: "Registrar i/c", contact_confidence: 0.5 },
+    ]);
+    assert.strictEqual(kept.length, 1);
+    assert.strictEqual(kept[0].name, "Dr. V. Kumaresan");
+    assert.strictEqual(dropped.length, 1);
+  });
+
   it("treats same-name duplicates as one person (upsert dedups)", () => {
     const { kept, dropped } = enforceSingletonRoles([
       { name: "Dr. A Sharma", role: "Vice Chancellor" },
