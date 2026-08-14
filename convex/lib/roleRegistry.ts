@@ -559,6 +559,106 @@ export function getEmailParts(email?: string | null): { local: string; domain: s
   return { local, domain };
 }
 
+/**
+ * Whether an email belongs to a university's own domain(s).
+ * Handles gov.in universities specially: they commonly use
+ * "<acronym>.gov.in"/"<acronym>.nic.in" addresses and legacy
+ * "<acronym>.ac.in" sibling domains (e.g. NMI: registrar.nmi@gov.in,
+ * vc@nmi.ac.in for nmi.gov.in).
+ */
+export function isRelevantInstitutionEmailDomain(
+  email: string | undefined | null,
+  institutionDomain: string | undefined | null,
+): boolean {
+  if (!email || !email.includes("@")) return false;
+  const [local = "", emailDomain = ""] = email.toLowerCase().split("@");
+  const uni = (institutionDomain || "")
+    .toLowerCase()
+    .replace(/^www\./, "")
+    .replace(/\/$/, "");
+  if (!emailDomain || !uni) return false;
+  if (emailDomain === uni || emailDomain.endsWith(`.${uni}`)) return true;
+
+  if (uni.endsWith(".gov.in") || uni.endsWith(".nic.in")) {
+    const base = uni.split(".")[0];
+    if (base && base.length >= 3) {
+      // "<acronym>.gov.in" / "<acronym>.nic.in" shared-parent addresses.
+      if (
+        (emailDomain === "gov.in" || emailDomain === "nic.in") &&
+        local.includes(base)
+      ) {
+        return true;
+      }
+      // Legacy "<acronym>.ac.in" sibling domain.
+      if (emailDomain.endsWith(".ac.in") && emailDomain.split(".")[0] === base) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+// ─── Name equivalence (initials vs full names) ───────────────────────────────
+
+const NAME_TITLE_RE =
+  /\b(dr|prof|professor|mr|mrs|ms|shri|smt|er|engg|arch|hon|hon'ble|honble)\b\.?/g;
+
+function nameTokens(name: string | undefined | null): string[] {
+  return (name || "")
+    .toLowerCase()
+    .replace(NAME_TITLE_RE, " ")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .filter((t) => t.length > 0);
+}
+
+function tokenEquivalent(a: string, b: string): boolean {
+  if (a === b) return true;
+  // Single-letter initial matches the full token it abbreviates: "a" ~ "ahmed",
+  // "k.s." ~ "krishna" (dots are stripped before tokenizing).
+  if (a.length === 1 && b.startsWith(a)) return true;
+  if (b.length === 1 && a.startsWith(b)) return true;
+  return false;
+}
+
+/**
+ * True when two names refer to the same person despite title/punctuation
+ * differences and single-letter initials ("Sohrab A. Khan" ≈ "Sohrab Ahmed
+ * Khan", "Dr. D. P. Singh" ≈ "D P Singh"). Order-preserving and conservative:
+ * when token counts differ, extra tokens in the longer name must be single
+ * initials.
+ */
+export function namesEquivalent(
+  nameA: string | undefined | null,
+  nameB: string | undefined | null,
+): boolean {
+  const a = nameTokens(nameA);
+  const b = nameTokens(nameB);
+  if (a.length === 0 || b.length === 0) return false;
+
+  if (a.length === b.length) {
+    return a.every((t, i) => tokenEquivalent(t, b[i]));
+  }
+
+  const [short, long] = a.length < b.length ? [a, b] : [b, a];
+  let j = 0;
+  for (const token of short) {
+    while (j < long.length && !tokenEquivalent(token, long[j])) {
+      if (long[j].length === 1) {
+        j++;
+        continue;
+      }
+      return false;
+    }
+    if (j >= long.length) return false;
+    j++;
+  }
+  for (; j < long.length; j++) {
+    if (long[j].length > 1) return false;
+  }
+  return true;
+}
+
 export const TARGET_ROLES = ROLE_REGISTRY
   .filter((r) => r.target)
   .map((r) => r.canonical);

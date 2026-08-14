@@ -17,6 +17,7 @@ import {
 } from "../lib/utils";
 import {
   augmentStakeholderSources,
+  linkedinMatchesName,
   type StakeholderLike,
 } from "../lib/validateDeepEnrichment";
 import {
@@ -35,6 +36,7 @@ import {
   extractContactsFromMarkdown,
   extractContactsWithContext,
   matchPhonesToStakeholders,
+  type ContactWithContext,
 } from "../lib/scrapers";
 import {
   inferRoleFromContactContext,
@@ -55,9 +57,10 @@ import * as Sentry from "@sentry/node";
 // ─── Constants ─────────────────────────────────────────────────────────────
 const MAX_CONTEXT_CHARS = 70_000; // Cap context to keep Gemini calls fast
 const MAX_URLS_TO_SCRAPE = 6; // Limit first-pass Firecrawl API calls per enrichment
-const MAX_FOLLOWUP_URLS = 4; // Free Jina-based recursive follow-up from menu pages
+const MAX_FOLLOWUP_URLS = 8; // Free Jina-based recursive follow-up from menu pages
 const MAX_CHARS_PER_SOURCE = 6_000; // Truncate each scraped source
 const MIN_BLOCK_LENGTH = 200; // Minimum length for a block to be considered valid
+const MAX_FIRECRAWL_SCRAPES_PER_UNIVERSITY = 15; // Cap Firecrawl credits per run; Jina takes over after
 const MAX_REGEX_CONTACTS = 30; // Cap to avoid bloating the prompt
 const MAX_COST_ESTIMATE = 30_000; // Firecrawl credits * 100 + Gemini input tokens.
 // A typical run: 1 map + 6 scrapes = 7 * 100 = 700.
@@ -94,17 +97,23 @@ async function serperSearch(
  * Government data (NIRF, AISHE, NAAC) is handled by enrichGovernmentData.ts.
  * Returns URLs sorted by relevance for stakeholder extraction.
  */
+export interface ExternalSource {
+  url: string;
+  title?: string;
+  snippet?: string;
+}
+
 async function discoverExternalSources(
   uniName: string,
   domain: string,
   serperKey: string,
-  serperBudget = createSerperBudget({ maxQueries: 4 }),
+  serperBudget = createSerperBudget({ maxQueries: 6 }),
   options: {
     city?: string;
     state?: string;
     websitePath?: string;
   } = {},
-): Promise<string[]> {
+): Promise<ExternalSource[]> {
   const locationTerms = [options.city, options.state]
     .filter(Boolean)
     .join(" ")
@@ -123,21 +132,39 @@ async function discoverExternalSources(
     `${uniName} ${locationTerms} site:${domain} vice chancellor director finance officer`,
     // Administration / Contact
     `${uniName} ${locationTerms} administration contact dean office`,
-    // LinkedIn for officials
+    // LinkedIn for officials (also surfaces official posts/announcements)
     `${uniName} ${locationTerms} vice chancellor registrar linkedin`,
     `${uniName} ${locationTerms} director dean linkedin`,
     // General contact info search
     `${uniName} ${locationTerms} phone email address contact`,
   ];
 
-  const allUrls: { url: string; score: number }[] = [];
+  const allUrls: { source: ExternalSource; score: number }[] = [];
   const seen = new Set<string>();
   const officialDomain = domain.toLowerCase();
 
-  // Only keep URLs on the official domain / subdomains, plus LinkedIn profiles.
-  // This stops the pipeline from scraping low-yield government portals or
-  // third-party aggregators (e.g. tamilnadu.gov.in pages for SRM).
-  const isRelevantExternalUrl = (link: string): boolean => {
+  const institutionNameTokens = uniName
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((t) => t.length >= 3)
+    .map((t) => t.replace(/[^a-z0-9]/g, ""))
+    .filter(Boolean);
+
+  // Official social / community sites for the institution.  Announcements on
+  // these often name the *current* office-holder before the main website is
+  // updated (e.g. a new Vice-Chancellor appointment).
+  const OFFICIAL_SOCIAL_HOSTS = new Set([
+    "facebook.com",
+    "linkedin.com",
+    "x.com",
+    "twitter.com",
+    "instagram.com",
+    "youtube.com",
+  ]);
+
+  // Only keep URLs on the official domain / subdomains, plus LinkedIn profiles
+  // and official social-media posts about the institution's leadership.
+  const isRelevantExternalUrl = (link: string, title = "", snippet = ""): boolean => {
     try {
       const u = new URL(link);
       const host = u.hostname.replace(/^www\./i, "").toLowerCase();
@@ -153,6 +180,18 @@ async function discoverExternalSources(
         u.pathname.toLowerCase().startsWith("/in/")
       ) {
         return true;
+      }
+      if (OFFICIAL_SOCIAL_HOSTS.has(host)) {
+        const combined = `${u.pathname} ${title} ${snippet}`.toLowerCase();
+        const hasInstitution = institutionNameTokens.some((t) =>
+          combined.includes(t),
+        );
+        const hasLeadership = /\b(vice\s*chancellor|pro\s*vice\s*chancellor|registrar|dean|director|chancellor|chairman|principal)\b/i.test(
+          combined,
+        );
+        if (hasInstitution && hasLeadership) {
+          return true;
+        }
       }
       return false;
     } catch {
@@ -176,7 +215,7 @@ async function discoverExternalSources(
       for (const r of data.organic || []) {
         if (!r.link || seen.has(r.link)) continue;
         seen.add(r.link);
-        if (!isRelevantExternalUrl(r.link)) {
+        if (!isRelevantExternalUrl(r.link, r.title, r.snippet)) {
           console.log(`[ExternalSearch] Skipping off-domain result: ${r.link}`);
           continue;
         }
@@ -231,7 +270,16 @@ async function discoverExternalSources(
           score -= 5;
         if (/wikipedia|wiki/i.test(combined)) score -= 3;
 
-        if (score > 0) allUrls.push({ url: r.link, score });
+        if (score > 0) {
+          allUrls.push({
+            source: {
+              url: r.link,
+              title: r.title,
+              snippet: r.snippet,
+            },
+            score,
+          });
+        }
       }
     } catch (e) {
       console.warn(
@@ -243,8 +291,87 @@ async function discoverExternalSources(
 
   return allUrls
     .sort((a, b) => b.score - a.score)
-    .slice(0, 3)
-    .map((u) => u.url);
+    .slice(0, 5)
+    .map((u) => u.source);
+}
+
+/**
+ * Fallback for .gov.in sites that block Firecrawl/Jina: pull Serper snippets
+ * for leadership/contact queries and build source blocks from them. Only
+ * official-domain / gov.in results are kept, and every block still flows
+ * through the normal per-source extraction + evidence sanitisation.
+ */
+async function discoverGovInSnippetBlocks(
+  uniName: string,
+  domain: string,
+  serperKey: string,
+  serperBudget = createSerperBudget({ maxQueries: 8 }),
+): Promise<string[]> {
+  const queries = [
+    `${uniName} vice chancellor registrar`,
+    `${uniName} registrar contact`,
+    `${uniName} administration officers`,
+    `${uniName} director general director`,
+  ];
+  const blocks: string[] = [];
+  const seen = new Set<string>();
+  const officialHosts = new Set([domain.toLowerCase()]);
+
+  for (const q of queries) {
+    if (serperBudget.exhausted || serperBudget.used >= serperBudget.max) break;
+    try {
+      const searchResult = await runWithSerperBudget(serperBudget, () =>
+        withRetry(() => serperSearch(q, serperKey, 5), {
+          maxRetries: 1,
+        }),
+      );
+      if (!searchResult.ok) {
+        if (searchResult.quotaExhausted) {
+          console.warn(
+            `[DeepEnrichment] gov.in Serper quota exhausted after "${q}"`,
+          );
+          break;
+        }
+        console.warn(
+          `[DeepEnrichment] gov.in Serper query failed for "${q}": ${searchResult.reason || "unknown"}`,
+        );
+        continue;
+      }
+      const results = searchResult.value?.organic || [];
+      let accepted = 0;
+      for (const r of results) {
+        if (!r.link || seen.has(r.link)) continue;
+        seen.add(r.link);
+        let host = "";
+        try {
+          host = new URL(r.link).hostname.replace(/^www\./i, "").toLowerCase();
+        } catch {
+          continue;
+        }
+        const onOfficial = [...officialHosts].some(
+          (h) =>
+            host === h || host.endsWith(`.${h}`) || h.endsWith(`.${host}`),
+        );
+        if (!onOfficial && !host.endsWith(".gov.in")) continue;
+        // Snippet blocks are intentionally shorter than full-page blocks;
+        // leadership snippets are still useful evidence for per-source extraction.
+        const text = `TITLE: ${r.title || "N/A"}\nSNIPPET: ${r.snippet || "N/A"}`;
+        if (text.length >= 100) {
+          blocks.push(`\n=== EXTERNAL SOURCE: ${r.link} ===\n${text}\n`);
+          accepted++;
+        }
+      }
+      console.log(
+        `[DeepEnrichment] gov.in Serper "${q}" → ${results.length} results, ${accepted} snippet blocks`,
+      );
+    } catch (e) {
+      console.warn(
+        `[DeepEnrichment] gov.in Serper query failed: "${q}"`,
+        e instanceof Error ? e.message : String(e),
+      );
+    }
+  }
+  return blocks;
 }
 
 // ─── Content normalizer ───────────────────────────────────────────────────────
@@ -360,6 +487,7 @@ const LEADERSHIP_URL_PATTERNS = [
   { re: /(?<![a-zA-Z])(chancellor|vice[-\s]?chancellor|pro[-\s]?vice[-\s]?chancellor|vc|provc)(?![a-zA-Z])/i, weight: 10 },
   { re: /(?<![a-zA-Z])(registrar|controller|finance|librarian|warden|rector|secretary|treasurer)(?![a-zA-Z])/i, weight: 8 },
   { re: /(?<![a-zA-Z])(dean|deans|director|directors|principal|head|hod|chairman|chairpersons?|president|owner)(?![a-zA-Z])/i, weight: 7 },
+  { re: /(?<![a-zA-Z])(officers[-_]?of[-_]?|officers?[-_]?of)(?![a-zA-Z])/i, weight: 12 },
   { re: /(?<![a-zA-Z])(officer|officers)(?![a-zA-Z])/i, weight: 6 },
   { re: /(?<![a-zA-Z])(staff)(?![a-zA-Z])/i, weight: -10 },
   { re: /(?<![a-zA-Z])(administration|leadership|governance|management|executive|team)(?![a-zA-Z])/i, weight: 3 },
@@ -400,6 +528,17 @@ function scoreSourceBlock(block: string): number {
   if (/(hostel|hostelites|day scholar|student strength|enrollment)/.test(text)) score += 2;
   if (/(staff|attendant|stenographer|junior assistant|senior assistant|office assistant|technician)/.test(text)) score -= 3;
   if (/(news|event|blog|tender|career|notification)/.test(text)) score -= 4;
+
+  // Boost blocks that contain many named people (e.g. an officers table)
+  const titleMatches = (text.match(/\b(dr\.|prof\.|mr\.|mrs\.|shri\.|smt\.|er\.)\s+[a-z]/gi) || []).length;
+  score += Math.min(titleMatches, 12);
+
+  // Strong boost for blocks that name a specific person in a leadership role
+  // (e.g. "Prof. (Dr.) M. Afshar Alam, Vice-Chancellor" or an officers table).
+  if (/(prof\.?|dr\.?|mr\.?|mrs\.?)\s+[a-z].*\b(vice[-\s]?chancellor|registrar|dean|director|controller|chancellor|finance[-\s]?officer|librarian|warden|rector)/i.test(text)) {
+    score += 10;
+  }
+
   return score;
 }
 
@@ -523,7 +662,13 @@ const NON_SCRAPABLE_EXTENSIONS =
 
 function cleanUrl(url: string): string {
   // Strip trailing punctuation that markdown extraction often captures
-  return url.replace(/[\),.;'"\s]+$/, "");
+  let cleaned = url.replace(/[\),.;'"\s]+$/, "");
+  // If a known binary extension is followed by extra characters, truncate there
+  const extMatch = cleaned.match(/(\.pdf|\.docx?|\.xlsx?|\.pptx?|\.zip)([^?#]*)/i);
+  if (extMatch) {
+    cleaned = cleaned.substring(0, cleaned.toLowerCase().indexOf(extMatch[1].toLowerCase()) + extMatch[1].length);
+  }
+  return cleaned;
 }
 
 function extractUrlsFromMarkdown(
@@ -537,6 +682,27 @@ function extractUrlsFromMarkdown(
   let match;
   while ((match = mdLinkRegex.exec(markdown)) !== null) {
     found.add(cleanUrl(match[1].trim()));
+  }
+
+  // Reference-style link definitions: [id]: url "title"
+  const refDefRegex = /^\[(.*?)\]:\s*(\S+)/gm;
+  const refMap = new Map<string, string>();
+  while ((match = refDefRegex.exec(markdown)) !== null) {
+    const id = match[1].trim().toLowerCase();
+    const url = match[2].trim();
+    if (id && url && !refMap.has(id)) {
+      refMap.set(id, cleanUrl(url));
+    }
+  }
+
+  // Reference-style link usages: [text][id] or [text] [id]
+  // After exhausting inline-style, also resolve collapsed [id][] references.
+  const refLinkRegex = /\[(?:[^\]]+)\]\[(\s*[^\]]+?)\]|\[([^\]]+)\]\s?\[\]/g;
+  while ((match = refLinkRegex.exec(markdown)) !== null) {
+    const id = (match[1] || match[2] || "").trim().toLowerCase();
+    if (id && refMap.has(id)) {
+      found.add(refMap.get(id)!);
+    }
   }
 
   // Autolinks <url>
@@ -780,7 +946,7 @@ export const runDeepEnrichment = internalAction({
         internal.settings.getInternalSerperKey,
       );
       const serperKey = rawSerperKey ? rawSerperKey.trim() : null;
-      const serperBudget = createSerperBudget({ maxQueries: 4 });
+      const serperBudget = createSerperBudget({ maxQueries: 6 });
 
       // ─── Domain extraction ────────────────────────────────────────────────
       const rawDomain = normalizedUrl.replace(/^https?:\/\//, "").replace(/\/$/, "");
@@ -870,10 +1036,10 @@ export const runDeepEnrichment = internalAction({
       // Supplement site scraping with Serper for leadership leaf pages and LinkedIn profiles.
       // Demographics are handled separately by enrichGovernmentData.
       let externalBlocks: string[] = [];
-      let externalUrls: string[] = [];
+      let externalSources: ExternalSource[] = [];
       if (serperKey) {
         try {
-          externalUrls = await discoverExternalSources(
+          externalSources = await discoverExternalSources(
             uniName,
             domain,
             serperKey,
@@ -884,32 +1050,47 @@ export const runDeepEnrichment = internalAction({
               websitePath: new URL(workingUrl).pathname,
             },
           );
-          if (externalUrls.length > 0) {
+          if (externalSources.length > 0) {
             console.log(
-              `[DeepEnrichment] Discovered ${externalUrls.length} external sources: ${externalUrls.join(", ")}`,
+              `[DeepEnrichment] Discovered ${externalSources.length} external sources: ${externalSources.map((s) => s.url).join(", ")}`,
             );
-            const jinaTasks = externalUrls.map((extUrl) => async () => {
+            const jinaTasks = externalSources.map((ext) => async () => {
+              const { url: extUrl, title = "", snippet = "" } = ext;
               try {
                 const text = await fetchJinaText(extUrl, 25000);
-                const normalized = normalizeContent(text).substring(
+                const fetched = normalizeContent(text).substring(
                   0,
                   MAX_CHARS_PER_SOURCE,
                 );
-                if (normalized.length < MIN_BLOCK_LENGTH) return "";
-                return `\n=== EXTERNAL SOURCE: ${extUrl} ===\n${normalized}\n`;
+                if (fetched.length >= MIN_BLOCK_LENGTH) {
+                  return `\n=== EXTERNAL SOURCE: ${extUrl} ===\n${
+                    title ? `TITLE: ${title}\n` : ""
+                  }${
+                    snippet ? `SNIPPET: ${snippet}\n` : ""
+                  }${fetched}\n`;
+                }
               } catch (e) {
                 console.warn(
                     `[DeepEnrichment] Jina Reader failed for ${extUrl}:`,
                     e instanceof Error ? e.message : String(e),
                   );
-                return "";
               }
+              // If Jina failed or returned too little, fall back to the
+              // search result title + snippet. This is especially useful for
+              // official social-media announcement posts.
+              if (title || snippet) {
+                const fallback = `TITLE: ${title || "N/A"}\nSNIPPET: ${snippet || "N/A"}`;
+                if (fallback.length >= MIN_BLOCK_LENGTH) {
+                  return `\n=== EXTERNAL SOURCE: ${extUrl} ===\n${fallback}\n`;
+                }
+              }
+              return "";
             });
-            externalBlocks = (await withConcurrencyLimit(jinaTasks, 4)).filter(
+            externalBlocks = (await withConcurrencyLimit(jinaTasks, 3)).filter(
               (b) => b.length > MIN_BLOCK_LENGTH,
             );
             console.log(
-              `[DeepEnrichment] External scraping: ${externalBlocks.length}/${externalUrls.length} sources succeeded.`,
+              `[DeepEnrichment] External scraping: ${externalBlocks.length}/${externalSources.length} sources succeeded.`,
             );
           }
         } catch (e) {
@@ -921,46 +1102,64 @@ export const runDeepEnrichment = internalAction({
       }
 
       // ─── Phase 2: Firecrawl Scrape → Get clean Markdown ──────────────────
+      // Firecrawl credit cap: once MAX_FIRECRAWL_SCRAPES_PER_UNIVERSITY is
+      // reached, remaining URLs go straight to the free Jina Reader fallback.
+      let firecrawlUsed = 0;
       const scrapeTasks = highYieldUrls.map((targetUrl) => async () => {
-        try {
-          const result = await withRetry(
-            async () => firecrawlScrape(targetUrl, firecrawlKey),
-            { maxRetries: 1 },
-          );
-          const markdown = result.data?.markdown || "";
-          const normalized = normalizeContent(markdown).substring(
-            0,
-            MAX_CHARS_PER_SOURCE,
-          );
-          return `\n=== SOURCE: ${targetUrl} ===\n${normalized}\n`;
-        } catch (e) {
-          console.warn(
-            `[DeepEnrichment] Firecrawl failed for ${targetUrl}, trying Jina Reader fallback:`,
-            e instanceof Error ? e.message : String(e),
-          );
+        let markdown = "";
+        let firecrawlAttempted = false;
+        if (firecrawlUsed < MAX_FIRECRAWL_SCRAPES_PER_UNIVERSITY) {
+          firecrawlUsed++;
+          firecrawlAttempted = true;
           try {
-            const text = await fetchJinaText(targetUrl, 25000);
-            const normalized = normalizeContent(text).substring(
-              0,
-              MAX_CHARS_PER_SOURCE,
+            const result = await withRetry(
+              async () => firecrawlScrape(targetUrl, firecrawlKey),
+              { maxRetries: 1 },
             );
-            if (normalized.length >= MIN_BLOCK_LENGTH) {
+            markdown = result.data?.markdown || "";
+          } catch (e) {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.warn(
+              `[DeepEnrichment] Firecrawl failed for ${targetUrl}, trying Jina Reader fallback:`,
+              msg,
+            );
+            // Rate-limited: stop burning time on backoff sleeps and route the
+            // remaining URLs through the free Jina Reader path.
+            if (/\b429\b|rate limit|ratelimit/i.test(msg)) {
+              firecrawlUsed = MAX_FIRECRAWL_SCRAPES_PER_UNIVERSITY;
+              console.warn(
+                `[DeepEnrichment] Firecrawl rate limit hit; switching remaining scrapes to Jina Reader`,
+              );
+            }
+          }
+        }
+
+        if (!markdown) {
+          try {
+            markdown = await fetchJinaText(targetUrl, 25000);
+            if (firecrawlAttempted) {
               console.log(
                 `[DeepEnrichment] Jina Reader fallback succeeded for ${targetUrl}`,
               );
-              return `\n=== SOURCE: ${targetUrl} ===\n${normalized}\n`;
             }
           } catch (jinaErr) {
             console.warn(
-              `[DeepEnrichment] Jina Reader fallback also failed for ${targetUrl}:`,
+              `[DeepEnrichment] Jina Reader failed for ${targetUrl}:`,
               jinaErr instanceof Error ? jinaErr.message : String(jinaErr),
             );
+            return "";
           }
-          return "";
         }
+
+        const normalized = normalizeContent(markdown).substring(
+          0,
+          MAX_CHARS_PER_SOURCE,
+        );
+        if (normalized.length < MIN_BLOCK_LENGTH) return "";
+        return `\n=== SOURCE: ${targetUrl} ===\n${normalized}\n`;
       });
 
-      const scrapedBlocks = await withConcurrencyLimit(scrapeTasks, 4);
+      const scrapedBlocks = await withConcurrencyLimit(scrapeTasks, 2);
       let validBlocks = scrapedBlocks.filter(
         (b) => b.length > MIN_BLOCK_LENGTH,
       );
@@ -988,7 +1187,11 @@ export const runDeepEnrichment = internalAction({
             alreadyScraped.add(url);
           }
         };
-        [workingUrl, ...highYieldUrls, ...externalUrls].forEach(addScraped);
+        [
+          workingUrl,
+          ...highYieldUrls,
+          ...externalSources.map((s) => s.url),
+        ].forEach(addScraped);
 
         const discoveredLinks = mapResult
           ? (mapResult.links || []).map((l) => l.url)
@@ -998,7 +1201,7 @@ export const runDeepEnrichment = internalAction({
           workingUrl,
           alreadyScraped,
           MAX_FOLLOWUP_URLS,
-          [...discoveredLinks, ...externalUrls],
+          [...discoveredLinks, ...externalSources.map((s) => s.url)],
         );
         if (followupUrls.length > 0) {
           console.log(
@@ -1021,7 +1224,7 @@ export const runDeepEnrichment = internalAction({
               return "";
             }
           });
-          const followupBlocks = (await withConcurrencyLimit(followupTasks, 4)).filter(
+          const followupBlocks = (await withConcurrencyLimit(followupTasks, 2)).filter(
             (b) => b.length > MIN_BLOCK_LENGTH,
           );
           if (followupBlocks.length > 0) {
@@ -1042,7 +1245,47 @@ export const runDeepEnrichment = internalAction({
       // already handles NIRF/AISHE/NAAC PDFs via Jina Reader + Gemini Flash-Lite.
       // Keeping deep enrichment focused on stakeholder contacts + website data.
 
-      // ─── Phase 2d: Anti-Ragging Committee Scraping ───────────────────────
+      // ─── Phase 2d: gov.in / IP-blocked snippet fallback ──────────────────
+      // .gov.in sites (e.g. nmi.gov.in) often block Firecrawl/Jina entirely.
+      // When the assembled context is thin, supplement with Serper snippets
+      // (official-domain / gov.in results only) so per-source extraction still
+      // has evidence to work with.
+      const totalContextChars = validBlocks.reduce(
+        (sum, b) => sum + b.length,
+        0,
+      );
+      if (
+        totalContextChars < 15_000 &&
+        serperKey &&
+        domain.toLowerCase().endsWith(".gov.in")
+      ) {
+        try {
+          // Fresh Serper budget: the shared budget is usually exhausted by
+          // external-source discovery by this point.
+          const snippetBlocks = await discoverGovInSnippetBlocks(
+            uniName,
+            domain,
+            serperKey,
+          );
+          if (snippetBlocks.length > 0) {
+            validBlocks = validBlocks.concat(snippetBlocks);
+            console.log(
+              `[DeepEnrichment] gov.in snippet fallback added ${snippetBlocks.length} blocks (total: ${validBlocks.length}).`,
+            );
+          } else {
+            console.warn(
+              `[DeepEnrichment] gov.in snippet fallback produced 0 blocks for ${uniName}`,
+            );
+          }
+        } catch (e) {
+          console.warn(
+            `[DeepEnrichment] gov.in snippet fallback failed:`,
+            e instanceof Error ? e.message : String(e),
+          );
+        }
+      }
+
+      // ─── Phase 2e: Anti-Ragging Committee Scraping ───────────────────────
       // UGC mandates every university to list anti-ragging committee members
       // with their mobile numbers. These are real, personal phone numbers.
       const antiRaggingUrls = mapResult
@@ -1063,7 +1306,7 @@ export const runDeepEnrichment = internalAction({
       const antiRaggingContacts = {
         emails: new Set<string>(),
         phones: new Set<string>(),
-        phoneContexts: [] as Array<{ value: string; context: string }>,
+        phoneContexts: [] as ContactWithContext[],
       };
       for (const arUrl of antiRaggingUrls) {
         try {
@@ -1089,8 +1332,8 @@ export const runDeepEnrichment = internalAction({
       // If contacts exist in raw Markdown, they are physically impossible to miss.
       const regexEmails = new Set<string>();
       const regexPhones = new Set<string>();
-      const allEmailContexts: Array<{ value: string; context: string }> = [];
-      const allPhoneContexts: Array<{ value: string; context: string }> = [...antiRaggingContacts.phoneContexts];
+      const allEmailContexts: ContactWithContext[] = [];
+      const allPhoneContexts: ContactWithContext[] = [...antiRaggingContacts.phoneContexts];
       for (const block of validBlocks) {
         const result = extractContactsFromMarkdown(block);
         result.emails.forEach((e) => regexEmails.add(e));
@@ -1312,10 +1555,13 @@ export const runDeepEnrichment = internalAction({
         name?: string;
         email?: string;
         phone?: string;
+        phone_source?: string;
         linkedin_url?: string;
+        linkedin_source?: string;
         role?: string;
         source_url?: string;
         sources?: string[];
+        contact_confidence?: number;
       }
 
       function isClericalOrSupportRole(role?: string | null): boolean {
@@ -1382,10 +1628,10 @@ export const runDeepEnrichment = internalAction({
       function collectFallbackPhonesForStakeholder(
         stakeholder: StakeholderCandidate,
       ): string[] {
-        if (stakeholder.phone) return [stakeholder.phone];
-        if (uniqueRegexPhones.length === 0) return [];
-
-        // Context-based match: check if a phone was matched to this stakeholder name
+        // Only use phones that matchPhonesToStakeholders explicitly tied to
+        // this person's name+role. This stops the model's per-source phone
+        // guesses (which often copy the main switchboard) from contaminating
+        // individual records.
         if (stakeholder.name) {
           for (const [phone, matchedName] of phoneNameMatches) {
             if (
@@ -1396,41 +1642,85 @@ export const runDeepEnrichment = internalAction({
           }
         }
 
-        // If there are multiple phones and no name match, do not blindly assign
-        // the first phone; that over-assigns shared office numbers.
-        if (uniqueRegexPhones.length > 1) return [];
-
-        // Single-phone fallback: only assign if the stakeholder's name or role
-        // appears in the context near that phone, or if the role is a singleton
-        // decision-maker role that plausibly owns the main office number.
-        const normalizedRole = (stakeholder.role || "").toLowerCase();
-        const normalizedName = normalizeNameDedup(stakeholder.name);
-        if (!normalizedName && !normalizedRole) return [];
-
-        const phone = uniqueRegexPhones[0];
-        const phoneCtx = allPhoneContexts.find((p) => p.value === phone);
-        const ctx = (phoneCtx?.context || "").toLowerCase();
-        const nameFirstToken = normalizedName?.split(" ")[0];
-        if (
-          nameFirstToken && ctx.includes(nameFirstToken)
-        ) {
-          return [phone];
-        }
-        if (normalizedRole && ctx.includes(normalizedRole)) {
-          return [phone];
-        }
-
-        if (
-          isSingletonRole(stakeholder.role) ||
-          isDecisionMakerRole(stakeholder.role)
-        ) {
-          return [phone];
-        }
-
         return [];
       }
 
-      const validStakeholders = ((stakeholders as StakeholderCandidate[]) || [])
+      // Resolve conflicts for singleton senior roles (VC, Registrar, FO, etc.)
+      // When multiple sources name different people for the same role, prefer
+      // the dedicated leadership leaf page and the current officers table over
+      // stale .html snapshots or committee/prospectus PDFs.
+      function sourceSpecificityScore(
+        st: StakeholderCandidate,
+      ): number {
+        const url = (st.source_url || "").toLowerCase();
+        const canonicalRole = (normalizeStakeholderRole(st.role) || "").toLowerCase();
+        let score = 0;
+
+        if (canonicalRole && url.includes(canonicalRole.replace(/\s+/g, "-")))
+          score += 20;
+        if (canonicalRole && url.includes(canonicalRole.replace(/\s+/g, "")))
+          score += 10;
+
+        if (url.includes("officers-of") && !url.endsWith(".html")) score += 10;
+        if (url.includes("officers-of") && url.endsWith(".html")) score += 2;
+
+        if (/(\.pdf|committee|prospectus|finance.*committee)/.test(url))
+          score -= 10;
+        if (url.endsWith(".html")) score -= 3;
+        if (url.includes("faculty") || url.includes("profile") || url.includes("bio"))
+          score += 5;
+
+        return score;
+      }
+
+      function resolveSingletonRoleConflicts(
+        list: StakeholderCandidate[],
+      ): StakeholderCandidate[] {
+        const byRole = new Map<string, StakeholderCandidate[]>();
+        const rest: StakeholderCandidate[] = [];
+        for (const st of list) {
+          const canonicalRole = normalizeStakeholderRole(st.role);
+          if (canonicalRole && isSingletonRole(canonicalRole)) {
+            const key = canonicalRole.toLowerCase();
+            const arr = byRole.get(key) || [];
+            arr.push(st);
+            byRole.set(key, arr);
+          } else {
+            rest.push(st);
+          }
+        }
+
+        const resolved: StakeholderCandidate[] = [];
+        for (const group of byRole.values()) {
+          if (group.length === 1) {
+            resolved.push(group[0]);
+            continue;
+          }
+          // Pick the record with the most specific/authoritative source.
+          // Preserve the Offg. / Acting label from the chosen record.
+          const scored = group.map((st) => ({
+            st,
+            score:
+              sourceSpecificityScore(st) +
+              (st.name?.toLowerCase().includes("offg") ||
+              st.role?.toLowerCase().includes("offg") ||
+              st.name?.toLowerCase().includes("acting") ||
+              st.role?.toLowerCase().includes("acting")
+                ? 3
+                : 0),
+          }));
+          scored.sort((a, b) => b.score - a.score);
+          resolved.push(scored[0].st);
+        }
+
+        return [...resolved, ...rest];
+      }
+
+      const resolvedStakeholders = resolveSingletonRoleConflicts(
+        (stakeholders as StakeholderCandidate[]) || [],
+      );
+
+      const validStakeholders = (resolvedStakeholders || [])
         .filter((st) => {
           const hasName = !!st.name?.trim();
           const hasRole = !!st.role?.trim();
@@ -1482,7 +1772,7 @@ export const runDeepEnrichment = internalAction({
             return false;
           });
           const fallbackPhones = collectFallbackPhonesForStakeholder(st);
-          const resolvedPhone = st.phone || fallbackPhones[0];
+          const resolvedPhone = fallbackPhones[0];
           if (existingIdx >= 0) {
             // Merge richer data into existing
             const existing = acc[existingIdx];
@@ -1582,21 +1872,6 @@ export const runDeepEnrichment = internalAction({
         return !isPersonalDomain && nameInitials.length >= 2 && local.includes(nameInitials);
       }
 
-      // LinkedIn-name consistency: the URL must be a real /in/ profile and the
-      // slug must contain the person's surname or at least two name tokens.
-      function linkedinMatchesName(linkedinUrl: string, name: string): boolean {
-        const lowerUrl = linkedinUrl.toLowerCase();
-        if (!lowerUrl.includes("linkedin.com/in/")) return false;
-        const slug = lowerUrl.split("/in/")[1]?.split("?")[0]?.toLowerCase() || "";
-        if (!slug || /\b(pub\/dir|company|search)\b/.test(slug)) return false;
-        const parts = name.toLowerCase().split(/[.\s]+/).filter((w) => w.length > 2);
-        if (parts.length === 0) return false;
-        const surname = parts[parts.length - 1];
-        if (surname.length > 2 && slug.includes(surname)) return true;
-        const matches = parts.filter((p) => slug.includes(p)).length;
-        return matches >= 2;
-      }
-
       const currentStakeholders = validStakeholders
         .map((st) => {
           const cleaned: StakeholderCandidate = { ...st };
@@ -1609,11 +1884,12 @@ export const runDeepEnrichment = internalAction({
             cleaned.email = undefined;
           }
           // Strip mismatched LinkedIn URLs similarly.
-          if (cleaned.linkedin_url && cleaned.name && !linkedinMatchesName(cleaned.linkedin_url, cleaned.name)) {
+          if (cleaned.linkedin_url && cleaned.name && !linkedinMatchesName(cleaned.name, cleaned.linkedin_url)) {
             console.warn(
               `[DeepEnrichment] Stripping mismatched LinkedIn ${cleaned.linkedin_url} for ${cleaned.name}`,
             );
             cleaned.linkedin_url = undefined;
+            cleaned.linkedin_source = "none";
           }
           return cleaned;
         })
@@ -1650,13 +1926,22 @@ export const runDeepEnrichment = internalAction({
         role: st.role || undefined,
         email: st.email || undefined,
         phone: st.phone || undefined,
+        phone_source: st.phone_source || (st.phone ? "scraped" : "none"),
         linkedin_url: st.linkedin_url || undefined,
+        linkedin_source: st.linkedin_source || (st.linkedin_url ? "scraped" : "none"),
         source_url: st.source_url || undefined,
         sources:
           st.sources ??
           (st.source_url ? [st.source_url] : undefined),
         email_source: st.email ? "scraped" : undefined,
-        phone_source: st.phone ? "scraped" : undefined,
+        contact_confidence:
+          typeof st.contact_confidence === "number"
+            ? Math.max(0, Math.min(1, st.contact_confidence))
+            : st.email || st.phone || st.linkedin_url
+              ? 1.0
+              : st.name && st.role
+                ? 0.5
+                : 0.0,
       }));
 
       if (currentStakeholders.length > 0) {
@@ -1778,18 +2063,18 @@ export const debugDeepEnrichment = internalAction({
     }
 
     // Phase 3: External source search
-    let externalUrls: string[] = [];
+    let externalSources: ExternalSource[] = [];
     if (serperKey) {
       try {
         const domain = url
           .replace(/^https?:\/\//, "")
           .replace(/\/$/, "")
           .replace(/^www\./, "");
-        externalUrls = await discoverExternalSources(
+        externalSources = await discoverExternalSources(
           uniName,
           domain,
           serperKey as string,
-          createSerperBudget({ maxQueries: 4 }),
+          createSerperBudget({ maxQueries: 6 }),
           {
             city: university.city,
             state: university.state,
@@ -1798,7 +2083,10 @@ export const debugDeepEnrichment = internalAction({
         );
         report.phases = {
           ...(report.phases as object),
-          externalSearch: { success: true, urls: externalUrls },
+          externalSearch: {
+            success: true,
+            urls: externalSources.map((s) => s.url),
+          },
         };
       } catch (e) {
         report.phases = {
@@ -1813,7 +2101,7 @@ export const debugDeepEnrichment = internalAction({
 
     // Phase 4: Jina Reader on external URLs
     const jinaResults: Record<string, { length: number; preview: string }> = {};
-    for (const extUrl of externalUrls.slice(0, 3)) {
+    for (const extUrl of externalSources.slice(0, 3).map((s) => s.url)) {
       try {
         const res = await fetch(`https://r.jina.ai/${extUrl}`, {
           headers: { Accept: "text/plain" },

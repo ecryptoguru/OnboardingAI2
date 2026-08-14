@@ -30,6 +30,33 @@ describe("createLlmUsageEntry", () => {
     assert.strictEqual(usage.totalCostUsd, 0.000625);
   });
 
+  it("bills thinking tokens at the output rate for 3.x models", () => {
+    const usage = createLlmUsageEntry({
+      label: "test",
+      model: "gemini-3.7-flash",
+      response: {
+        usageMetadata: {
+          promptTokenCount: 1000,
+          candidatesTokenCount: 200,
+          thoughtsTokenCount: 500,
+          totalTokenCount: 1700,
+        },
+      },
+      fallbackInputTokens: 1,
+      fallbackOutputTokens: 1,
+    });
+
+    assert.strictEqual(usage.inputTokens, 1000);
+    assert.strictEqual(usage.outputTokens, 200);
+    assert.strictEqual(usage.thoughtsTokenCount, 500);
+    assert.strictEqual(usage.totalTokens, 1700);
+    // billed output = 200 candidates + 500 thoughts = 700 @ $3.75/M
+    assert.strictEqual(usage.outputCostUsd, 0.002625);
+    // input 1000 @ $0.75/M
+    assert.strictEqual(usage.inputCostUsd, 0.00075);
+    assert.strictEqual(usage.totalCostUsd, 0.003375);
+  });
+
   it("falls back to estimated token counts when metadata is absent", () => {
     const usage = createLlmUsageEntry({
       label: "test",

@@ -4,6 +4,7 @@ import {
   internalQuery,
   internalMutation,
 } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { validateAuth } from "./lib/auth_utils";
@@ -749,6 +750,42 @@ export const updateInternal = internalMutation({
   },
 });
 
+export const bulkUpdateWebsitesManual = internalMutation({
+  args: {
+    updates: v.array(
+      v.object({
+        id: v.id("universities"),
+        website: v.optional(v.string()),
+        website_status: v.optional(
+          v.union(
+            v.literal("pending"),
+            v.literal("valid"),
+            v.literal("invalid"),
+            v.literal("discovered"),
+            v.literal("discovered_weak"),
+          ),
+        ),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    for (const update of args.updates) {
+      const fields: Partial<Doc<"universities">> = { updated_at: Date.now() };
+      if (update.website !== undefined) fields.website = update.website;
+      if (update.website_status !== undefined) {
+        fields.website_status = update.website_status as
+          | "pending"
+          | "valid"
+          | "invalid"
+          | "discovered"
+          | "discovered_weak";
+      }
+      await ctx.db.patch(update.id as Id<"universities">, fields);
+    }
+    return { updated: args.updates.length };
+  },
+});
+
 export const updateOutreachStageInternal = internalMutation({
   args: {
     universityId: v.id("universities"),
@@ -769,6 +806,40 @@ export const updateOutreachStageInternal = internalMutation({
   handler: async (ctx, args) => {
     await ctx.db.patch(args.universityId, {
       outreach_stage: args.stage,
+      updated_at: Date.now(),
+    });
+  },
+});
+
+export const updateEnrichmentProgressInternal = internalMutation({
+  args: {
+    universityId: v.id("universities"),
+    status: v.optional(
+      v.union(
+        v.literal("running"),
+        v.literal("completed"),
+        v.literal("failed"),
+        v.literal("timed_out"),
+      ),
+    ),
+    phase: v.optional(v.string()),
+    started_at: v.optional(v.number()),
+    completed_at: v.optional(v.number()),
+    error: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const { universityId, status, phase, error, started_at, completed_at } =
+      args;
+    const update: Partial<Record<string, unknown>> = {};
+    if (status !== undefined) update["enrichment_status"] = status;
+    if (phase !== undefined) update["enrichment_phase"] = phase;
+    if (error !== undefined) update["enrichment_error"] = error;
+    if (started_at !== undefined) update["enrichment_started_at"] = started_at;
+    if (completed_at !== undefined)
+      update["enrichment_completed_at"] = completed_at;
+    if (Object.keys(update).length === 0) return;
+    await ctx.db.patch(universityId, {
+      ...update,
       updated_at: Date.now(),
     });
   },

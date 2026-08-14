@@ -23,6 +23,7 @@ import {
 } from "../lib/contactInference";
 import { isDecisionMakerRole } from "../lib/stakeholderQuality";
 import { extractContactsWithContext } from "../lib/scrapers";
+import { linkedinMatchesName } from "../lib/validateDeepEnrichment";
 import * as Sentry from "@sentry/node";
 
 // ─── Constants ─────────────────────────────────────────────────────────────
@@ -106,38 +107,6 @@ function extractCandidateNameFromLinkedinTitle(
 }
 
 /**
- * Validate whether a LinkedIn profile URL/title actually matches a stakeholder name.
- * Checks that at least one non-trivial name token (first or last name) appears in
- * the URL slug or title. Prevents false positives like "puneetred" for "Dr. K R Sridhara Murthi".
- */
-function linkedinProfileMatchesName(
-  name: string | undefined,
-  linkedinUrl: string | undefined,
-): boolean {
-  if (!name || !linkedinUrl) return false;
-  const slugMatch = linkedinUrl.match(/linkedin\.com\/in\/([^/?#]+)/i);
-  const slug = slugMatch ? slugMatch[1].toLowerCase() : "";
-
-  const nameTokens = name
-    .toLowerCase()
-    .replace(/[^a-z\s]/g, " ")
-    .split(/\s+/)
-    .filter(
-      (t) =>
-        t.length >= 3 &&
-        !["dr", "prof", "mr", "mrs", "ms", "shri", "smt", "er"].includes(t),
-    );
-
-  if (nameTokens.length === 0) return false;
-
-  // A LinkedIn personal profile URL slug should contain a name token.
-  // We do not rely on the title because search results can show a person's name
-  // while linking to an unrelated profile (e.g. a campus or company page).
-  const slugMatches = nameTokens.filter((token) => slug.includes(token)).length;
-  return slugMatches >= 1;
-}
-
-/**
  * Search the public web for a stakeholder's email and/or phone.
  * Uses Serper and extracts contacts from result snippets, keeping only those
  * whose surrounding context mentions the person's name or role.
@@ -181,25 +150,29 @@ async function searchStakeholderEmailPhone(
     const roleLower = (role || "").toLowerCase();
     const normalizedDomain = (domain || "").toLowerCase().replace(/^www\./, "");
 
+    const universityNameLower = universityName.toLowerCase();
+
     const emailMatch = extracted.emails.find((e) => {
       const emailDomain = e.value.split("@")[1]?.toLowerCase();
       const context = e.context;
-      const relevant =
-        context.includes(nameLower) ||
-        (!!roleLower && context.includes(roleLower));
+      const hasName = context.includes(nameLower);
+      const hasRole = !!roleLower && context.includes(roleLower);
+      const hasUniversity = context.includes(universityNameLower);
+      const relevant = hasName && (hasRole || hasUniversity);
       const domainOk =
         !normalizedDomain ||
-        !!emailDomain?.endsWith(normalizedDomain) ||
-        emailDomain?.endsWith(".ac.in");
+        (!!emailDomain &&
+          (emailDomain === normalizedDomain ||
+            emailDomain.endsWith("." + normalizedDomain)));
       return relevant && domainOk;
     });
 
     const phoneMatch = extracted.phones.find((p) => {
       const context = p.context;
-      return (
-        context.includes(nameLower) ||
-        (!!roleLower && context.includes(roleLower))
-      );
+      const hasName = context.includes(nameLower);
+      const hasRole = !!roleLower && context.includes(roleLower);
+      const hasUniversity = context.includes(universityNameLower);
+      return hasName && (hasRole || hasUniversity);
     });
 
     return {
@@ -297,7 +270,7 @@ async function searchStakeholderLinkedInBatch(
     for (const result of linkedinResults) {
       const link = result.link;
       if (!link) continue;
-      const matchesName = linkedinProfileMatchesName(target.name, link);
+      const matchesName = linkedinMatchesName(target.name, link);
       const roleInContext =
         !!normalizedRole &&
         `${result.title || ""} ${result.snippet || ""}`
@@ -305,7 +278,7 @@ async function searchStakeholderLinkedInBatch(
           .includes(normalizedRole.toLowerCase());
       if (
         matchesName ||
-        (roleInContext && linkedinProfileMatchesName(target.name, link))
+        (roleInContext && linkedinMatchesName(target.name, link))
       ) {
         bestResult = { link, title: result.title, snippet: result.snippet };
         break;
@@ -327,7 +300,7 @@ async function searchStakeholderLinkedInBatch(
         (r) =>
           r.link &&
           r.link !== bestResult!.link &&
-          linkedinProfileMatchesName(target.name, r.link),
+          linkedinMatchesName(target.name, r.link),
       )
       .slice(0, 2)
       .map((r) => {
@@ -513,12 +486,12 @@ export const discoverSocialAndMedia = internalAction({
             !!(st.email && hasRoleBasedInstitutionEmail(st.email))) &&
           // Skip stakeholders whose existing LinkedIn URL already matches their name
           (!st.linkedin_url ||
-            !linkedinProfileMatchesName(st.name, st.linkedin_url)),
+            !linkedinMatchesName(st.name, st.linkedin_url)),
       );
 
       // Clear mismatched LinkedIn URLs before searching
       for (const st of liTargets) {
-        if (st.linkedin_url && !linkedinProfileMatchesName(st.name, st.linkedin_url)) {
+        if (st.linkedin_url && !linkedinMatchesName(st.name, st.linkedin_url)) {
           console.warn(
             `[Enrichment] Clearing mismatched LinkedIn URL for ${st.name || st.role}: ${st.linkedin_url}`,
           );
@@ -888,9 +861,9 @@ export const debugLinkedInEnrichment = internalAction({
             normalizedRole,
           );
         const canPatchStakeholder =
-          linkedinProfileMatchesName(discoveredName, firstResult?.link) ||
+          linkedinMatchesName(discoveredName, firstResult?.link) ||
           (!!normalizedRole &&
-            linkedinProfileMatchesName(st.name, firstResult?.link) &&
+            linkedinMatchesName(st.name, firstResult?.link) &&
             `${firstResult?.title || ""} ${firstResult?.snippet || ""}`
               .toLowerCase()
               .includes(normalizedRole.toLowerCase()));

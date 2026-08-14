@@ -28,6 +28,7 @@ import {
   inferPreferredRoleEmail,
   inferRoleFromContactContext,
   inferRoleFromInstitutionEmail,
+  isRelevantInstitutionEmailDomain,
   isSingletonRole,
   normalizeInstitutionDomain,
 } from "../lib/contactInference";
@@ -61,32 +62,34 @@ const GENERIC_PERSONAL_DOMAINS = new Set([
 ]);
 
 const TARGET_ROLES = [
-  "Owner",
-  "President",
-  "Chairman",
-  "Chairperson",
   "Chancellor",
   "Vice Chancellor",
   "Pro Vice Chancellor",
   "Registrar",
   "Dy Registrar",
+  "Dean",
   "Dean Student Welfare",
   "Dean Student Affairs",
   "Director Administration",
   "Chief Warden",
+  "Controller of Examinations",
+  "Deputy Controller of Examinations",
+  "Finance Officer",
+  "Chief Finance Officer",
+  "Librarian",
   "Director",
   "Principal",
   "Rector",
   "Secretary",
   "Treasurer",
-  "Dean of Faculty",
-  "Head of Administration",
-  "Executive Director",
-  "Managing Director",
-  "Joint Director",
-  "Deputy Director",
-  "Associate Director",
 ];
+
+function isConcatenatedOrOverlongRole(role?: string | null): boolean {
+  if (!role) return true;
+  if (role.length > 80) return true;
+  const segments = role.split(/[\/;,&|]+/).filter((s) => s.trim().length > 0);
+  return segments.length > 2;
+}
 
 async function fetchJinaText(targetUrl: string, timeoutMs = 20000) {
   const response = await fetch(`https://r.jina.ai/${encodeURIComponent(targetUrl)}`, {
@@ -276,18 +279,6 @@ async function discoverOfficialAdminPages(
     .sort((a, b) => b[1] - a[1])
     .slice(0, 5)
     .map(([link]) => link);
-}
-
-function isRelevantInstitutionEmailDomain(
-  emailDomain: string,
-  institutionDomain: string,
-): boolean {
-  if (!emailDomain) return false;
-  return (
-    GENERIC_PERSONAL_DOMAINS.has(emailDomain) ||
-    emailDomain === institutionDomain ||
-    emailDomain.endsWith(`.${institutionDomain}`)
-  );
 }
 
 export const scrapeUniversity = internalAction({
@@ -650,17 +641,16 @@ export const scrapeUniversity = internalAction({
       }
 
       // ─── Regex augmentation: extract emails+phones and try to attach to stakeholders
-      const { emails: regexEmails, phones: regexPhones } =
+      const { emails: regexEmails } =
         extractContactsFromMarkdown(content);
       const contactsWithContext = extractContactsWithContext(content);
 
       const regexRoleFallbackStakeholders = regexEmails
         .flatMap((email) => {
           const emailDomain = email.split("@")[1]?.toLowerCase() || "";
-          const domainRelevant = isRelevantInstitutionEmailDomain(
-            emailDomain,
-            domain,
-          );
+          const domainRelevant =
+            GENERIC_PERSONAL_DOMAINS.has(emailDomain) ||
+            isRelevantInstitutionEmailDomain(email, domain);
           if (!domainRelevant) {
             console.warn(
               `[Scraper] Rejecting cross-university email ${email} for ${university.university_name}`,
@@ -757,7 +747,7 @@ export const scrapeUniversity = internalAction({
               st.email_source = "inferred";
             }
           }
-          // Context-based phone assignment (name proximity)
+          // Context-based phone assignment (name + role proximity)
           if (!st.phone) {
             const matchedPhone = Array.from(phoneMatches.entries()).find(
               ([, name]) => name.toLowerCase() === (st.name || "").toLowerCase(),
@@ -766,15 +756,6 @@ export const scrapeUniversity = internalAction({
               st.phone = matchedPhone[0];
               st.phone_source = "regex";
             }
-          }
-          // Fallback: single phone for single stakeholder
-          if (
-            !st.phone &&
-            regexPhones.length === 1 &&
-            stakeholders.length === 1
-          ) {
-            st.phone = regexPhones[0];
-            st.phone_source = "regex";
           }
         }
       }
@@ -786,10 +767,9 @@ export const scrapeUniversity = internalAction({
       stakeholders = stakeholders.filter((st) => {
         if (!st.email) return true;
         const emailDomain = st.email.split("@")[1]?.toLowerCase() || "";
-        const domainRelevant = isRelevantInstitutionEmailDomain(
-          emailDomain,
-          domain,
-        );
+        const domainRelevant =
+          GENERIC_PERSONAL_DOMAINS.has(emailDomain) ||
+          isRelevantInstitutionEmailDomain(st.email, domain);
         if (!domainRelevant) {
           console.warn(
             `[Scraper] Rejecting cross-domain stakeholder ${st.email} for ${university.university_name}`,
@@ -842,8 +822,15 @@ export const scrapeUniversity = internalAction({
           );
           return false;
         }
-        // Keep role-only contacts only when they are decision-maker roles.
-        // This avoids long tails of generic faculty/department entries.
+        if (isConcatenatedOrOverlongRole(st.role)) {
+          console.warn(
+            `[Scraper] Rejecting concatenated/overlong role: ${st.role}`,
+          );
+          return false;
+        }
+        // Keep contacts only when they have a real name with a decision-maker role,
+        // or a verified contact. A named person with a real, senior role is always
+        // retained even without email/phone.
         return (
           hasValidEmail ||
           hasValidPhone ||

@@ -47,6 +47,19 @@ export default defineSchema({
     naac_grade: v.optional(v.string()),
     established_year: v.optional(v.number()),
     notes: v.optional(v.string()),
+    // Enrichment job progress for long-running deep-enrichment runs
+    enrichment_status: v.optional(
+      v.union(
+        v.literal("running"),
+        v.literal("completed"),
+        v.literal("failed"),
+        v.literal("timed_out"),
+      ),
+    ),
+    enrichment_phase: v.optional(v.string()),
+    enrichment_started_at: v.optional(v.number()),
+    enrichment_completed_at: v.optional(v.number()),
+    enrichment_error: v.optional(v.string()),
     demographics: v.optional(
       v.object({
         // ── AISHE / NAAC SSR block (hostelite breakdown) ──────────────────────
@@ -134,8 +147,18 @@ export default defineSchema({
         v.literal("regex"),
         v.literal("inferred"),
         v.literal("manual"),
+        v.literal("none"),
       ),
     ),
+    linkedin_source: v.optional(
+      v.union(
+        v.literal("scraped"),    // Explicitly present in source page
+        v.literal("inferred"),   // Guessed from name search
+        v.literal("manual"),     // User-added
+        v.literal("none"),       // No LinkedIn data
+      ),
+    ),
+    contact_confidence: v.optional(v.number()), // 0-1, overall confidence for this record's contact details
     created_at: v.number(),
     updated_at: v.optional(v.number()),
   })
@@ -234,6 +257,7 @@ export default defineSchema({
     ),
     sendgrid_message_id: v.optional(v.string()),
     zeptomail_message_id: v.optional(v.string()),
+    owner_id: v.optional(v.id("users")), // user who created/owns this draft
     status: v.union(
       v.literal("pending_approval"),
       v.literal("queued"),
@@ -254,7 +278,8 @@ export default defineSchema({
     .index("by_status", ["status"])
     .index("by_step_number", ["step_number"])
     .index("by_sendgrid_id", ["sendgrid_message_id"])
-    .index("by_zeptomail_id", ["zeptomail_message_id"]),
+    .index("by_zeptomail_id", ["zeptomail_message_id"])
+    .index("by_owner_status", ["owner_id", "status"]),
 
   // ─── Reply Logs ───────────────────────────────────────────────────────────
   replyLogs: defineTable({

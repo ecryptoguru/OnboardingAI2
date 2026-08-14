@@ -12,7 +12,10 @@ export interface StakeholderLike {
   role?: string | null;
   email?: string | null;
   phone?: string | null;
+  phone_source?: string | null;
   linkedin_url?: string | null;
+  linkedin_source?: string | null;
+  contact_confidence?: number | null;
   source_url?: string | null;
 }
 
@@ -31,12 +34,61 @@ function cleanString(value: unknown): string | undefined {
   return trimmed;
 }
 
-function isLikelyValidLinkedIn(url: string): boolean {
+export function isLikelyValidLinkedIn(url: string): boolean {
   const lower = url.toLowerCase();
   if (!lower.includes("linkedin.com/in/")) return false;
   const slug = lower.split("/in/")[1]?.split("?")[0] || "";
   if (!slug) return false;
   return !/\b(pub\/dir|company|search)\b/.test(slug);
+}
+
+/**
+ * Verify that a LinkedIn /in/ URL slug clearly matches a person\'s name.
+ * Requires the surname or at least two distinct name tokens to appear as
+ * whole "words" in the slug (delimited by - or _ or non-letters). This
+ * prevents matching unrelated profiles like "iamalinakhan" to "Asgar Ali".
+ */
+export function linkedinMatchesName(
+  name: string | undefined,
+  linkedinUrl: string | undefined,
+): boolean {
+  if (!name || !linkedinUrl) return false;
+  const url = linkedinUrl.toLowerCase();
+  if (!isLikelyValidLinkedIn(url)) return false;
+  const slugMatch = url.match(/linkedin\.com\/in\/([^/?#]+)/i);
+  const slug = slugMatch ? slugMatch[1] : "";
+  if (!slug) return false;
+
+  const slugParts = slug
+    .replace(/\./g, "-")
+    .split(/[-_\W]+/)
+    .filter((w) => w.length >= 2);
+  const slugSet = new Set(slugParts);
+
+  const parts = name
+    .toLowerCase()
+    .replace(/[^a-z\s]/g, " ")
+    .split(/\s+/)
+    .filter(
+      (w) =>
+        w.length > 2 &&
+        !["dr", "prof", "mr", "mrs", "ms", "shri", "smt", "er"].includes(w),
+    );
+  if (parts.length === 0) return false;
+
+  const surname = parts[parts.length - 1];
+
+  if (parts.length === 1) {
+    return slugSet.has(surname);
+  }
+
+  // For multi-word names, require the surname plus at least one other name
+  // token to appear as whole slug parts. This stops "Sohrab Khan" from matching
+  // a "sana-khan" profile just because the surname is shared.
+  return (
+    slugSet.has(surname) &&
+    parts.slice(0, parts.length - 1).some((p) => slugSet.has(p))
+  );
 }
 
 function isValidStakeholder(st: unknown): st is Record<string, unknown> {
@@ -48,18 +100,41 @@ function isValidStakeholder(st: unknown): st is Record<string, unknown> {
   const email = cleanString(obj.email);
   const phone = cleanString(obj.phone);
   const linkedin = cleanString(obj.linkedin_url);
+  const linkedinSource = cleanString(obj.linkedin_source);
 
   // Must have at least one meaningful contact field or a real name + role
   const hasName = !!name && name.length > 1;
   const hasRole = !!role && role.length > 1;
   const hasEmail = !!email;
   const hasPhone = !!phone;
-  const hasLinkedin = !!linkedin && isLikelyValidLinkedIn(linkedin);
+  const hasLinkedin =
+    !!linkedin &&
+    linkedinSource === "scraped" &&
+    !!name &&
+    isLikelyValidLinkedIn(linkedin) &&
+    linkedinMatchesName(name, linkedin);
 
   return (
     (hasName && (hasRole || hasEmail || hasPhone || hasLinkedin)) ||
     (hasRole && (hasEmail || hasPhone || hasLinkedin))
   );
+}
+
+function cleanNumber(value: unknown): number | undefined {
+  if (typeof value === "number") return value;
+  if (typeof value === "string") {
+    const n = Number(value);
+    if (!Number.isNaN(n)) return n;
+  }
+  return undefined;
+}
+
+function cleanSource(value: unknown): string | undefined {
+  const s = cleanString(value);
+  if (!s) return undefined;
+  if (["scraped", "inferred", "manual", "none", "regex"].includes(s))
+    return s;
+  return "inferred";
 }
 
 function cleanStakeholder(st: Record<string, unknown>): StakeholderLike {
@@ -68,15 +143,50 @@ function cleanStakeholder(st: Record<string, unknown>): StakeholderLike {
   const role = cleanString(st.role);
   const email = cleanString(st.email);
   const phone = cleanString(st.phone);
+  const phoneSource = cleanSource(st.phone_source);
   const linkedin = cleanString(st.linkedin_url);
+  const linkedinSource = cleanSource(st.linkedin_source);
   const sourceUrl = cleanString(st.source_url);
+  const rawConfidence = cleanNumber(st.contact_confidence);
 
   if (name) out.name = name;
   if (role) out.role = role;
   if (email) out.email = email;
-  if (phone) out.phone = phone;
-  if (linkedin && isLikelyValidLinkedIn(linkedin)) out.linkedin_url = linkedin;
+  if (phone) {
+    out.phone = phone;
+    // A model-emitted "none" alongside an actual phone is treated as absent;
+    // the phone is present so it is evidence-backed by default.
+    out.phone_source =
+      phoneSource && phoneSource !== "none" ? phoneSource : "scraped";
+  } else {
+    out.phone_source = "none";
+  }
+  if (
+    linkedin &&
+    (linkedinSource === "scraped" ||
+      linkedinSource === undefined ||
+      linkedinSource === "none") &&
+    isLikelyValidLinkedIn(linkedin) &&
+    linkedinMatchesName(name, linkedin)
+  ) {
+    out.linkedin_url = linkedin;
+    out.linkedin_source =
+      linkedinSource && linkedinSource !== "none"
+        ? linkedinSource
+        : "scraped";
+  } else {
+    out.linkedin_source = linkedinSource || "none";
+  }
   if (sourceUrl) out.source_url = sourceUrl;
+
+  let confidence = rawConfidence;
+  if (confidence === undefined) {
+    if ((out.email || out.phone || out.linkedin_url) && out.name && out.role)
+      confidence = 1.0;
+    else if (out.name && out.role) confidence = 0.5;
+    else confidence = 0.0;
+  }
+  out.contact_confidence = Math.max(0, Math.min(1, confidence));
 
   return out;
 }

@@ -107,19 +107,22 @@ async function storeLlmCache(
  * Detect Gemini 3.x models that use thinkingLevel and ignore temperature.
  * Excludes gemini-3.1-flash-lite, which behaves like a legacy Flash model.
  */
-function isGemini3Model(model: string): boolean {
-  // New 3.x API behavior: no temperature, use thinkingLevel.
-  // Applies to 3.6, 3.5-flash-lite, and future 3.7+ models.
-  // NOT gemini-3.5-flash or gemini-3.1-flash-lite, which keep legacy behavior.
-  return /^gemini-3\.(6|[7-9]|[1-9][0-9])/.test(model) ||
-    model.includes("gemini-3.5-flash-lite") ||
-    model.includes("gemini-3-flash-preview");
+export function isGemini3Model(model: string): boolean {
+  // 3.x flash/pro models use thinkingLevel and ignore temperature.
+  // Applies to gemini-3.5-flash (non-lite), 3.6, 3.7+ and 3-flash-preview.
+  // Flash-Lite models (3.1/3.5) keep legacy behavior and must NOT get thinkingConfig.
+  return (
+    (/^gemini-3\.([5-9]|[1-9][0-9])-/.test(model) &&
+      !model.includes("-lite") &&
+      !model.includes("live-translate")) ||
+    model.includes("gemini-3-flash-preview")
+  );
 }
 
-function defaultThinkingLevelForModel(model: string): string | undefined {
+export function defaultThinkingLevelForModel(model: string): string | undefined {
   if (!isGemini3Model(model)) return undefined;
-  if (model.includes("flash-lite")) return THINKING_LEVEL.minimal;
-  if (model === MODELS.gemini_3_6_flash) return THINKING_LEVEL.low;
+  // 3.7 Flash rejects MINIMAL (API validation error); LOW keeps latency/cost
+  // down for extraction while preserving structured-output quality.
   return THINKING_LEVEL.low;
 }
 
@@ -153,6 +156,9 @@ const MODEL_PRICING_USD_PER_MILLION: Record<
   string,
   { input: number; output: number }
 > = {
+  // Intro pricing through 2026-12-31; $1.50/$7.50 from 2027-01-01.
+  // Output price includes thinking tokens.
+  "gemini-3.7-flash": { input: 0.75, output: 3.75 },
   "gemini-3.6-flash": { input: 1.5, output: 7.5 },
   "gemini-3.5-flash": { input: 1.5, output: 9.0 },
   "gemini-3.5-flash-lite": { input: 0.3, output: 2.5 },
@@ -169,6 +175,9 @@ export interface LlmUsageEntry {
   outputCostUsd: number;
   totalCostUsd: number;
   tokenSource: "api_usage" | "estimated";
+  durationMs?: number;
+  /** Thinking tokens consumed by 3.x models; billed at the output rate. */
+  thoughtsTokenCount?: number;
 }
 
 export interface LlmUsageSummary {
@@ -179,6 +188,8 @@ export interface LlmUsageSummary {
   inputCostUsd: number;
   outputCostUsd: number;
   totalCostUsd: number;
+  totalDurationMs: number;
+  avgDurationMs: number;
   entries: LlmUsageEntry[];
 }
 
@@ -197,8 +208,14 @@ function estimateTokensFromText(text: string | undefined | null): number {
 function getModelPricing(model: string): { input: number; output: number } {
   const pricing = MODEL_PRICING_USD_PER_MILLION[model];
   if (pricing) return pricing;
-  console.warn(`[LLM] No pricing for ${model}; defaulting to gemini-3.5-flash`);
-  return MODEL_PRICING_USD_PER_MILLION[MODELS.gemini];
+  const fallback = MODEL_PRICING_USD_PER_MILLION[MODELS.gemini];
+  if (fallback) {
+    console.warn(`[LLM] No pricing for ${model}; defaulting to ${MODELS.gemini}`);
+    return fallback;
+  }
+  throw new Error(
+    `[LLM] No pricing configured for ${model} or default ${MODELS.gemini}`,
+  );
 }
 
 function readUsageNumber(
@@ -222,12 +239,14 @@ export function createLlmUsageEntry({
   response,
   fallbackInputTokens = 0,
   fallbackOutputTokens = 0,
+  durationMs,
 }: {
   label: string;
   model: string;
   response?: GeminiGenerateResponseLike | null;
   fallbackInputTokens?: number;
   fallbackOutputTokens?: number;
+  durationMs?: number;
 }): LlmUsageEntry {
   const usage = response?.usageMetadata;
   const usageRecord = usage as Record<string, unknown> | undefined;
@@ -247,9 +266,14 @@ export function createLlmUsageEntry({
   const totalTokens =
     readUsageNumber(usage, ["totalTokenCount", "totalTokens"]) ??
     inputTokens + outputTokens;
+  const thoughtsTokenCount =
+    readUsageNumber(usage, ["thoughtsTokenCount", "thoughtTokens"]) ?? 0;
   const pricing = getModelPricing(model);
   const inputCostUsd = (inputTokens / 1_000_000) * pricing.input;
-  const outputCostUsd = (outputTokens / 1_000_000) * pricing.output;
+  // Output price includes thinking tokens for 3.x models, so bill them at the
+  // output rate even though the API reports them separately from candidates.
+  const billedOutputTokens = outputTokens + thoughtsTokenCount;
+  const outputCostUsd = (billedOutputTokens / 1_000_000) * pricing.output;
 
   return {
     label,
@@ -265,9 +289,12 @@ export function createLlmUsageEntry({
       (typeof usageRecord.promptTokenCount === "number" ||
         typeof usageRecord.inputTokenCount === "number" ||
         typeof usageRecord.candidatesTokenCount === "number" ||
-        typeof usageRecord.outputTokenCount === "number")
+        typeof usageRecord.outputTokenCount === "number" ||
+        typeof usageRecord.thoughtsTokenCount === "number")
         ? "api_usage"
         : "estimated",
+    durationMs,
+    thoughtsTokenCount: thoughtsTokenCount > 0 ? thoughtsTokenCount : undefined,
   };
 }
 
@@ -281,6 +308,7 @@ export function summarizeLlmUsage(entries: LlmUsageEntry[]): LlmUsageSummary {
       acc.inputCostUsd += entry.inputCostUsd;
       acc.outputCostUsd += entry.outputCostUsd;
       acc.totalCostUsd += entry.totalCostUsd;
+      acc.totalDurationMs += entry.durationMs ?? 0;
       acc.entries.push(entry);
       return acc;
     },
@@ -292,9 +320,16 @@ export function summarizeLlmUsage(entries: LlmUsageEntry[]): LlmUsageSummary {
       inputCostUsd: 0,
       outputCostUsd: 0,
       totalCostUsd: 0,
+      totalDurationMs: 0,
+      avgDurationMs: 0,
       entries: [],
     },
   );
+
+  summary.avgDurationMs =
+    summary.calls > 0
+      ? Math.round(summary.totalDurationMs / summary.calls)
+      : 0;
 
   return {
     ...summary,
@@ -500,6 +535,7 @@ export async function callGeminiWithUsage({
           model,
           fallbackInputTokens: 0,
           fallbackOutputTokens: 0,
+          durationMs: 0,
         }),
       };
     }
@@ -529,6 +565,7 @@ export async function callGeminiWithUsage({
     thinkBudget: number,
     level?: string,
   ): Promise<{ text: string; usage: LlmUsageEntry }> {
+    const callStartMs = Date.now();
     return withRetry(
       async () => {
         const sendTemperature = !isGemini3Model(modelName);
@@ -583,6 +620,7 @@ export async function callGeminiWithUsage({
               `${systemPrompt}\n${userPrompt}`,
             ),
             fallbackOutputTokens: estimateTokensFromText(txt),
+            durationMs: Date.now() - callStartMs,
           }),
         };
       },

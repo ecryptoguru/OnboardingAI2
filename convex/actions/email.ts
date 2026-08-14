@@ -4,7 +4,11 @@ import { action, internalAction } from "../_generated/server";
 import type { ActionCtx } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
-import { validateAuth } from "../lib/auth_utils";
+import {
+  validateAuth,
+  getCurrentUserId,
+  isAdmin,
+} from "../lib/auth_utils";
 
 export type EmailAttachment = {
   name: string;
@@ -160,13 +164,18 @@ export const approveAndSend = action({
   args: { emailId: v.id("emailsSent") },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
-    // 1. Fetch the drafted email
+    // 1. Fetch the drafted email and verify ownership
     const email = await ctx.runQuery(internal.emails.getInternal, {
       id: args.emailId,
     });
     if (!email) throw new Error("Email not found");
     if (email.status !== "pending_approval")
       throw new Error("Email is not pending approval");
+    const userId = await getCurrentUserId(ctx);
+    const admin = await isAdmin(ctx);
+    if (!admin && email.owner_id && email.owner_id !== userId) {
+      throw new Error("Forbidden: Not your draft");
+    }
 
     // Resolve recipient email: explicit custom address takes priority
     let toAddress = email.recipient_email;

@@ -1,8 +1,6 @@
 "use node";
 
-// Ensure browser globals are present before pdfjs-dist module code loads.
-import "./pdfPolyfills";
-import * as pdfjsLib from "pdfjs-dist/legacy/build/pdf.mjs";
+import { extractText, extractTextItems } from "unpdf";
 
 import { normalizeIndianPhone, withRetry } from "./utils";
 import { normalizeRoleText, normalizeStakeholderRole } from "./roleRegistry";
@@ -50,7 +48,7 @@ export async function firecrawlMap(
   url: string,
   apiKey: string,
   limit = 5000,
-  maxAttempts = 3,
+  maxAttempts = 4,
 ): Promise<FirecrawlMapResult> {
   let lastText = "";
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -80,14 +78,14 @@ export async function firecrawlMap(
 
     lastText = await res.text();
     if (res.status === 429 && attempt < maxAttempts) {
-      const wait = firecrawlRetryAfterMs(res) ?? 1000 * 2 ** attempt;
-      const bounded = Math.min(wait, 60_000);
+      const wait = firecrawlRetryAfterMs(res) ?? 1000 * 3 ** attempt;
+      const bounded = Math.min(wait, 90_000);
       console.warn(`[Firecrawl] 429 on map; sleeping ${bounded}ms (attempt ${attempt})`);
       await new Promise((resolve) => setTimeout(resolve, bounded));
       continue;
     }
     if (res.status >= 500 && res.status < 600 && attempt < maxAttempts) {
-      const wait = 1000 * 2 ** attempt;
+      const wait = 1000 * 3 ** attempt;
       console.warn(`[Firecrawl] ${res.status} on map; retrying in ${wait}ms (attempt ${attempt})`);
       await new Promise((resolve) => setTimeout(resolve, wait));
       continue;
@@ -105,7 +103,7 @@ export async function firecrawlMap(
 export async function firecrawlScrape(
   url: string,
   apiKey: string,
-  maxAttempts = 3,
+  maxAttempts = 4,
 ): Promise<FirecrawlScrapeResult> {
   let lastText = "";
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
@@ -130,14 +128,14 @@ export async function firecrawlScrape(
 
     lastText = await res.text();
     if (res.status === 429 && attempt < maxAttempts) {
-      const wait = firecrawlRetryAfterMs(res) ?? 1000 * 2 ** attempt;
-      const bounded = Math.min(wait, 60_000);
+      const wait = firecrawlRetryAfterMs(res) ?? 1000 * 3 ** attempt;
+      const bounded = Math.min(wait, 90_000);
       console.warn(`[Firecrawl] 429 on scrape; sleeping ${bounded}ms (attempt ${attempt})`);
       await new Promise((resolve) => setTimeout(resolve, bounded));
       continue;
     }
     if (res.status >= 500 && res.status < 600 && attempt < maxAttempts) {
-      const wait = 1000 * 2 ** attempt;
+      const wait = 1000 * 3 ** attempt;
       console.warn(`[Firecrawl] ${res.status} on scrape; retrying in ${wait}ms (attempt ${attempt})`);
       await new Promise((resolve) => setTimeout(resolve, wait));
       continue;
@@ -279,50 +277,16 @@ export async function downloadPdfBuffer(url: string): Promise<Buffer> {
   );
 }
 
-interface TextItem {
-  str: string;
-  dir: string;
-  width: number;
-  height: number;
-  transform: number[];
-  fontName: string;
-  hasEOL: boolean;
-}
-
-// Point the fake worker at the worker bundle so it can be imported inline.
-// This avoids spawning a real Web Worker, which is unavailable in Convex.
-try {
-  const gwo = (pdfjsLib as unknown as { GlobalWorkerOptions?: { workerSrc?: string } }).GlobalWorkerOptions;
-  if (gwo) gwo.workerSrc = "pdfjs-dist/legacy/build/pdf.worker.mjs";
-} catch {
-  // read-only in some builds; extraction will fall back to empty string
-}
-
 /**
- * Extract text from a PDF buffer using pdfjs-dist without canvas rendering.
- * Falls back to empty string if the runtime cannot load the parser.
+ * Extract text from a PDF buffer using unpdf (serverless-safe PDF.js build,
+ * no Web Worker / canvas requirements). Falls back to empty string on error.
  */
 export async function extractPdfText(buffer: Buffer): Promise<string> {
   try {
-    const loadingTask = (pdfjsLib as unknown as { getDocument: (opts: { data: Uint8Array; useSystemFonts?: boolean; verbosity?: number }) => { promise: Promise<PdfDocument> } }).getDocument({
-      data: new Uint8Array(buffer),
-      useSystemFonts: true,
-      verbosity: (pdfjsLib as unknown as { VerbosityLevel?: { ERRORS: number } }).VerbosityLevel?.ERRORS ?? 0,
+    const result = await extractText(new Uint8Array(buffer), {
+      mergePages: true,
     });
-    const pdf = await loadingTask.promise;
-    const maxPages = Math.min(pdf.numPages, 30);
-    const pages: string[] = [];
-    for (let i = 1; i <= maxPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      const pageText = content.items
-        .map((item: unknown) => (item as TextItem).str || "")
-        .join(" ")
-        .replace(/\s+/g, " ")
-        .trim();
-      if (pageText) pages.push(pageText);
-    }
-    return pages.join("\n\n");
+    return (result.text || "").trim();
   } catch (e) {
     console.warn(
       `[PDF] Failed to extract text:`,
@@ -332,43 +296,24 @@ export async function extractPdfText(buffer: Buffer): Promise<string> {
   }
 }
 
-interface PdfDocument {
-  numPages: number;
-  getPage(n: number): Promise<PdfPage>;
-}
-
-interface PdfPage {
-  getTextContent(): Promise<{ items: unknown[] }>;
-}
-
 /**
  * Extract table-like data from a PDF buffer by grouping text items by line
  * and column position, then joining with ` | `. Falls back to empty string.
  */
 export async function extractPdfTables(buffer: Buffer): Promise<string> {
   try {
-    const loadingTask = (pdfjsLib as unknown as { getDocument: (opts: { data: Uint8Array; useSystemFonts?: boolean; verbosity?: number }) => { promise: Promise<PdfDocument> } }).getDocument({
-      data: new Uint8Array(buffer),
-      useSystemFonts: true,
-      verbosity: (pdfjsLib as unknown as { VerbosityLevel?: { ERRORS: number } }).VerbosityLevel?.ERRORS ?? 0,
-    });
-    const pdf = await loadingTask.promise;
-    const maxPages = Math.min(pdf.numPages, 30);
+    const { items } = await extractTextItems(new Uint8Array(buffer));
     const chunks: string[] = [];
-    for (let i = 1; i <= maxPages; i++) {
-      const page = await pdf.getPage(i);
-      const content = await page.getTextContent();
-      const items = (content.items as TextItem[]).filter(
-        (it) => typeof it.str === "string" && it.str.trim().length > 0,
-      );
 
+    items.forEach((pageItems, pageIndex) => {
       // Group by vertical position (rounded to 2 decimals) to reconstruct rows
       const rows = new Map<number, { x: number; text: string }[]>();
-      for (const it of items) {
-        const y = Math.round((it.transform?.[5] ?? 0) * 100) / 100;
-        const x = it.transform?.[4] ?? 0;
+      for (const it of pageItems) {
+        const text = (it.str || "").replace(/\s+/g, " ").trim();
+        if (!text) continue;
+        const y = Math.round(it.y * 100) / 100;
         if (!rows.has(y)) rows.set(y, []);
-        rows.get(y)!.push({ x, text: it.str.replace(/\s+/g, " ").trim() });
+        rows.get(y)!.push({ x: it.x, text });
       }
 
       const sortedRows = [...rows.entries()].sort(([a], [b]) => b - a);
@@ -382,9 +327,9 @@ export async function extractPdfTables(buffer: Buffer): Promise<string> {
         .filter((row) => row.length > 0);
 
       if (tableRows.length > 1) {
-        chunks.push(`=== PAGE ${i} ===\n${tableRows.join("\n")}`);
+        chunks.push(`=== PAGE ${pageIndex + 1} ===\n${tableRows.join("\n")}`);
       }
-    }
+    });
 
     if (chunks.length === 0) return "";
     return `=== TABLES ===\n${chunks.join("\n\n")}\n=== END TABLES ===`;
@@ -413,7 +358,8 @@ export interface RegexExtractionResult {
 
 export interface ContactWithContext {
   value: string;
-  context: string; // Surrounding text (±200 chars)
+  context: string; // Surrounding text (±100 chars)
+  position: number; // Character index of the contact within the context string
 }
 
 /**
@@ -477,29 +423,33 @@ export function extractContactsWithContext(
   const emails: ContactWithContext[] = [];
   const phones: ContactWithContext[] = [];
 
-  // Extract emails with context
+  // Extract emails with context (±100 chars for tighter association)
   let match;
   const emailRegexClone = new RegExp(emailRegex.source, emailRegex.flags);
   while ((match = emailRegexClone.exec(decoded)) !== null) {
-    const start = Math.max(0, match.index - 200);
-    const end = Math.min(decoded.length, match.index + match[0].length + 200);
+    const start = Math.max(0, match.index - 100);
+    const end = Math.min(decoded.length, match.index + match[0].length + 100);
+    const context = decoded.substring(start, end).toLowerCase();
     emails.push({
       value: match[0],
-      context: decoded.substring(start, end).toLowerCase(),
+      context,
+      position: match.index - start,
     });
   }
 
-  // Extract phones with context
+  // Extract phones with context (±100 chars for tighter association)
   const phoneRegexClone = new RegExp(phoneRegex.source, phoneRegex.flags);
   while ((match = phoneRegexClone.exec(decoded)) !== null) {
     const normalizedPhone = normalizeIndianPhone(match[0]);
     if (!normalizedPhone) continue;
 
-    const start = Math.max(0, match.index - 200);
-    const end = Math.min(decoded.length, match.index + match[0].length + 200);
+    const start = Math.max(0, match.index - 100);
+    const end = Math.min(decoded.length, match.index + match[0].length + 100);
+    const context = decoded.substring(start, end).toLowerCase();
     phones.push({
       value: normalizedPhone,
-      context: decoded.substring(start, end).toLowerCase(),
+      context,
+      position: match.index - start,
     });
   }
 
@@ -571,39 +521,52 @@ export function matchPhonesToStakeholders(
       if (matches.has(phone.value)) continue;
 
       const ctx = phone.context;
+      const phonePos =
+        typeof phone.position === "number"
+          ? phone.position
+          : ctx.indexOf(phone.value.replace(/\D/g, ""));
       let score = 0;
 
-      // Name proximity: count how many name tokens appear in the phone's context
+      // Name proximity: count how many name tokens appear CLOSE to the phone.
+      // Tokens that are on the same line or within a few words of the phone get
+      // much more weight than tokens that merely appear somewhere in the block.
       if (namePatterns.length > 0) {
-        let matchedTokens = 0;
-        for (const pattern of namePatterns) {
-          try {
-            if (new RegExp(pattern, "i").test(ctx)) matchedTokens++;
-          } catch {
-            // Ignore invalid regex from unusual tokens
+        for (const token of nameTokens) {
+          if (token.length < 2) continue;
+          const idx = ctx.indexOf(token);
+          if (idx === -1) continue;
+          const distance = Math.abs(idx - phonePos);
+          if (distance <= 40) {
+            score += 3;
+          } else if (distance <= 80) {
+            score += 1;
           }
         }
-        // Score by fraction of unique tokens matched, not raw count
-        score += Math.min(matchedTokens, nameTokens.length * 2) * 2;
       }
 
-      // Role proximity: canonical role or any alias appears
+      // Role proximity: canonical role or any alias must be close to the phone.
       if (roleText) {
         for (const alias of roleAliases) {
           if (!alias) continue;
-          if (ctx.includes(alias)) {
-            score += 2;
+          const idx = ctx.indexOf(alias);
+          if (idx === -1) continue;
+          const distance = Math.abs(idx - phonePos);
+          if (distance <= 40) {
+            score += 3;
+            break;
+          } else if (distance <= 80) {
+            score += 1;
             break;
           }
         }
       }
 
-      // Threshold: need at least 2 points with name match, or role-only with strong signal
+      // Threshold: need a real name in the context AND either a strong name match
+      // (surname/initials within 40 chars of the phone) or a name match plus role
+      // context very close to the phone. This stops the last row of an officers
+      // table from grabbing the footer phone that appears 100 chars below it.
       const hasName = nameTokens.length > 0;
-      if (
-        (hasName && score >= 3) ||
-        (!hasName && roleText && score >= 2 && nameTokens.length === 0)
-      ) {
+      if (hasName && score >= 4) {
         const label = st.name || st.role || "unknown";
         matches.set(phone.value, label);
         break; // One phone per stakeholder pass

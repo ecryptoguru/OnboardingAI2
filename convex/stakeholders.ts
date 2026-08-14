@@ -10,29 +10,23 @@ import { validateAuth } from "./lib/auth_utils";
 import {
   canonicalizeInstitutionEmail,
   choosePreferredRoleEmail,
+  isRelevantInstitutionEmailDomain,
   isRoleBasedInstitutionEmail,
   isSingletonRole,
+  namesEquivalent,
   normalizeInstitutionDomain,
   normalizeStakeholderRole,
 } from "./lib/contactInference";
 import { normalizeIndianPhone } from "./lib/phone";
+import {
+  isLikelyValidLinkedIn,
+  linkedinMatchesName,
+} from "./lib/validateDeepEnrichment";
 
 // Source type aliases matching the schema union types
 type EmailSource = "scraped" | "regex" | "inferred" | "linkedin" | "manual";
 type PhoneSource = "scraped" | "regex" | "inferred" | "manual";
-
-// Normalize name for fuzzy matching: remove titles, then split into tokens,
-// sort alphabetically, and join. This makes "R. P. Singh" and "Rajesh Prasad Singh"
-// share the same surname token even if initials differ.
-function normalizeName(n?: string) {
-  const raw = (n || "")
-    .toLowerCase()
-    .replace(/\b(dr|prof|professor|mr|mrs|ms|shri|smt|er|engg|arch)\b/g, "")
-    .replace(/\./g, " ")
-    .replace(/[,\-]/g, " ");
-  const tokens = raw.split(/\s+/).filter((t) => t.length > 0);
-  return tokens.sort().join(" ");
-}
+type LinkedInSource = "scraped" | "inferred" | "manual" | "none";
 
 // Extract the last token as surname for looser matching
 function surnameOf(n?: string): string {
@@ -359,11 +353,13 @@ export const upsertBulkInternal = internalMutation({
         role: v.optional(v.string()),
         email: v.optional(v.string()),
         phone: v.optional(v.string()),
-        linkedin_url: v.optional(v.string()),
-        email_source: v.optional(v.string()),
         phone_source: v.optional(v.string()),
+        linkedin_url: v.optional(v.string()),
+        linkedin_source: v.optional(v.string()),
+        email_source: v.optional(v.string()),
         source_url: v.optional(v.string()),
         sources: v.optional(v.array(v.string())),
+        contact_confidence: v.optional(v.number()),
       }),
     ),
     source: v.optional(v.string()),
@@ -449,11 +445,11 @@ export const upsertBulkInternal = internalMutation({
           "me.com",
         ];
 
-        // Robust domain check: exact match or subdomain of uniDomain
+        // Robust domain check: exact match, subdomain of uniDomain, or a
+        // gov.in-family address (e.g. registrar.nmi@gov.in for nmi.gov.in).
         const isMatch =
           genericDomains.includes(emailDomain) ||
-          emailDomain === uniDomain ||
-          emailDomain.endsWith(`.${uniDomain}`);
+          isRelevantInstitutionEmailDomain(sanitizedInputEmail, uniDomain);
 
         if (!isMatch) {
           console.warn(
@@ -477,19 +473,33 @@ export const upsertBulkInternal = internalMutation({
         if (st.name && e.name && e.name.toLowerCase() === st.name.toLowerCase())
           return true;
 
-        // Fuzzy name match (e.g. "Dr. D. P. Singh" vs "D P Singh")
-        // NEW: also check that roles aren't conflicting — two different people
-        // can share a similar name but have different roles.
-        if (
-          st.name &&
-          e.name &&
-          normalizeName(e.name) === normalizeName(st.name) &&
-          normalizeName(st.name).length > 3
-        ) {
+        // Fuzzy name match (e.g. "Dr. D. P. Singh" vs "D P Singh",
+        // "Sohrab A. Khan" vs "Sohrab Ahmed Khan").
+        // When roles differ, only merge if contact evidence links the two
+        // records or one side has no contacts — two different people can
+        // share a name but not the same email/phone/LinkedIn.
+        if (st.name && e.name && namesEquivalent(e.name, st.name)) {
           const roleA = normalizeStakeholderRole(e.role) || "";
           const roleB = normalizeStakeholderRole(normalizedRole) || "";
           if (roleA && roleB && roleA !== roleB) {
-            return false;
+            const sharedContact =
+              (validatedEmail &&
+                e.email &&
+                sanitizeEmail(e.email, uniDomain) === validatedEmail) ||
+              (normalizedPhone &&
+                e.phone &&
+                normalizeIndianPhone(e.phone) === normalizedPhone) ||
+              (st.linkedin_url &&
+                e.linkedin_url &&
+                e.linkedin_url === st.linkedin_url);
+            const hasAnyContact =
+              !!validatedEmail ||
+              !!normalizedPhone ||
+              !!st.linkedin_url ||
+              !!e.email ||
+              !!e.phone ||
+              !!e.linkedin_url;
+            return sharedContact || !hasAnyContact;
           }
           return true;
         }
@@ -549,18 +559,32 @@ export const upsertBulkInternal = internalMutation({
         if (st.source_url) mergedSources.add(st.source_url);
         if (st.sources) st.sources.forEach((s) => mergedSources.add(s));
 
+        // Only carry over the new record's provenance when the corresponding
+        // value is actually present/accepted; otherwise a new "none" would
+        // clobber the source of a preserved phone/LinkedIn/email.
+        const stPhoneSource = st.phone_source as PhoneSource | undefined;
+        const stLinkedinSource = st.linkedin_source as LinkedInSource | undefined;
+        const stEmailSource = st.email_source as EmailSource | undefined;
+
         await ctx.db.patch(match._id, {
           name: st.name ?? match.name,
           role: normalizedRole ?? sanitizeRole(match.role) ?? match.role,
           email: mergedEmail ? mergedEmail.toLowerCase().trim() : match.email,
           phone: mergedPhone,
+          phone_source: normalizedPhone
+            ? stPhoneSource ?? match.phone_source
+            : match.phone_source,
           linkedin_url: st.linkedin_url ?? match.linkedin_url,
+          linkedin_source: st.linkedin_url
+            ? stLinkedinSource ?? match.linkedin_source
+            : match.linkedin_source,
+          contact_confidence:
+            st.contact_confidence ?? match.contact_confidence,
           source: args.source ?? match.source ?? "deep_enrichment",
           source_url: st.source_url ?? match.source_url,
-          email_source:
-            (st.email_source as EmailSource | undefined) ?? match.email_source,
-          phone_source:
-            (st.phone_source as PhoneSource | undefined) ?? match.phone_source,
+          email_source: validatedEmail
+            ? stEmailSource ?? match.email_source
+            : match.email_source,
           last_enriched_source: st.source_url ?? match.last_enriched_source,
           last_enriched_at: now,
           sources: Array.from(mergedSources),
@@ -577,12 +601,14 @@ export const upsertBulkInternal = internalMutation({
             ? validatedEmail.toLowerCase().trim()
             : undefined,
           phone: normalizedPhone,
+          phone_source: st.phone_source as PhoneSource | undefined,
           linkedin_url: st.linkedin_url,
+          linkedin_source: st.linkedin_source as LinkedInSource | undefined,
+          contact_confidence: st.contact_confidence,
           is_primary: false,
           source: args.source || "deep_enrichment",
           source_url: st.source_url,
           email_source: st.email_source as EmailSource | undefined,
-          phone_source: st.phone_source as PhoneSource | undefined,
           last_enriched_source: st.source_url,
           last_enriched_at: now,
           sources,
@@ -795,6 +821,195 @@ export const dedupeSingletonRoleContactsInternal = internalMutation({
         await ctx.db.delete(duplicate._id);
       }
     }
+  },
+});
+
+/**
+ * One-time cleanup for a university's stakeholders:
+ * 1. Delete `scraper`/`inferred` rows that duplicate a `deep_enrichment` (or
+ *    `manual`) row for the same person (same name/email/phone group).
+ * 2. Strip phone/LinkedIn from remaining `scraper` rows that have no
+ *    `source_url` evidence, and set their contact_confidence to 0.5.
+ * 3. Backfill missing provenance: `linkedin_source` verified against the URL
+ *    slug/name, `phone_source`/`email_source` defaulted from the row's origin.
+ * `dryRun: true` returns counts without mutating.
+ */
+export const cleanupStakeholdersInternal = internalMutation({
+  args: {
+    university_id: v.id("universities"),
+    dryRun: v.optional(v.boolean()),
+  },
+  handler: async (ctx, args) => {
+    const dryRun = args.dryRun ?? true;
+    const university = await ctx.db.get(args.university_id);
+    const rows = await ctx.db
+      .query("stakeholders")
+      .withIndex("by_university", (q) =>
+        q.eq("university_id", args.university_id),
+      )
+      .collect();
+
+    const report: {
+      deleted: Array<Record<string, unknown>>;
+      stripped: Array<Record<string, unknown>>;
+      backfilled: Array<Record<string, unknown>>;
+    } = { deleted: [], stripped: [], backfilled: [] };
+
+    // ─── 1. Delete scraper/inferred duplicates of verified deep rows ────────
+    const groups: Doc<"stakeholders">[][] = [];
+    for (const row of rows) {
+      let bucket = groups.find((g) => {
+        const rep = g[0];
+        const nameMatch =
+          rep.name && row.name && namesEquivalent(rep.name, row.name);
+        const emailMatch =
+          rep.email && row.email && rep.email.toLowerCase() === row.email.toLowerCase();
+        const phoneMatch =
+          rep.phone && row.phone && normalizeIndianPhone(rep.phone) === normalizeIndianPhone(row.phone);
+        return nameMatch || emailMatch || phoneMatch;
+      });
+      if (!bucket) {
+        bucket = [];
+        groups.push(bucket);
+      }
+      bucket.push(row);
+    }
+
+    for (const group of groups) {
+      const verified = group.filter(
+        (r) => r.source === "deep_enrichment" || r.source === "manual",
+      );
+      const stale = group.filter(
+        (r) => r.source === "scraper" || r.source === "inferred",
+      );
+      if (verified.length === 0 || stale.length === 0) continue;
+      for (const row of stale) {
+        report.deleted.push({ _id: row._id, name: row.name, role: row.role, email: row.email, phone: row.phone, linkedin_url: row.linkedin_url, source: row.source });
+        if (!dryRun) await ctx.db.delete(row._id);
+      }
+    }
+
+    // ─── 2 + 3. Strip unverified contacts + backfill provenance ─────────────
+    const remaining = dryRun
+      ? rows
+      : await ctx.db
+          .query("stakeholders")
+          .withIndex("by_university", (q) =>
+            q.eq("university_id", args.university_id),
+          )
+          .collect();
+
+    for (const row of remaining) {
+      const patch: Partial<Doc<"stakeholders">> = {};
+      let changed = false;
+      // When a phone/LinkedIn is stripped, its provenance must stay "none" —
+      // the backfill pass below must not re-add "scraped"/"regex" for it.
+      let stripped = false;
+
+      // Scraper rows without a source URL have no evidence for phone/LinkedIn.
+      if (row.source === "scraper" && !row.source_url) {
+        const strippedContacts: Partial<Doc<"stakeholders">> = {};
+        if (row.phone) {
+          strippedContacts.phone = undefined;
+          strippedContacts.phone_source = "none" as PhoneSource;
+          changed = true;
+        }
+        if (row.linkedin_url) {
+          strippedContacts.linkedin_url = undefined;
+          strippedContacts.linkedin_source = "none" as LinkedInSource;
+          changed = true;
+        }
+        if (typeof row.contact_confidence !== "number") {
+          strippedContacts.contact_confidence = 0.5;
+          changed = true;
+        }
+        if (Object.keys(strippedContacts).length > 0) {
+          stripped = true;
+          report.stripped.push({
+            _id: row._id,
+            name: row.name,
+            source: row.source,
+            patch: strippedContacts,
+          });
+          Object.assign(patch, strippedContacts);
+        }
+      }
+
+      // Backfill linkedin_source with a name/URL verification pass. A
+      // model-emitted "none" alongside a present URL is treated as missing.
+      if (
+        row.linkedin_url &&
+        (!row.linkedin_source || row.linkedin_source === "none") &&
+        !stripped
+      ) {
+        if (
+          isLikelyValidLinkedIn(row.linkedin_url) &&
+          linkedinMatchesName(row.name, row.linkedin_url)
+        ) {
+          patch.linkedin_source = "scraped" as LinkedInSource;
+        } else {
+          patch.linkedin_url = undefined;
+          patch.linkedin_source = "none" as LinkedInSource;
+        }
+        changed = true;
+      }
+
+      if (
+        row.phone &&
+        (!row.phone_source || row.phone_source === "none") &&
+        !stripped
+      ) {
+        patch.phone_source =
+          row.source === "inferred"
+            ? ("inferred" as PhoneSource)
+            : row.source_url
+              ? ("scraped" as PhoneSource)
+              : ("regex" as PhoneSource);
+        changed = true;
+      }
+
+      if (row.email && !row.email_source) {
+        patch.email_source =
+          row.source === "deep_enrichment"
+            ? ("scraped" as EmailSource)
+            : ("regex" as EmailSource);
+        changed = true;
+      }
+
+      // Consistency pass (also makes the cleanup idempotent): a value that was
+      // cleared must not carry a non-"none" provenance.
+      if (!row.linkedin_url && row.linkedin_source && row.linkedin_source !== "none") {
+        patch.linkedin_source = "none" as LinkedInSource;
+        changed = true;
+      }
+      if (!row.phone && row.phone_source && row.phone_source !== "none") {
+        patch.phone_source = "none" as PhoneSource;
+        changed = true;
+      }
+
+      if (!changed) continue;
+      report.backfilled.push({
+        _id: row._id,
+        name: row.name,
+        source: row.source,
+        patch,
+      });
+      if (!dryRun && Object.keys(patch).length > 0) {
+        await ctx.db.patch(row._id, patch as Doc<"stakeholders">);
+      }
+    }
+
+    return {
+      university_id: args.university_id,
+      university_name: university?.university_name ?? null,
+      dryRun,
+      rows: rows.length,
+      deleted: report.deleted.length,
+      stripped: report.stripped.length,
+      backfilled: report.backfilled.length,
+      deletedRows: report.deleted,
+      backfillDetails: report.backfilled,
+    };
   },
 });
 

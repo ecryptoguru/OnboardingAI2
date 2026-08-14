@@ -1,39 +1,23 @@
 import { mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { internal } from "./_generated/api";
 import { validateAuth } from "./lib/auth_utils";
+import {
+  scheduleWebsiteValidation,
+  WEBSITE_STATUSES,
+} from "./dispatcherInternal";
 
 export const dispatchWebsiteValidation = mutation({
-  args: { limit: v.optional(v.number()) },
+  args: {
+    limit: v.optional(v.number()),
+    status: v.optional(
+      v.union(
+        v.literal("all"),
+        ...WEBSITE_STATUSES.map((s) => v.literal(s)),
+      ),
+    ),
+  },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
-    // Find universities that are 'pending' or 'invalid' to try validating or discovering
-    const pending = await ctx.db
-      .query("universities")
-      .withIndex("by_website_status", (q) => q.eq("website_status", "pending"))
-      .take(args.limit ?? 20);
-
-    let delayMs = 0;
-    const staggerMs = 500; // 500ms between each external ping
-
-    for (const uni of pending) {
-      if (uni.website) {
-        // Schedule validation
-        await ctx.scheduler.runAfter(delayMs, internal.actions.discovery.validateWebsite, {
-          universityId: uni._id,
-          website: uni.website,
-          universityName: uni.university_name,
-        });
-      } else {
-        // Schedule discovery
-        await ctx.scheduler.runAfter(delayMs, internal.actions.discovery.discoverWebsite, {
-          universityId: uni._id,
-          universityName: uni.university_name,
-        });
-      }
-      delayMs += staggerMs;
-    }
-
-    return { scheduled: pending.length };
+    return await scheduleWebsiteValidation(ctx, args);
   },
 });

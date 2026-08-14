@@ -299,6 +299,43 @@ export default function EnrichmentPage() {
           </div>
         )}
       </div>
+
+      {isEnriching && (
+        <div className="mt-2 text-[11px] text-muted-foreground">
+          {uni.enrichment_status === "failed" ? (
+            <span className="text-red-400">
+              Failed
+              {uni.enrichment_error
+                ? `: ${uni.enrichment_error.slice(0, 80)}`
+                : ""}
+            </span>
+          ) : (
+            <>
+              <span className="capitalize">
+                {uni.enrichment_phase?.replace(/-/g, " ") ?? "Enriching"}
+              </span>
+              {uni.enrichment_started_at && (
+                <>
+                  {" "}
+                  ·{" "}
+                  {Math.max(
+                    0,
+                    Math.round(
+                      (Date.now() - uni.enrichment_started_at) / 60000,
+                    ),
+                  )}
+                  m
+                  {Date.now() - uni.enrichment_started_at > 10 * 60 * 1000 && (
+                    <span className="text-amber-500 ml-1">
+                      (may have timed out)
+                    </span>
+                  )}
+                </>
+              )}
+            </>
+          )}
+        </div>
+      )}
     </div>
   );
 

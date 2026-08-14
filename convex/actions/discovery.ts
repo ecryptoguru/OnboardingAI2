@@ -5,60 +5,35 @@ import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import {
   findFirstValidWebsiteCandidate,
+  hasEducationTld,
   looksLikeOwnedDomain,
   rankWebsiteCandidates,
 } from "../lib/discoveryCandidates";
 import { withRetry } from "../lib/utils";
-import {
-  createSerperBudget,
-  runWithSerperBudget,
-  markSerperQuotaExhausted,
-} from "../lib/serperBudget";
-import { callGeminiWithGrounding, MODELS } from "../lib/llm";
+import { createSerperBudget, runWithSerperBudget } from "../lib/serperBudget";
 
-/**
- * Lightweight HEAD check to confirm a URL is reachable.
- * Used to validate Gemini Grounding URLs before accepting them.
- */
-async function validateUrlLive(url: string): Promise<boolean> {
-  try {
-    const res = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(8000) });
-    return res.ok;
-  } catch {
-    // If HEAD fails, try GET as fallback (some servers don't support HEAD)
-    try {
-      const res = await fetch(url, { method: "GET", signal: AbortSignal.timeout(8000) });
-      return res.ok;
-    } catch {
-      return false;
-    }
-  }
+interface SerperResult {
+  organic?: Array<{ link: string; title?: string; snippet?: string }>;
 }
 
-/**
- * Generate progressively shorter query variants for Serper fallback.
- * Keeps the first N words (with generic filler removed) to improve hit rate on long names.
- */
-function generateShortNameQueries(fullName: string): string[] {
-  // Remove generic filler words (keep in sync with significantWords in looksLikeOwnedDomain)
-  const words = fullName
-    .replace(
-      /\b(university|college|institute|of|technology|management|school|and|&)\b/gi,
-      " ",
-    )
-    .trim()
-    .split(/\s+/)
-    .filter((w) => w.length >= 2);
+async function serperSearch(
+  query: string,
+  apiKey: string,
+  num = 5,
+): Promise<SerperResult> {
+  const res = await fetch("https://google.serper.dev/search", {
+    method: "POST",
+    headers: { "X-API-KEY": apiKey, "Content-Type": "application/json" },
+    body: JSON.stringify({ q: query, num }),
+  });
+  if (!res.ok) throw new Error(`Serper search failed: ${res.status}`);
+  return (await res.json()) as SerperResult;
+}
 
-  const variants: string[] = [];
-  // Take first 5 words, then 4, then 3
-  for (const count of [5, 4, 3]) {
-    if (words.length >= count) {
-      const short = words.slice(0, count).join(" ");
-      if (short) variants.push(`${short} official website India`);
-    }
-  }
-  return [...new Set(variants)]; // dedupe
+function organicLinksToCandidates(result: SerperResult): string[] {
+  return (result.organic || [])
+    .map((r) => r.link)
+    .filter((link): link is string => typeof link === "string" && link.startsWith("http"));
 }
 
 function guessOfficialWebsiteCandidates(
@@ -69,21 +44,42 @@ function guessOfficialWebsiteCandidates(
     .toLowerCase()
     .replace(/[^a-z0-9\s]/g, " ")
     .split(/\s+/)
-    .filter(Boolean);
+    .filter((w) => w.length >= 2);
+
+  // Slug forms: full concatenation, leading acronym, and short brand forms.
   const fullSlug = tokens.join("");
   const acronym = tokens
     .filter((word) => !["of", "and"].includes(word))
     .map((word) => word[0])
     .join("");
+
+  // Common Indian university brand patterns, e.g. "Ahmedabad University" -> ahduni
+  const shortBrands: string[] = [];
+  if (tokens.length >= 2) {
+    const first = tokens[0];
+    const last = tokens[tokens.length - 1];
+    shortBrands.push(`${first.slice(0, 3)}${last}`, `${first.slice(0, 4)}${last}`);
+    if (last === "university") {
+      shortBrands.push(`${first.slice(0, 3)}uni`, `${first.slice(0, 4)}uni`);
+      shortBrands.push(`${first.slice(0, 3)}univ`, `${first.slice(0, 4)}univ`);
+    }
+    if (last === "institute") {
+      shortBrands.push(`${first.slice(0, 3)}inst`, `${first.slice(0, 4)}inst`);
+    }
+  }
+
   const stateSlug = (state || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const guessed = new Set<string>();
 
-  for (const slug of [fullSlug, acronym]) {
+  const slugs = [fullSlug, acronym, ...shortBrands].filter(
+    (s): s is string => typeof s === "string" && s.length >= 3,
+  );
+
+  for (const slug of slugs) {
     if (!slug || slug.length < 3) continue;
-    guessed.add(`https://${slug}.ac.in`);
-    guessed.add(`https://${slug}.edu.in`);
-    guessed.add(`https://${slug}.edu`);
-    guessed.add(`https://${slug}.gov.in`);
+    for (const tld of ["ac.in", "edu.in", "edu", "gov.in"]) {
+      guessed.add(`https://${slug}.${tld}`);
+    }
     if (stateSlug) {
       guessed.add(`https://${slug}.${stateSlug}.gov.in`);
     }
@@ -109,6 +105,21 @@ export const validateWebsite = internalAction({
       return false;
     }
 
+    // Clean up common dataset typos: multiple URLs, duplicate schemes,
+    // missing TLD letters, and trailing punctuation/whitespace.
+    url = url.split(/[,;\s]+/)[0].trim();
+    url = url.replace(/^(?:https?:\/\/){2,}/i, "https://");
+    url = url.replace(/^http:\/\/https:\/\//i, "https://");
+    url = url.replace(/\.edu\.i(?:\/|$|\s)/i, ".edu.in$1");
+    url = url.replace(/\.+$/, "");
+    if (!url) {
+      await ctx.runMutation(internal.universities.updateInternal, {
+        id: args.universityId,
+        website_status: "invalid",
+      });
+      return false;
+    }
+
     if (!url.startsWith("http")) {
       url = `https://${url}`;
     }
@@ -124,6 +135,50 @@ export const validateWebsite = internalAction({
       }
     }
 
+    // Accept any stored/education domain that is reachable. Education TLDs
+    // (.ac.in, .edu.in, .edu, .ac) are strong evidence the domain is institutional,
+    // even when the heuristic cannot match the university name to a short brand.
+    function domainOrEducationTldMatches(targetUrl: string): boolean {
+      if (domainMatchesUniversity(targetUrl)) return true;
+      try {
+        const hostname = new URL(targetUrl).hostname.replace(/^www\./, "");
+        return hasEducationTld(hostname);
+      } catch {
+        return false;
+      }
+    }
+
+    function contentMatchesUniversity(
+      text: string,
+      targetUrl: string,
+    ): boolean {
+      if (!universityName) return true;
+      try {
+        const hostname = new URL(targetUrl).hostname.replace(/^www\./, "");
+        if (hasEducationTld(hostname)) return true;
+      } catch {
+        // ignore
+      }
+      const lowerText = text.toLowerCase();
+      const tokens = universityName
+        .toLowerCase()
+        .replace(/[^a-z0-9\s]/g, " ")
+        .split(/\s+/)
+        .filter(
+          (w) =>
+            w.length >= 4 &&
+            !["university", "college", "institute", "technology"].includes(w),
+        );
+      const matched = tokens.filter((w) => lowerText.includes(w)).length;
+      return matched >= 2 || (tokens.length === 1 && matched === 1);
+    }
+
+    function isReachableStatus(status: number): boolean {
+      // Server is responsive and not a 404: includes 200-299, common blocks
+      // (401/403/405), rate limits (429), and temporary failures (503).
+      return status < 500 && status !== 404;
+    }
+
     async function tryFetch(
       targetUrl: string,
       method: "HEAD" | "GET",
@@ -131,24 +186,25 @@ export const validateWebsite = internalAction({
       try {
         const response = await fetch(targetUrl, {
           method,
-          signal: AbortSignal.timeout(5000),
+          signal: AbortSignal.timeout(8000),
         });
-        if (response.ok || response.status === 405 /* Method Not Allowed */) {
-          // HEAD 405 means server is reachable but rejects HEAD; still treat as valid
-          if (response.ok || method === "HEAD") {
-            if (!domainMatchesUniversity(targetUrl)) {
-              console.warn(
-                `[Discovery] Reached ${targetUrl} but domain does not match ${universityName}.`,
-              );
-              return false;
-            }
-            await ctx.runMutation(internal.universities.updateInternal, {
-              id: args.universityId,
-              website: targetUrl,
-              website_status: "valid",
-            });
-            return true;
+        if (
+          isReachableStatus(response.status) ||
+          response.status === 503 ||
+          response.status === 504
+        ) {
+          if (!domainOrEducationTldMatches(targetUrl)) {
+            console.warn(
+              `[Discovery] Reached ${targetUrl} but domain does not match ${universityName}.`,
+            );
+            return false;
           }
+          await ctx.runMutation(internal.universities.updateInternal, {
+            id: args.universityId,
+            website: targetUrl,
+            website_status: "valid",
+          });
+          return true;
         }
       } catch {
         // network error — will fall through
@@ -160,12 +216,15 @@ export const validateWebsite = internalAction({
       try {
         const response = await fetch(`https://r.jina.ai/${encodeURIComponent(targetUrl)}`, {
           headers: { Accept: "text/plain" },
-          signal: AbortSignal.timeout(12000),
+          signal: AbortSignal.timeout(20000),
         });
         if (!response.ok) return false;
         const text = await response.text();
         if (text.trim().length >= 100) {
-          if (!domainMatchesUniversity(targetUrl)) {
+          if (
+            !domainOrEducationTldMatches(targetUrl) &&
+            !contentMatchesUniversity(text, targetUrl)
+          ) {
             console.warn(
               `[Discovery] Jina reached ${targetUrl} but domain does not match ${universityName}.`,
             );
@@ -196,16 +255,15 @@ export const validateWebsite = internalAction({
       if (await tryJinaFallback(httpUrl)) return true;
     }
 
-    // Bypass: Indian government domains (.gov.in) are frequently IP-range
-    // blocked from cloud environments but are authoritative. Accept them if
-    // they look like an official university portal (owned-domain match or
-    // education TLD).
+    // Bypass: Indian government/NIC domains (.gov.in / .nic.in) are frequently
+    // IP-range blocked from cloud environments but are authoritative. Accept them
+    // if they look like an official university portal.
     try {
       const hostname = new URL(url).hostname.replace(/^www\./, "");
-      if (hostname.endsWith(".gov.in")) {
+      if (hostname.endsWith(".gov.in") || hostname.endsWith(".nic.in")) {
         if (!domainMatchesUniversity(url)) {
           console.warn(
-            `[Discovery] Rejected .gov.in ${url} — domain does not match ${universityName}.`,
+            `[Discovery] Rejected gov/NIC domain ${url} — domain does not match ${universityName}.`,
           );
         } else {
           await ctx.runMutation(internal.universities.updateInternal, {
@@ -214,7 +272,7 @@ export const validateWebsite = internalAction({
             website_status: "discovered",
           });
           console.warn(
-            `[Discovery] Accepted ${url} as .gov.in without live validation (cloud env blocked).`,
+            `[Discovery] Accepted ${url} as gov/NIC domain without live validation (cloud env blocked).`,
           );
           return true;
         }
@@ -234,16 +292,7 @@ export const validateWebsite = internalAction({
 export const discoverWebsite = internalAction({
   args: { universityId: v.id("universities"), universityName: v.string() },
   handler: async (ctx, args) => {
-    const rawApiKey = await ctx.runQuery(
-      internal.settings.getInternalSerperKey,
-    );
-    const apiKey = rawApiKey ? rawApiKey.trim() : null;
-    if (!apiKey) {
-      console.warn("SERPER_API_KEY is not set. Cannot discover website.");
-      return null;
-    }
-
-    // Fetch university details to include state and city in the search
+    // Fetch university details to include state and city in the ranking
     const university = await ctx.runQuery(internal.universities.getInternal, {
       universityId: args.universityId,
     });
@@ -252,198 +301,21 @@ export const discoverWebsite = internalAction({
     // Clean up state/city if they are placeholders or unknown
     const cleanState = state && !/unknown|test/i.test(state) ? state : "";
     const cleanCity = city && !/unknown|test/i.test(city) ? city : "";
-    const locationSuffix = `${cleanCity ? " " + cleanCity : ""}${cleanState ? " " + cleanState : ""}`;
 
-    // Try progressively shorter name variants if the full name yields no results
-    // We prioritize variants with the branch's state and city to ensure we get the correct branch website
-    const nameVariants = [
-      `${args.universityName}${locationSuffix} official website India`,
-      `${args.universityName} official website India`,
-      `${args.universityName}${locationSuffix} site:gov.in official website`,
-      `${args.universityName}${locationSuffix} site:ac.in official website`,
-      ...generateShortNameQueries(args.universityName).map((q) =>
-        q.replace(
-          "official website India",
-          `${locationSuffix} official website India`,
-        ),
-      ),
-      ...generateShortNameQueries(args.universityName),
-    ];
-    const serperBudget = createSerperBudget({ maxQueries: 2 });
-
-    let data: { organic?: Array<{ link: string }> } | null = null;
-    for (const q of nameVariants) {
-      if (serperBudget.exhausted || serperBudget.used >= serperBudget.max) {
-        console.warn(
-          `[Discovery] Serper budget reached for ${args.universityName}. Falling back to grounding.`,
-        );
-        break;
-      }
-      try {
-        const searchResult = await runWithSerperBudget(serperBudget, () =>
-          withRetry(async () => {
-            const response = await fetch("https://google.serper.dev/search", {
-              method: "POST",
-              headers: {
-                "X-API-KEY": apiKey,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify({ q, num: 5 }),
-              signal: AbortSignal.timeout(15000),
-            });
-            if (!response.ok) {
-              const body = await response.text().catch(() => "");
-              if (
-                response.status === 400 &&
-                body.toLowerCase().includes("not enough credits")
-              ) {
-                markSerperQuotaExhausted(serperBudget);
-              }
-              throw new Error(
-                `Serper search failed: ${response.status} ${response.statusText} — ${body}`,
-              );
-            }
-            return await response.json();
-          }),
-        );
-        if (!searchResult.ok) {
-          if (searchResult.quotaExhausted) {
-            console.warn(
-              `[Discovery] Serper quota exhausted for ${args.universityName}.`,
-            );
-            break;
-          }
-          console.error(
-            `[Discovery] Serper error for "${q}":`,
-            searchResult.reason,
-          );
-          continue;
-        }
-        const result = searchResult.value;
-        if (result.organic?.length > 0) {
-          data = result;
-          console.log(`[Discovery] Query hit with: "${q}"`);
-          break;
-        }
-        console.log(
-          `[Discovery] Serper returned 0 organic results for: "${q}"`,
-        );
-      } catch (e) {
-        console.error(
-          `[Discovery] Serper error for "${q}":`,
-          e instanceof Error ? e.message : String(e),
-        );
-      }
-    }
-
-    let organicResults: Array<{ link: string }> = [];
-
-    if (!data) {
-      console.warn(
-        `[Discovery] Serper returned no results for ${args.universityName}. Falling back to Gemini Grounding...`,
-      );
-
-      try {
-        const geminiKey = await ctx.runQuery(
-          internal.settings.getInternalGeminiKey,
-        );
-        if (geminiKey) {
-          const grounding = await callGeminiWithGrounding({
-            systemPrompt:
-              "You are a research assistant. Find the official website of the given university. Return ONLY the full URL (including https://).",
-            userPrompt: `What is the official website of ${args.universityName} in India?`,
-            temperature: 0,
-            model: MODELS.gemini, // fast, cheap, with search
-            apiKey: geminiKey,
-            ctx,
-            skipCache: true,
-          });
-
-          let foundUrl = "";
-          if (grounding.sources.length > 0) {
-            foundUrl = grounding.sources[0];
-          } else if (grounding.text) {
-            // Fallback: extract URL from text response using regex, then validate
-            const urlMatch = grounding.text.match(/https?:\/\/[^\s\"<>]+/);
-            if (urlMatch) {
-              let candidate = urlMatch[0];
-              try {
-                candidate = candidate.replace(/[),.;:!?]+$/, "");
-                const urlObj = new URL(candidate);
-                const hostname = urlObj.hostname.replace(/^www\./, "");
-                const tld = hostname.split(".").pop() || "";
-                const validTlds = ["edu", "ac", "in", "org", "com", "net"];
-                const hasValidTld = validTlds.some(
-                  (v) => tld === v || tld.endsWith(`.${v}`),
-                );
-                if (
-                  hasValidTld &&
-                  looksLikeOwnedDomain(candidate, args.universityName)
-                ) {
-                  foundUrl = candidate;
-                } else {
-                  console.warn(
-                    `[Discovery] Rejected grounding URL that failed TLD/ownership checks: ${candidate}`,
-                  );
-                }
-              } catch {
-                console.warn(
-                  `[Discovery] Rejected malformed URL: ${candidate}`,
-                );
-              }
-            }
-          }
-          if (foundUrl) {
-            const isLive = await validateUrlLive(foundUrl);
-            if (isLive) {
-              console.log(`[Discovery] Gemini Grounding found (live): ${foundUrl}`);
-              organicResults = [{ link: foundUrl }];
-              data = { organic: organicResults };
-            } else {
-              console.warn(
-                `[Discovery] Gemini Grounding URL unreachable, discarding: ${foundUrl}`,
-              );
-              foundUrl = "";
-            }
-          }
-          if (!foundUrl) {
-            console.warn(
-              `[Discovery] Gemini Grounding returned no sources or URL for ${args.universityName}`,
-            );
-          }
-        }
-      } catch (e) {
-        console.error(
-          `[Discovery] Gemini Grounding fallback failed:`,
-          e instanceof Error ? e.message : String(e),
-        );
-      }
-    }
-
-    if (!data) {
-      console.warn(
-        `[Discovery] No results for ${args.universityName} after ${nameVariants.length} Serper attempts + Gemini fallback.`,
-      );
-      await ctx.runMutation(internal.universities.updateInternal, {
-        id: args.universityId,
-        website_status: "invalid",
-      });
-      return null;
-    }
-
-    organicResults = data.organic || [];
-
+    // Build candidates from local heuristics only — no Serper, no Gemini.
     const candidates = rankWebsiteCandidates(
-      [
-        ...organicResults.map((result) => result.link || ""),
-        ...guessOfficialWebsiteCandidates(args.universityName, cleanState),
-      ],
+      guessOfficialWebsiteCandidates(args.universityName, cleanState),
       args.universityName,
       {
         locationHints: [cleanCity, cleanState].filter(Boolean),
       },
     );
-    const selectedCandidate = await findFirstValidWebsiteCandidate(
+
+    console.log(
+      `[Discovery] No-Serper discovery for ${args.universityName}: ${candidates.length} heuristic candidates`,
+    );
+
+    let selectedCandidate = await findFirstValidWebsiteCandidate(
       candidates,
       async (candidate) =>
         await ctx.runAction(internal.actions.discovery.validateWebsite, {
@@ -452,6 +324,39 @@ export const discoverWebsite = internalAction({
           universityName: args.universityName,
         }),
     );
+
+    // Fallback: use Serper search when local heuristics come up empty.
+    if (!selectedCandidate) {
+      const rawSerperKey = await ctx.runQuery(internal.settings.getInternalSerperKey);
+      const serperKey = rawSerperKey ? rawSerperKey.trim() : null;
+      if (serperKey) {
+        const budget = createSerperBudget({ maxQueries: 2 });
+        const query = `${args.universityName} official website`;
+        const searchResult = await runWithSerperBudget(budget, () =>
+          withRetry(() => serperSearch(query, serperKey, 8), { maxRetries: 1 }),
+        );
+        if (searchResult.ok && searchResult.value) {
+          const serperCandidates = rankWebsiteCandidates(
+            organicLinksToCandidates(searchResult.value),
+            args.universityName,
+            { locationHints: [cleanCity, cleanState].filter(Boolean) },
+          );
+          console.log(
+            `[Discovery] Serper fallback for ${args.universityName}: ${serperCandidates.length} candidates`,
+          );
+          selectedCandidate = await findFirstValidWebsiteCandidate(
+            serperCandidates,
+            async (candidate) =>
+              await ctx.runAction(internal.actions.discovery.validateWebsite, {
+                universityId: args.universityId,
+                website: candidate.link,
+                universityName: args.universityName,
+              }),
+          );
+        }
+      }
+    }
+
     if (selectedCandidate) {
       await ctx.runMutation(internal.universities.updateInternal, {
         id: args.universityId,
@@ -471,7 +376,7 @@ export const discoverWebsite = internalAction({
       return selectedCandidate.link;
     }
 
-    // If no valid link found
+    // No heuristic or Serper candidate was reachable
     await ctx.runMutation(internal.universities.updateInternal, {
       id: args.universityId,
       website_status: "invalid",

@@ -23,5 +23,7 @@ export {
   canonicalizeInstitutionEmail,
   normalizeInstitutionDomain,
   getEmailParts,
+  isRelevantInstitutionEmailDomain,
+  namesEquivalent,
   TARGET_ROLES,
 } from "./roleRegistry";

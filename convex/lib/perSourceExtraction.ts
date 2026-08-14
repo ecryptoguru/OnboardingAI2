@@ -2,7 +2,7 @@
 
 import { ActionCtx } from "../_generated/server";
 import { Schema } from "@google/genai";
-import { callGeminiWithUsage, LlmUsageEntry, MODELS, THINKING_LEVEL } from "./llm";
+import { callGeminiWithUsage, LlmUsageEntry, MODELS, TEMP } from "./llm";
 import {
   STAKEHOLDERS_SCHEMA,
   STAKEHOLDERS_SYNTHESIS_PROMPT,
@@ -14,7 +14,7 @@ import {
   extractSourceUrl,
 } from "./validateDeepEnrichment";
 
-const MAX_PARTIAL_SOURCES = 5;
+const MAX_PARTIAL_SOURCES = 6;
 
 function withMaxStakeholders(
   schema: Schema,
@@ -38,8 +38,8 @@ function withMaxStakeholders(
 
 const PER_SOURCE_SCHEMA = withMaxStakeholders(
   STAKEHOLDERS_SCHEMA,
-  12,
-  "University officials from this single source. Return at most 12 of the most relevant decision-makers and those with complete contact information.",
+  25,
+  "University officials from this single source. If the source contains an Officers/Administration/Governance table or list, return EVERY named row. Return at most 25 decision-makers, prioritising Vice Chancellor, Registrar, Deans, Controllers, Directors, Finance Officer, and other senior officials.",
 ) as Schema;
 
 const MERGE_SCHEMA = withMaxStakeholders(
@@ -69,6 +69,55 @@ function cleanJson(text: string): string {
     .trim();
 }
 
+function digitsOnly(value?: string | null): string | undefined {
+  if (!value) return undefined;
+  const digits = value.replace(/\D/g, "");
+  return digits.length >= 7 ? digits : undefined;
+}
+
+/**
+ * Remove phone/LinkedIn that are not literally present in the source block.
+ * Keeps the model honest: contact details must be evidence-backed.
+ */
+function sanitiseEvidence(
+  stakeholders: StakeholderLike[],
+  block: string,
+): StakeholderLike[] {
+  const lowerBlock = block.toLowerCase();
+  return stakeholders.map((st) => {
+    const out: StakeholderLike = { ...st };
+
+    if (out.linkedin_url) {
+      const url = out.linkedin_url.toLowerCase();
+      if (!lowerBlock.includes(url)) {
+        out.linkedin_url = undefined;
+        out.linkedin_source = "none";
+        if (typeof out.contact_confidence === "number" && out.contact_confidence > 0.5) {
+          out.contact_confidence = 0.5;
+        }
+      } else {
+        out.linkedin_source = "scraped";
+      }
+    } else {
+      out.linkedin_source = "none";
+    }
+
+    if (out.phone) {
+      const phoneDigits = digitsOnly(out.phone);
+      if (!phoneDigits || !lowerBlock.includes(phoneDigits)) {
+        out.phone = undefined;
+        out.phone_source = "none";
+      } else {
+        out.phone_source = "scraped";
+      }
+    } else {
+      out.phone_source = "none";
+    }
+
+    return out;
+  });
+}
+
 function contactHints(emails: string[], phones: string[]): string {
   return (
     `PRE-DISCOVERED CONTACTS (verify and merge with this source):\n` +
@@ -84,7 +133,11 @@ function perSourceSystemPrompt(targetRoles: string[]): string {
     "Extract only facts explicitly stated in this source. " +
     "Do not infer values from other sources or general knowledge. " +
     "If a value is not present, return null. " +
-    "Return at most 10 stakeholders per source, prioritising decision-making roles " +
+    "If this source is an Officers/Administration/Governance table or directory, " +
+    "return EVERY named person in the table, one row per person, with their exact role and email. " +
+    "Do not stop at the first few rows. " +
+    "For Deans, keep the specific school/faculty in the role, e.g. \"Dean, School of Pharmaceutical Education and Research\". " +
+    "Return at most 25 stakeholders per source, prioritising decision-making roles " +
     "(Vice Chancellor, Registrar, Deans, Directors, Controllers, Wardens, Finance Officer, etc.) " +
     "and those with complete contact information."
   );
@@ -113,14 +166,14 @@ async function extractOnePartial(
   try {
     const result = await callGeminiWithUsage({
       apiKey,
-      model: MODELS.gemini_3_5_flash_lite,
-      fallbackModel: MODELS.geminiFlash,
+      model: MODELS.gemini_3_7_flash,
+      fallbackModel: MODELS.gemini_3_5_flash_lite,
       systemPrompt: perSourceSystemPrompt(options.targetRoles),
       userPrompt: prompt,
-      thinkingLevel: THINKING_LEVEL.minimal,
+      temperature: TEMP.deterministic,
       responseAsJson: true,
       responseSchema: PER_SOURCE_SCHEMA,
-      maxOutputTokens: 2048,
+      maxOutputTokens: 4096,
       label: "per_source_extraction",
       ctx,
       cacheTtlMs: 60 * 60 * 1000,
@@ -128,7 +181,8 @@ async function extractOnePartial(
     llmUsageEntries.push(result.usage);
 
     const parsed = JSON.parse(cleanJson(result.text));
-    const stakeholders = validateStakeholdersOutput(parsed);
+    let stakeholders = validateStakeholdersOutput(parsed);
+    stakeholders = sanitiseEvidence(stakeholders, block);
     return {
       source_url: sourceUrl,
       stakeholders: stakeholders.map((st) => ({
@@ -203,14 +257,14 @@ export async function mergePartialExtractions(
 
   const result = await callGeminiWithUsage({
     apiKey,
-    model: MODELS.gemini_3_6_flash,
-    fallbackModel: MODELS.gemini,
+    model: MODELS.gemini_3_7_flash,
+    fallbackModel: MODELS.gemini_3_5_flash_lite,
     systemPrompt: mergeSystemPrompt(options.targetRoles),
     userPrompt: prompt,
-    thinkingLevel: THINKING_LEVEL.low,
+    temperature: TEMP.deterministic,
     responseAsJson: true,
     responseSchema: MERGE_SCHEMA,
-    maxOutputTokens: 4096,
+    maxOutputTokens: 8192,
     label: "merge_partial_extractions",
     ctx,
     cacheTtlMs: 60 * 60 * 1000,

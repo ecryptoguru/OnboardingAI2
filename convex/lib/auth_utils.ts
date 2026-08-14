@@ -1,4 +1,11 @@
 import { getOptionalEnv } from "./env";
+import { Id } from "../_generated/dataModel";
+
+interface UserIdentityLike {
+  subject?: string;
+  email?: string;
+  tokenIdentifier?: string;
+}
 
 /**
  * Helper to check authentication with a development-only bypass.
@@ -9,7 +16,38 @@ export async function validateAuth(ctx: {
 }) {
   const identity = await ctx.auth.getUserIdentity();
   if (!identity) throw new Error("Unauthenticated");
-  return identity;
+  return identity as UserIdentityLike;
+}
+
+/**
+ * Extract the current user's `users._id` from their identity subject.
+ * Throws if the client is not authenticated.
+ */
+export async function getCurrentUserId(ctx: {
+  auth: { getUserIdentity: () => Promise<unknown> };
+}): Promise<Id<"users">> {
+  const identity = await validateAuth(ctx);
+  const subject = identity.subject;
+  if (!subject) throw new Error("Unauthenticated");
+  const [userId] = subject.split("|");
+  if (!userId) throw new Error("Unauthenticated");
+  return userId as Id<"users">;
+}
+
+/**
+ * Returns true if the current user is an admin.
+ * Reuses validateAdmin, so an empty ADMIN_EMAILS list means everyone is
+ * treated as an admin in development mode.
+ */
+export async function isAdmin(ctx: {
+  auth: { getUserIdentity: () => Promise<unknown> };
+}): Promise<boolean> {
+  try {
+    await validateAdmin(ctx);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -26,9 +64,7 @@ export async function validateAdmin(ctx: {
   // Extract email from identity. For password provider this is often in
   // tokenIdentifier as "password|email@example.com" or directly as email.
   const rawEmail =
-    (identity as Record<string, unknown>).email ||
-    (identity as Record<string, unknown>).tokenIdentifier ||
-    "";
+    identity.email || identity.tokenIdentifier || "";
 
   const email = String(rawEmail).toLowerCase().trim();
   // Handle tokenIdentifier format like "password|user@example.com"

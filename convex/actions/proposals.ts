@@ -4,7 +4,7 @@ import { action, internalAction } from "../_generated/server";
 import type { ActionCtx } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
-import { validateAuth } from "../lib/auth_utils";
+import { validateAuth, getCurrentUserId } from "../lib/auth_utils";
 import type { Id } from "../_generated/dataModel";
 import { callGemini, TEMP, MODELS } from "../lib/llm";
 import { validateJsonOutput, sanitizeLlmInput, sanitizeLlmOutput, isValidEmail } from "../lib/utils";
@@ -358,6 +358,7 @@ export const emailProposal = action({
     args,
   ): Promise<{ success: boolean; messageId?: string; error?: string }> => {
     await validateAuth(ctx);
+    const owner_id = await getCurrentUserId(ctx);
     const proposal = await ctx.runQuery(internal.proposals.getInternal, {
       id: args.proposalId,
     });
@@ -582,6 +583,7 @@ export const emailProposal = action({
         html_body: html,
         status: "queued",
         step_number: 100,
+        owner_id,
         drafted_at: Date.now(),
       });
     } else {

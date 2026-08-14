@@ -18,4 +18,13 @@ crons.cron(
   { days: 30 },
 );
 
+// Website re-validation cron disabled: we now only run fetch/Jina-based checks
+// manually or through explicit non-Serper discovery.
+// crons.interval(
+//   "website-validation-batch",
+//   { minutes: 10 },
+//   internal.dispatcherInternal.dispatchWebsiteValidationInternal,
+//   { status: "all", limit: 50 },
+// );
+
 export default crons;

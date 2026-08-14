@@ -5,7 +5,9 @@ import type { ActionCtx } from "../_generated/server";
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { Id, Doc } from "../_generated/dataModel";
-import type { LlmUsageSummary } from "../lib/llm";
+import { callGeminiWithUsage, type LlmUsageSummary } from "../lib/llm";
+import { MODELS, TEMP } from "../lib/models";
+import { STAKEHOLDERS_SCHEMA } from "../lib/prompts";
 
 interface TestReport {
   testStartedAt: string;
@@ -1434,5 +1436,50 @@ export const recoverFourUniversities = internalAction({
       count: rows.length,
       rows,
     };
+  },
+});
+
+export const testGeminiModel = internalAction({
+  args: {
+    model: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const key = await ctx.runQuery(
+      internal.settings.getInternalGeminiKey,
+    ) as string | null;
+    if (!key) return { success: false, error: "No Gemini API key" };
+    const model = args.model ?? MODELS.gemini_3_7_flash;
+    try {
+      const userPrompt =
+        "Extract the Vice Chancellor and Registrar from this source as JSON:\n" +
+        "Source: Prof. Asgar Ali, Vice Chancellor (Offg.), can be reached at vc@jamiahamdard.ac.in. " +
+        "Col. Tahir Mustafa, Registrar, registrar@jamiahamdard.ac.in.";
+      const result = await callGeminiWithUsage({
+        apiKey: key,
+        model,
+        fallbackModel: model,
+        systemPrompt: "Return a JSON object with a stakeholders array.",
+        userPrompt,
+        temperature: TEMP.deterministic,
+        responseAsJson: true,
+        responseSchema: STAKEHOLDERS_SCHEMA,
+        maxOutputTokens: 2048,
+        label: "test_gemini_model",
+        ctx,
+        skipCache: true,
+      });
+      const parsed = JSON.parse(result.text) as {
+        stakeholders?: unknown[];
+      };
+      return {
+        success: true,
+        model,
+        text: result.text,
+        stakeholders: parsed.stakeholders?.length ?? 0,
+      };
+    } catch (e: unknown) {
+      const err = e instanceof Error ? e.message : String(e);
+      return { success: false, model, error: err };
+    }
   },
 });

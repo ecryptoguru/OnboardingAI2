@@ -5,7 +5,11 @@ import {
   internalQuery,
 } from "./_generated/server";
 import { v } from "convex/values";
-import { validateAuth } from "./lib/auth_utils";
+import {
+  validateAuth,
+  getCurrentUserId,
+  isAdmin,
+} from "./lib/auth_utils";
 import { Id } from "./_generated/dataModel";
 
 const MAX_ANALYTICS_ROWS = 5000;
@@ -170,8 +174,10 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
+    const owner_id = await getCurrentUserId(ctx);
     return await ctx.db.insert("emailsSent", {
       ...args,
+      owner_id,
       status: "queued",
     });
   },
@@ -197,6 +203,13 @@ export const updateStatus = mutation({
   handler: async (ctx, args) => {
     await validateAuth(ctx);
     const { id, ...fields } = args;
+    const email = await ctx.db.get(id);
+    if (!email) throw new Error("Email not found");
+    const userId = await getCurrentUserId(ctx);
+    const admin = await isAdmin(ctx);
+    if (!admin && email.owner_id && email.owner_id !== userId) {
+      throw new Error("Forbidden: Not your email");
+    }
     await ctx.db.patch(id, fields);
   },
 });
@@ -222,6 +235,11 @@ export const updateStatusByZeptomailId = mutation({
       )
       .first();
     if (!email) return;
+    const userId = await getCurrentUserId(ctx);
+    const admin = await isAdmin(ctx);
+    if (!admin && email.owner_id && email.owner_id !== userId) {
+      throw new Error("Forbidden: Not your email");
+    }
     await ctx.db.patch(email._id, {
       status: args.status,
       opened_at: args.opened_at,
@@ -316,6 +334,7 @@ export const insertInternal = internalMutation({
     // Deprecated: ZeptoMail migration complete. Use zeptomail_message_id for new emails.
     sendgrid_message_id: v.optional(v.string()),
     zeptomail_message_id: v.optional(v.string()),
+    owner_id: v.optional(v.id("users")),
     step_number: v.number(),
     drafted_at: v.optional(v.number()),
     sent_at: v.optional(v.number()),
@@ -370,10 +389,19 @@ export const pendingCount = query({
   args: {},
   handler: async (ctx) => {
     await validateAuth(ctx);
-    const pendingEmails = await ctx.db
-      .query("emailsSent")
-      .withIndex("by_status", (q) => q.eq("status", "pending_approval"))
-      .take(MAX_ANALYTICS_ROWS);
+    const admin = await isAdmin(ctx);
+    const userId = await getCurrentUserId(ctx);
+    const pendingEmails = admin
+      ? await ctx.db
+          .query("emailsSent")
+          .withIndex("by_status", (q) => q.eq("status", "pending_approval"))
+          .take(MAX_ANALYTICS_ROWS)
+      : await ctx.db
+          .query("emailsSent")
+          .withIndex("by_owner_status", (q) =>
+            q.eq("owner_id", userId).eq("status", "pending_approval"),
+          )
+          .take(MAX_ANALYTICS_ROWS);
     return pendingEmails.length;
   },
 });
@@ -382,10 +410,19 @@ export const listPending = query({
   args: {},
   handler: async (ctx) => {
     await validateAuth(ctx);
-    const pendingEmails = await ctx.db
-      .query("emailsSent")
-      .withIndex("by_status", (q) => q.eq("status", "pending_approval"))
-      .take(MAX_ANALYTICS_ROWS);
+    const admin = await isAdmin(ctx);
+    const userId = await getCurrentUserId(ctx);
+    const pendingEmails = admin
+      ? await ctx.db
+          .query("emailsSent")
+          .withIndex("by_status", (q) => q.eq("status", "pending_approval"))
+          .take(MAX_ANALYTICS_ROWS)
+      : await ctx.db
+          .query("emailsSent")
+          .withIndex("by_owner_status", (q) =>
+            q.eq("owner_id", userId).eq("status", "pending_approval"),
+          )
+          .take(MAX_ANALYTICS_ROWS);
     return await Promise.all(
       pendingEmails.map(async (email) => {
         const uni = await ctx.db.get(email.university_id);
@@ -412,6 +449,16 @@ export const updateDraft = mutation({
   handler: async (ctx, args) => {
     await validateAuth(ctx);
     const { id, subject, body } = args;
+    const email = await ctx.db.get(id);
+    if (!email) throw new Error("Email not found");
+    const userId = await getCurrentUserId(ctx);
+    const admin = await isAdmin(ctx);
+    if (!admin && email.owner_id && email.owner_id !== userId) {
+      throw new Error("Forbidden: Not your draft");
+    }
+    if (email.status !== "pending_approval") {
+      throw new Error("Can only edit pending drafts");
+    }
     await ctx.db.patch(id, { subject, body });
   },
 });
@@ -421,7 +468,15 @@ export const rejectDraft = mutation({
   handler: async (ctx, args) => {
     await validateAuth(ctx);
     const email = await ctx.db.get(args.id);
-    if (!email || email.status !== "pending_approval") return;
+    if (!email || email.status !== "pending_approval") {
+      throw new Error("Draft not found or not pending approval");
+    }
+
+    const userId = await getCurrentUserId(ctx);
+    const admin = await isAdmin(ctx);
+    if (!admin && email.owner_id && email.owner_id !== userId) {
+      throw new Error("Forbidden: Not your draft");
+    }
 
     await ctx.db.patch(args.id, { status: "failed" });
 

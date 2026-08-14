@@ -7,15 +7,19 @@ import { Type, Schema } from "@google/genai";
 export const SCRAPER_SYSTEM_PROMPT = (targetRoles: string[]) =>
   `
 You are a highly accurate data extraction system.
-Your job is to read the provided text from a University website and extract key stakeholders matching or closely related to the following roles:
+Your job is to read the provided text from a University website and extract the most senior named stakeholders matching or closely related to the following roles:
 ${targetRoles.join(", ")}
 
 CRITICAL RULES:
-1. Extract EVERY person you find with a name and role, even if NO email or phone is listed.
+1. Extract at most 15 named senior decision-makers from this source. Do NOT extract every staff member, faculty member, or department head.
 2. Indian universities often display names+roles on administration pages but hide emails to avoid spam. STILL extract the name and role.
 3. Use null for missing email or phone — do NOT skip the person just because contact info is missing.
 4. Look for titles: Dr., Prof., Mr., Mrs., Shri, Smt., Er.
 5. If the same person appears multiple times with slightly different names, merge them into one entry.
+6. The role must be a SINGLE, SPECIFIC title exactly as written on the page. It must NOT be a list, slash-separated, or a concatenation of multiple roles.
+7. If the page says "Dean, School of Pharmaceutical Education and Research", use that exact text. Do not collapse it into a generic "Dean of Faculty".
+8. Do not extract generic "Head of Administration", "Dean of Faculty", or faculty/assistant/associate professors, research scientists, or HODs.
+9. A named person is required for each record. Do not output a role name as a person name.
 
 Extract as much relevant information as possible for each found stakeholder.
 If no stakeholders are found, return an empty array for stakeholders.
@@ -26,6 +30,7 @@ export const SCRAPER_SCHEMA: Schema = {
   properties: {
     stakeholders: {
       type: Type.ARRAY,
+      maxItems: "15",
       items: {
         type: Type.OBJECT,
         properties: {
@@ -37,7 +42,10 @@ export const SCRAPER_SCHEMA: Schema = {
           role: {
             type: Type.STRING,
             nullable: true,
-            description: "Exact role or closest match from the list",
+            minLength: "1",
+            maxLength: "80",
+            description:
+              "Single, specific role as written on the page. Not a list or concatenation.",
           },
           email: {
             type: Type.STRING,
@@ -50,9 +58,6 @@ export const SCRAPER_SCHEMA: Schema = {
             description: "phone number or null",
           },
         },
-        // Intentionally NO required fields — Indian university sites often list
-        // names+roles without emails. We want to capture the name+role even
-        // when contact details are missing. The app filters empty entries later.
       },
     },
   },
@@ -131,7 +136,7 @@ PASS 1 — Build the ROSTER (scan for people):
   Include: Vice Chancellor, Pro Vice Chancellor, Registrar, Dy Registrar, Dean (all Deans),
            Controller of Examinations, Chief Warden, Finance Officer, Director, Rector.
 
-PASS 2 — Cross-reference CONTACTS onto the roster:
+PASS 2 — Cross-reference CONTACTS onto the roster (ONLY when justified):
   EMAIL patterns (scan ENTIRE context, not just the person's section):
     - Role-based:  vc@, registrar@, registrar1@, dean@, coe@, chiefwarden@, provc@, dyregistrar@, finance@
     - Name-based:  firstname.lastname@, firstinitiallastname@, lastname@
@@ -142,13 +147,14 @@ PASS 2 — Cross-reference CONTACTS onto the roster:
     - +91-XXXXXXXXXX or 91-XXXXXXXXXX
     - 0XXX-XXXXXXX landline (STD code + number)
     - Anti-ragging pages usually have mobile numbers — prioritise scanning them
+    - NEVER attach the main university switchboard/helpline number (e.g. 011-26059688, +91-11-26059688) to a specific person unless it appears in the SAME row/section as that person's name and role. Footer or "Contact us" numbers are shared and should remain unassigned.
 
   EMAIL OBFUSCATION: Decode "name[at]domain[dot]edu" and "name(at)domain(dot)edu" to real emails.
 
   LINKEDIN:
-    - Only include a linkedin_url if it is a real "https://linkedin.com/in/<slug>" URL and the slug clearly contains the person's name (full surname or at least two name tokens).
-    - Do NOT include search result URLs like "linkedin.com/pub/dir" or company pages.
-    - Do NOT include a LinkedIn URL if the slug does not contain the surname.
+    - Only include a linkedin_url if the EXACT URL string is literally present in the source text.
+    - linkedin_url must be a real "https://linkedin.com/in/<slug>" URL.
+    - If no LinkedIn URL is present in the source, set linkedin_url to null.
 
 STRICT EXCLUSIONS (NON-NEGOTIABLE):
   - Do NOT extract government officials, ministry representatives, or regulatory body directors.
@@ -163,7 +169,7 @@ MERGE RULE: If the same person appears in multiple sources, merge into ONE recor
 RANKING: Return stakeholders ranked by completeness: email+phone+linkedin > email+phone > email only > name only.
 
 VERIFICATION:
-  - Every linkedin_url is a /in/ URL and its slug matches the name.
+  - Every linkedin_url must be literally present in the source text and be a /in/ URL.
   - Emails contain "@" and a real domain matching the university.
   - Phones are at least 10 digits.
   - No two records share the same name+role pair unless they are duplicates to merge.
@@ -288,8 +294,6 @@ export const STAKEHOLDERS_SCHEMA: Schema = {
   properties: {
     stakeholders: {
       type: Type.ARRAY,
-      description:
-        "University officials matching the target roles. Return every relevant decision-maker found in the source.",
       items: {
         type: Type.OBJECT,
         properties: {
@@ -303,7 +307,7 @@ export const STAKEHOLDERS_SCHEMA: Schema = {
             type: Type.STRING,
             nullable: true,
             description:
-              "Official designation e.g. Vice Chancellor, Registrar, Dean Student Affairs, Pro Vice Chancellor, Chief Warden, Controller of Examinations, Dy Registrar, Chairman",
+              "Official designation exactly as written in the source. Keep the specific school/faculty for Deans, e.g. \"Dean, School of Pharmaceutical Education and Research\". Do not concatenate or generalise roles. Maximum 80 characters.",
           },
           email: {
             type: Type.STRING,
@@ -315,13 +319,13 @@ export const STAKEHOLDERS_SCHEMA: Schema = {
             type: Type.STRING,
             nullable: true,
             description:
-              "Phone number - Indian mobile 10-digit or landline. Usually found on anti-ragging committee pages.",
+              "Phone number - Indian mobile 10-digit or landline. Only include when the phone number appears next to this person in the source.",
           },
           linkedin_url: {
             type: Type.STRING,
             nullable: true,
             description:
-              "Full LinkedIn URL from search results e.g. https://linkedin.com/in/username. Only include if the URL slug clearly matches the person's name.",
+              "Full LinkedIn URL e.g. https://linkedin.com/in/username. Only include when the exact URL string is literally present in the source text.",
           },
           source_url: {
             type: Type.STRING,
@@ -350,7 +354,12 @@ STAKEHOLDER RULES:
 - If a name is just a role (e.g. "Vice Chancellor") with no actual person name, set name to null.
 - Never output "N/A", "Unknown", etc. as a name; use null.
 - Do not extract government officials from UGC/AICTE/NAAC/NIRF pages.
-- Only keep a linkedin_url when the URL slug clearly matches the person's name (surname or two+ tokens).
+- Only keep a linkedin_url when the URL string is literally present in one of the partials and the URL slug clearly matches the person's name.
+
+CONFLICT RESOLUTION:
+- If the same senior role (e.g. "Vice Chancellor") appears in multiple sources with different names, keep only ONE person for that role.
+- Prefer the record from the dedicated leadership leaf page (e.g. /vice-chancellor, /registrar) or the current main officers table.
+- Preserve "Offg." / "Acting" labels when they are explicitly present; do not override a current acting office-holder with a committee/prospectus/PDF unless that non-Offg. source is a clearly current, dedicated leadership page.
 
 SOURCE PROVENANCE:
 - For each final stakeholder, keep the most specific source_url from the partials.

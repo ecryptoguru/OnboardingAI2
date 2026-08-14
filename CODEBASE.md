@@ -13,7 +13,7 @@ This document is the central reference for navigating the `fretbox-outreach-v2` 
 - **Auth:** `@convex-dev/auth` `^0.0.90` with Password provider and password-reset email config
 - **Styling:** Tailwind CSS `^3.4.1`, glassmorphism / flat design system in `design-system/onboardingai/MASTER.md`
 - **Icons:** Heroicons React
-- **AI Models:** Google Gemini via `@google/genai` (`gemini-3.5-flash`, `gemini-3.1-flash-lite`, `gemini-embedding-001`); model constants live in `convex/lib/models.ts`.
+- **AI Models:** Google Gemini via `@google/genai` (`gemini-3.7-flash`, `gemini-3.5-flash-lite`, `gemini-embedding-001`); model constants live in `convex/lib/models.ts`.
 - **LLM Guardrails:** Daily budget tracking (`llmBudget` table) + deterministic response cache (`llmCache` table). Default budget `$50/day`; configurable via `LLM_DAILY_BUDGET_USD`.
 - **External Services:**
   - ZeptoMail (transactional email, delivery tracking, inbound reply routing)

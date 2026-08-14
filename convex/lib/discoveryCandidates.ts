@@ -114,7 +114,7 @@ function getLocationTokens(locationHints: string[]): string[] {
     });
 }
 
-function hasEducationTld(hostname: string): boolean {
+export function hasEducationTld(hostname: string): boolean {
   return (
     hostname.endsWith(".edu") ||
     hostname.endsWith(".edu.in") ||
@@ -233,10 +233,11 @@ export function looksLikeOwnedDomain(
   const acronyms = getUniversityAcronyms(universityName);
   try {
     const hostname = new URL(link).hostname.replace(/^www\./, "");
-    const domainRoot = hostname.split(".")[0];
-    return (
-      significantWords.some((word) => domainRoot.includes(word)) ||
-      acronyms.some((acronym) => matchesAcronymDomainRoot(acronym, domainRoot))
+    const parts = hostname.split(".").filter((p) => p.length >= 2);
+    return parts.some(
+      (part) =>
+        significantWords.some((word) => part.includes(word)) ||
+        acronyms.some((acronym) => matchesAcronymDomainRoot(acronym, part)),
     );
   } catch {
     return false;

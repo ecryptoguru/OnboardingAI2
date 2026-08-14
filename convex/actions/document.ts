@@ -4,7 +4,7 @@ import { action } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v, ConvexError } from "convex/values";
 import mammoth from "mammoth";
-import { validateAuth } from "../lib/auth_utils";
+import { validateAuth, getCurrentUserId } from "../lib/auth_utils";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -77,6 +77,7 @@ export const createDocumentDrafts = action({
   },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
+    const owner_id = await getCurrentUserId(ctx);
 
     if (args.recipients.length === 0) {
       throw new ConvexError("At least one recipient is required");
@@ -144,6 +145,7 @@ export const createDocumentDrafts = action({
         document_storage_id: args.bodyStorageId,
         attachments: args.attachments,
         status: "pending_approval",
+        owner_id,
         drafted_at: now,
       });
       createdIds.push(emailId);

@@ -67,7 +67,7 @@ API keys and sender details are managed in **Settings → API Keys**. Values are
 - **Backend / DB**: [Convex](https://convex.dev) (queries, mutations, actions, crons, HTTP, vector search)
 - **Frontend**: [Next.js 15](https://nextjs.org) + [React 19](https://react.dev) + [Tailwind CSS 3.4.1](https://tailwindcss.com)
 - **Auth**: `@convex-dev/auth` with Password provider
-- **AI**: Google Gemini (`gemini-3.5-flash`, `gemini-3.1-flash-lite`, `gemini-embedding-001`)
+- **AI**: Google Gemini (`gemini-3.7-flash`, `gemini-3.5-flash-lite`, `gemini-embedding-001`)
 - **Email**: [ZeptoMail](https://www.zoho.com/zeptomail/) REST API
 - **Scraping**: Firecrawl + Jina Reader + `fetch` fallback
 - **Testing**: Playwright E2E (`tests/e2e`, baseURL `http://localhost:3000`) + tsx unit tests (`tests/unit/*.test.ts`)
@@ -123,8 +123,8 @@ npm run build             # Production build
 ## More Documentation
 
 - [Architecture / Codebase map](./CODEBASE.md)
-- [End-user guide](./user-guide.md)
-- [Quick user guide](./user-guide-lite.md)
+- [End-user guide](./user-guide.md) ([PDF](./user-guide.pdf))
+- [Quick user guide](./user-guide-lite.md) ([PDF](./user-guide-lite.pdf))
 - [Convex backend notes](./convex/README.md)
 - [Implementation plan](./docs/PLAN.md)
 - [Requirements](./docs/Requirement.md)
