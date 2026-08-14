@@ -77,9 +77,11 @@ describe("enforceSingletonRoles", () => {
       { name: "Dr. V. Kumaresan", role: "Registrar", contact_confidence: 1 },
       { name: "Prof. Dr. V. Kumaresan", role: "Registrar i/c", contact_confidence: 0.5 },
     ]);
-    assert.strictEqual(kept.length, 1);
+    // Same person across sources: singleton enforcement keeps both and the
+    // upsert/dedupe layer merges them (competes in the same singleton group).
+    assert.strictEqual(kept.length, 2);
+    assert.strictEqual(dropped.length, 0);
     assert.strictEqual(kept[0].name, "Dr. V. Kumaresan");
-    assert.strictEqual(dropped.length, 1);
   });
 
   it("treats same-name duplicates as one person (upsert dedups)", () => {
