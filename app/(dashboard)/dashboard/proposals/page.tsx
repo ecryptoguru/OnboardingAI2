@@ -51,10 +51,13 @@ export default function ProposalsPage() {
   const { withKeyCheck, keyModal: pageKeyModal } = useRequireGeminiKey();
 
   const STALE_CUTOFF_MS = 90 * 24 * 60 * 60 * 1000;
+  // Query args must stay referentially stable across renders — Date.now() in
+  // args re-subscribes every render and triggers an infinite update loop.
+  const enrichedAfter = useMemo(() => Date.now() - STALE_CUTOFF_MS, []);
   const allStakeholders = useQuery(
     api.stakeholders.listByUniversity,
     selectedUniId
-      ? { university_id: selectedUniId as Id<"universities">, enriched_after: Date.now() - STALE_CUTOFF_MS }
+      ? { university_id: selectedUniId as Id<"universities">, enriched_after: enrichedAfter }
       : "skip",
   );
 
@@ -322,10 +325,13 @@ function ProposalCard({
   const { withKeyCheck, keyModal: cardKeyModal } = useRequireGeminiKey();
 
   // Default to stakeholders enriched within the last 90 days so legacy records are hidden.
+  // Query args must stay referentially stable across renders — Date.now() in
+  // args re-subscribes every render and triggers an infinite update loop.
   const STALE_CUTOFF_MS = 90 * 24 * 60 * 60 * 1000;
+  const enrichedAfter = useMemo(() => Date.now() - STALE_CUTOFF_MS, []);
   const allStakeholders = useQuery(api.stakeholders.listByUniversity, {
     university_id: proposal.university_id,
-    enriched_after: Date.now() - STALE_CUTOFF_MS,
+    enriched_after: enrichedAfter,
   });
   const validStakeholders = useMemo(
     () =>

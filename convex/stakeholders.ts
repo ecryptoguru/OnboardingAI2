@@ -693,8 +693,17 @@ export const updateLinkedinInternal = internalMutation({
     };
     if (args.linkedin_url !== undefined) {
       patch.linkedin_url = args.linkedin_url;
+      // Provenance must follow the URL: a valid URL that matches the person's
+      // name is evidence-backed; anything else is cleared.
+      patch.linkedin_source =
+        args.linkedin_url &&
+        isLikelyValidLinkedIn(args.linkedin_url) &&
+        linkedinMatchesName(args.name ?? existing?.name, args.linkedin_url)
+          ? ("scraped" as LinkedInSource)
+          : ("none" as LinkedInSource);
     } else {
       patch.linkedin_url = undefined;
+      patch.linkedin_source = "none" as LinkedInSource;
     }
     await ctx.db.patch(args.id, patch as Doc<"stakeholders">);
   },

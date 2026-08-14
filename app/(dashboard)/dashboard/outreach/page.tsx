@@ -3,7 +3,7 @@
 import { useQuery, useMutation, useAction } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { Doc, Id } from "../../../../convex/_generated/dataModel";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   MagnifyingGlassIcon,
   XMarkIcon,
@@ -733,10 +733,16 @@ function SimulateReplyModal({
   onClose: () => void;
 }) {
   // Default to recently enriched stakeholders; hide legacy records.
+  // Query args must stay referentially stable across renders — Date.now() in
+  // args re-subscribes every render and triggers an infinite update loop.
   const STALE_CUTOFF_MS = 90 * 24 * 60 * 60 * 1000;
+  const enrichedAfter = useMemo(
+    () => Date.now() - STALE_CUTOFF_MS,
+    [],
+  );
   const stakeholders = useQuery(api.stakeholders.listByUniversity, {
     university_id: university._id,
-    enriched_after: Date.now() - STALE_CUTOFF_MS,
+    enriched_after: enrichedAfter,
   });
   const createReply = useMutation(api.replies.create);
   const classifyReply = useAction(api.actions.replyClassifier.classifyReply);
