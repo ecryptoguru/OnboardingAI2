@@ -1,29 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect } from "react";
-import { useConvexAuth } from "convex/react";
+import { RedirectIfAuthenticated } from "@/components/RedirectIfAuthenticated";
 import { ArrowRightIcon } from "@heroicons/react/24/outline";
 
 export default function Home() {
-  const { isLoading, isAuthenticated } = useConvexAuth();
-
-  useEffect(() => {
-    if (!isLoading && isAuthenticated) {
-      window.location.href = "/dashboard";
-    }
-  }, [isLoading, isAuthenticated]);
-
-  if (isLoading) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-background">
-        <div className="animate-spin h-8 w-8 border-2 border-indigo-500 border-t-transparent rounded-full" />
-      </main>
-    );
-  }
-
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-8 bg-background text-foreground overflow-hidden relative">
+    <>
+      <RedirectIfAuthenticated />
+      <main className="flex min-h-screen flex-col items-center justify-center p-8 bg-background text-foreground overflow-hidden relative">
       {/* Decorative background elements */}
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-500/10 blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-emerald-500/10 blur-[120px] rounded-full pointer-events-none" />
@@ -84,5 +69,6 @@ export default function Home() {
       {/* Grid pattern */}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,#8080800a_1px,transparent_1px),linear-gradient(to_bottom,#8080800a_1px,transparent_1px)] bg-[size:14px_24px] pointer-events-none" />
     </main>
+    </>
   );
 }
