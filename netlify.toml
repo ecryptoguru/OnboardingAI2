@@ -2,5 +2,9 @@
   command = "npm run build"
   publish = ".next"
 
+[build.environment]
+  NEXT_PUBLIC_CONVEX_URL = "https://energetic-raven-535.convex.cloud"
+  NEXT_PUBLIC_CONVEX_SITE_URL = "https://energetic-raven-535.convex.site"
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"
