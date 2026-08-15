@@ -18,19 +18,19 @@ test.describe("Responsive Viewports", () => {
     await expect(page.locator('input[name="password"]')).toBeVisible();
   });
 
-  test("Dashboard renders on desktop viewport", async ({ page }) => {
+  test("Landing page renders on desktop viewport", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+    await page.goto("/", { waitUntil: "domcontentloaded" });
 
     const bodyText = await page.locator("body").textContent();
     expect(bodyText).toBeTruthy();
     expect(bodyText!.length).toBeGreaterThan(50);
   });
 
-  test("Dashboard renders on desktop and mobile viewports", async ({ page }) => {
+  test("Auth pages render on desktop and mobile viewports", async ({ page }) => {
     // Desktop
     await page.setViewportSize({ width: 1440, height: 900 });
-    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+    await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
 
     const bodyText = await page.locator("body").textContent();
     expect(bodyText).toBeTruthy();
@@ -38,7 +38,7 @@ test.describe("Responsive Viewports", () => {
 
     // Mobile
     await page.setViewportSize({ width: 375, height: 667 });
-    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+    await page.goto("/sign-up", { waitUntil: "domcontentloaded" });
 
     const mobileBody = await page.locator("body").textContent();
     expect(mobileBody).toBeTruthy();

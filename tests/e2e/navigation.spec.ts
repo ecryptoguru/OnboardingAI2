@@ -5,9 +5,8 @@ test.use({ storageState: { cookies: [], origins: [] } });
 test.describe("Sidebar Navigation", () => {
   test("Unauthenticated users see sign-in when accessing dashboard", async ({ page }) => {
     await page.goto("/dashboard", { waitUntil: "domcontentloaded", timeout: 60000 });
-    // Network idle skipped — Convex WebSocket keeps connection alive
-
-    // Should redirect to sign-in page
+    // Wait for client-side AuthGuard redirect
+    await page.waitForURL(/.*sign-in.*/, { timeout: 15000 });
     await expect(page).toHaveURL(/.*sign-in.*/);
     await expect(page.locator("h1")).toContainText("Fretbox Outreach AI");
   });

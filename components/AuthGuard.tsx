@@ -1,16 +1,18 @@
 "use client";
 
 import { useConvexAuth } from "convex/react";
+import { useRouter } from "next/navigation";
 import { useEffect } from "react";
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const { isLoading, isAuthenticated } = useConvexAuth();
+  const router = useRouter();
 
   useEffect(() => {
     if (!isLoading && !isAuthenticated) {
-      window.location.href = "/sign-in";
+      router.replace("/sign-in");
     }
-  }, [isLoading, isAuthenticated]);
+  }, [isLoading, isAuthenticated, router]);
 
   if (isLoading) {
     return (
