@@ -1,35 +1,41 @@
-import {
-  convexAuthNextjsMiddleware,
-  createRouteMatcher,
-  nextjsMiddlewareRedirect,
-} from "@convex-dev/auth/nextjs/server";
+import { NextResponse, type NextRequest } from "next/server";
 
-const isSignInPage = createRouteMatcher([
-  "/sign-in",
-  "/sign-up",
-  "/forgot-password",
-  "/reset-password",
-]);
-const isProtectedRoute = createRouteMatcher(["/dashboard(.*)"]);
+export function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
 
-const convexUrl =
-  process.env.NEXT_PUBLIC_CONVEX_URL ||
-  "https://energetic-raven-535.convex.cloud";
+  const hasAuthToken =
+    request.cookies.has("__convexAuthJWT") ||
+    request.cookies.has("__Host-__convexAuthJWT") ||
+    request.cookies.has("__convexAuthRefreshToken") ||
+    request.cookies.has("__Host-__convexAuthRefreshToken");
 
-export default convexAuthNextjsMiddleware(
-  async (request, { convexAuth }) => {
-    if (isSignInPage(request) && (await convexAuth.isAuthenticated())) {
-      return nextjsMiddlewareRedirect(request, "/dashboard");
-    }
-    if (isProtectedRoute(request) && !(await convexAuth.isAuthenticated())) {
-      return nextjsMiddlewareRedirect(request, "/sign-in");
-    }
-  },
-  {
-    convexUrl,
-  },
-);
+  const isAuthPage =
+    pathname === "/sign-in" ||
+    pathname === "/sign-up" ||
+    pathname === "/forgot-password" ||
+    pathname === "/reset-password";
+
+  const isProtectedRoute = pathname.startsWith("/dashboard");
+
+  if (isAuthPage && hasAuthToken) {
+    return NextResponse.redirect(new URL("/dashboard", request.url));
+  }
+
+  if (isProtectedRoute && !hasAuthToken) {
+    return NextResponse.redirect(new URL("/sign-in", request.url));
+  }
+
+  return NextResponse.next();
+}
+
+export default middleware;
 
 export const config = {
-  matcher: ["/((?!.*\\..*|_next).*)", "/", "/(api|trpc)(.*)"],
+  matcher: [
+    "/dashboard/:path*",
+    "/sign-in",
+    "/sign-up",
+    "/forgot-password",
+    "/reset-password",
+  ],
 };
