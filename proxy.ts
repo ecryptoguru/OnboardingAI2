@@ -12,6 +12,10 @@ const isSignInPage = createRouteMatcher([
 ]);
 const isProtectedRoute = createRouteMatcher(["/dashboard(.*)"]);
 
+const convexUrl =
+  process.env.NEXT_PUBLIC_CONVEX_URL ||
+  "https://energetic-raven-535.convex.cloud";
+
 export default convexAuthNextjsMiddleware(
   async (request, { convexAuth }) => {
     if (isSignInPage(request) && (await convexAuth.isAuthenticated())) {
@@ -22,7 +26,7 @@ export default convexAuthNextjsMiddleware(
     }
   },
   {
-    convexUrl: process.env.NEXT_PUBLIC_CONVEX_URL!,
+    convexUrl,
   },
 );
 
