@@ -198,6 +198,69 @@ export const deleteByTypeInternal = internalMutation({
   },
 });
 
+/**
+ * Delete-and-insert for one university's signals in a SINGLE transaction.
+ * The previous two-step (deleteByTypeInternal then batchInsertInternal) could
+ * permanently lose existing signals if the insert failed after the delete
+ * committed; this atomic version avoids that window.
+ */
+export const replaceSignalsInternal = internalMutation({
+  args: {
+    university_id: v.id("universities"),
+    signal_types: v.array(
+      v.union(
+        v.literal("news"),
+        v.literal("linkedin"),
+        v.literal("website"),
+        v.literal("manual"),
+        v.literal("image"),
+      ),
+    ),
+    signals: v.array(
+      v.object({
+        university_id: v.id("universities"),
+        signal_type: v.union(
+          v.literal("news"),
+          v.literal("linkedin"),
+          v.literal("website"),
+          v.literal("manual"),
+          v.literal("image"),
+        ),
+        content: v.string(),
+        source_url: v.optional(v.string()),
+        embedding: v.array(v.float64()),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    const existingSignals = await ctx.db
+      .query("universitySignals")
+      .withIndex("by_university", (q) =>
+        q.eq("university_id", args.university_id),
+      )
+      .collect();
+
+    for (const signal of existingSignals) {
+      if (
+        args.signal_types.includes(
+          signal.signal_type as (typeof args.signal_types)[number],
+        )
+      ) {
+        await ctx.db.delete(signal._id);
+      }
+    }
+
+    const now = Date.now();
+    for (const s of args.signals) {
+      await ctx.db.insert("universitySignals", {
+        ...s,
+        created_at: now,
+      });
+    }
+    return args.signals.length;
+  },
+});
+
 // ─── Migration helpers ────────────────────────────────────────────────────────
 
 /** Returns all signals (id + content only) — used by the embedding migration action. */

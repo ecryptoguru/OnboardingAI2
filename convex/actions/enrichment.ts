@@ -728,19 +728,17 @@ export const discoverSocialAndMedia = internalAction({
       // Image search removed: low value for outreach and costs a Serper query.
       // Logo/campus images can be fetched directly from the website (free).
 
-      // 4. Batch Insert Signals
+      // 4. Batch Insert Signals (atomic delete+insert so a mid-failure can
+      // never wipe the university's existing signals).
       if (allSignals.length > 0) {
         // Wipe old signals only for the types we actually rebuilt this run,
         // so a cooldown skip doesn't delete existing news/image signals.
         const typesToDelete = [
           ...new Set(allSignals.map((s) => s.signal_type)),
         ] as ("news" | "image" | "linkedin" | "website" | "manual")[];
-        await ctx.runMutation(internal.signals.deleteByTypeInternal, {
+        await ctx.runMutation(internal.signals.replaceSignalsInternal, {
           university_id: args.universityId,
           signal_types: typesToDelete,
-        });
-
-        await ctx.runMutation(internal.signals.batchInsertInternal, {
           signals: allSignals,
         });
         signalsAdded = allSignals.length;

@@ -2,6 +2,7 @@
 
 import { useAuthActions } from "@convex-dev/auth/react";
 import { RedirectIfAuthenticated } from "@/components/RedirectIfAuthenticated";
+import { getAuthErrorMessage, withTimeout } from "../authSubmit";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -19,22 +20,22 @@ export default function SignInPage() {
     const emailValue = (formData.get("email") as string).trim().toLowerCase();
 
     try {
-      await signIn("password", {
-        email: emailValue,
-        password: formData.get("password") as string,
-        flow: formData.get("flow") as string,
-      });
-      window.location.href = "/dashboard";
+      const result = await withTimeout(
+        signIn("password", {
+          email: emailValue,
+          password: formData.get("password") as string,
+          flow: formData.get("flow") as string,
+        }),
+      );
+      if (result.signingIn) {
+        window.location.href = "/dashboard";
+        return;
+      }
+      setError("Sign-in did not complete. Please try again.");
     } catch (err: unknown) {
       console.error(err);
-      const message = (err as Error).message || "";
-      if (message.includes("Server Error")) {
-        setError("Incorrect email or password. Please try again.");
-      } else if (message.toLowerCase().includes("invalidsecret") || message.toLowerCase().includes("password")) {
-        setError("Incorrect password. Please try again.");
-      } else {
-        setError("Invalid email or password.");
-      }
+      setError(getAuthErrorMessage(err, "signIn"));
+    } finally {
       setLoading(false);
     }
   };

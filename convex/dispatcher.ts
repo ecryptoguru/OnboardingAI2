@@ -1,10 +1,12 @@
 import { mutation } from "./_generated/server";
 import { v } from "convex/values";
-import { validateAuth } from "./lib/auth_utils";
+import { validateAdmin, validateAuth } from "./lib/auth_utils";
 import {
   scheduleWebsiteValidation,
   WEBSITE_STATUSES,
 } from "./dispatcherInternal";
+
+const MAX_DISPATCH_LIMIT = 100;
 
 export const dispatchWebsiteValidation = mutation({
   args: {
@@ -18,6 +20,10 @@ export const dispatchWebsiteValidation = mutation({
   },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
-    return await scheduleWebsiteValidation(ctx, args);
+    await validateAdmin(ctx);
+    // Cap the batch server-side so a single call can't sweep the whole DB
+    // and schedule unbounded external fetches.
+    const limit = Math.min(Math.max(1, Math.floor(args.limit ?? 20)), MAX_DISPATCH_LIMIT);
+    return await scheduleWebsiteValidation(ctx, { ...args, limit });
   },
 });

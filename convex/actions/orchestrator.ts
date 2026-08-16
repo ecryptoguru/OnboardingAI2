@@ -4,7 +4,7 @@ import { action, internalAction } from "../_generated/server";
 import { internal } from "../_generated/api";
 import { v } from "convex/values";
 import type { Doc, Id } from "../_generated/dataModel";
-import { validateAuth } from "../lib/auth_utils";
+import { validateAdmin, validateAuth } from "../lib/auth_utils";
 import { isSuspiciousWebsite } from "../lib/discoveryCandidates";
 import { LlmUsageEntry, LlmUsageSummary, summarizeLlmUsage } from "../lib/llm";
 import * as Sentry from "@sentry/node";
@@ -281,6 +281,7 @@ export const runEnrichmentChainInternal = internalAction({
       // finishEnrichmentChainInternal (phases 5-6 + queue chaining) on
       // completion.
       await trackProgress("phase-4-deep-enrichment");
+      let deepScheduled = false;
       try {
         if (websiteReady) {
           console.log(
@@ -298,9 +299,31 @@ export const runEnrichmentChainInternal = internalAction({
               serperUsedBefore: serperQueriesUsed,
             },
           );
+          deepScheduled = true;
         }
       } catch (e) {
         console.error("[Orchestrator] Deep Enrichment scheduling failed", e);
+      }
+
+      // Deep (when scheduled) owns phases 5-6 + queue chaining via
+      // finishEnrichmentChainInternal. If it was never scheduled (no trusted
+      // website, or scheduling failed), run the remainder ourselves so the
+      // university is never left stuck in "enriching" and the batch queue
+      // never stalls.
+      if (!deepScheduled) {
+        console.warn(
+          `[Orchestrator] Deep enrichment not scheduled for ${university.university_name}; running finish phase directly.`,
+        );
+        await ctx.scheduler.runAfter(
+          0,
+          internal.actions.orchestrator.finishEnrichmentChainInternal,
+          {
+            universityId: args.universityId,
+            queue: args.queue ?? [],
+            serperUsedBefore: serperQueriesUsed,
+            deepSuccess: false,
+          },
+        );
       }
 
       await trackProgress("phase-4-deep-enrichment", "completed");
@@ -589,6 +612,28 @@ export const runEnrichmentChain = action({
     message?: string;
   }> => {
     await validateAuth(ctx);
+    await validateAdmin(ctx);
+
+    // In-flight guard: don't start a second paid chain for the same
+    // university. A run is considered "stuck" (and re-triggerable) once it
+    // has been running for more than 30 minutes.
+    const existing = await ctx.runQuery(internal.universities.getInternal, {
+      universityId: args.universityId,
+    });
+    if (!existing) {
+      return { success: false, enqueued: false, error: "University not found" };
+    }
+    const startedAt = existing.enrichment_started_at ?? 0;
+    const isRunning =
+      existing.enrichment_status === "running" ||
+      existing.outreach_stage === "enriching";
+    if (isRunning && Date.now() - startedAt < 30 * 60 * 1000) {
+      return {
+        success: false,
+        enqueued: false,
+        message: "Enrichment is already running for this university.",
+      };
+    }
 
     // Mark the university as actively enriching so the UI can show live progress.
     await ctx.runMutation(internal.universities.updateOutreachStageInternal, {

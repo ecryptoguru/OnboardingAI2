@@ -6,7 +6,7 @@ import {
 } from "./_generated/server";
 import { v } from "convex/values";
 import { Doc } from "./_generated/dataModel";
-import { validateAuth } from "./lib/auth_utils";
+import { validateAdmin, validateAuth } from "./lib/auth_utils";
 import {
   canonicalizeInstitutionEmail,
   choosePreferredRoleEmail,
@@ -1103,6 +1103,7 @@ export const cleanupLegacyStakeholders = mutation({
   },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
+    await validateAdmin(ctx);
     const dryRun = args.dry_run ?? true;
     const badSources = (args.bad_sources ?? ["scraper", "Scribd"]).map((s) =>
       s.toLowerCase(),
@@ -1162,6 +1163,7 @@ export const purgeTestStakeholders = mutation({
   args: {},
   handler: async (ctx) => {
     await validateAuth(ctx);
+    await validateAdmin(ctx);
     const all = await ctx.db.query("stakeholders").collect();
     const toDelete = all.filter((s) => {
       const email = (s.email ?? "").toLowerCase();

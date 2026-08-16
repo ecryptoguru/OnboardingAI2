@@ -29,14 +29,13 @@ test.describe("Sidebar Navigation", () => {
     ];
 
     for (const path of paths) {
-      await page.goto(path);
-      // Network idle skipped — Convex WebSocket keeps connection alive
+      await page.goto(path, { waitUntil: "domcontentloaded" });
+      // The client-side AuthGuard must redirect every protected route to
+      // sign-in for unauthenticated users.
+      await page.waitForURL(/.*sign-in.*/, { timeout: 15000 });
+      expect(page.url()).toMatch(/.*sign-in.*/);
 
-      // Should end up at sign-in (redirect) or the page itself (if auth bypass)
-      const url = page.url();
-      expect(url.includes("/sign-in") || url.includes(path)).toBe(true);
-
-      // Should never be a 500
+      // The sign-in page should render real content (not a 500 or a stuck spinner)
       const bodyText = await page.locator("body").textContent();
       expect(bodyText).toBeTruthy();
       expect(bodyText!.length).toBeGreaterThan(50);

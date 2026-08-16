@@ -444,6 +444,48 @@ export function sanitizeLlmOutput(text: string): string {
   return cleaned;
 }
 
+/**
+ * Parse an LLM response as JSON, tolerating markdown code fences and
+ * leading/trailing prose that some models emit even with
+ * responseMimeType: "application/json". Tries, in order: raw parse,
+ * fence-stripped parse, then substring extraction of the first balanced
+ * JSON object/array.
+ */
+export function parseJsonResponse<T>(raw: string, label = "LLM output"): T {
+  const tryParse = (s: string): T | null => {
+    try {
+      return JSON.parse(s) as T;
+    } catch {
+      return null;
+    }
+  };
+
+  const text = raw.trim();
+  const direct = tryParse(text);
+  if (direct !== null) return direct;
+
+  // Strip ```json ... ``` fences
+  const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fenced) {
+    const inner = tryParse(fenced[1].trim());
+    if (inner !== null) return inner;
+  }
+
+  // Extract from the first `{` / `[` to the last matching `}` / `]`
+  const openIdx = text.search(/[[{]/);
+  if (openIdx !== -1) {
+    const open = text[openIdx];
+    const close = open === "{" ? "}" : "]";
+    const closeIdx = text.lastIndexOf(close);
+    if (closeIdx > openIdx) {
+      const sliced = tryParse(text.slice(openIdx, closeIdx + 1));
+      if (sliced !== null) return sliced;
+    }
+  }
+
+  throw new Error(`${label} is not valid JSON: ${text.slice(0, 200)}`);
+}
+
 export function validateJsonOutput<T extends Record<string, unknown>>(
   parsed: unknown,
   requiredFields: (keyof T)[],

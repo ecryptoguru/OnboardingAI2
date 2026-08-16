@@ -69,6 +69,7 @@ export const checkRateLimit = action({
     ctx,
     args,
   ): Promise<{ allowed: boolean; remaining: number; retryAfter?: number }> => {
+    await validateAuth(ctx);
     const now = Date.now();
     const record = await ctx.runQuery(internal.rateLimits.getByKey, {
       key: args.key,

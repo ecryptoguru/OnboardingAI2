@@ -16,6 +16,7 @@ export interface StakeholderLike {
   name?: string | null;
   role?: string | null;
   email?: string | null;
+  email_source?: string | null;
   phone?: string | null;
   phone_source?: string | null;
   linkedin_url?: string | null;

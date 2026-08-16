@@ -207,7 +207,7 @@ export const updateStatus = mutation({
     if (!email) throw new Error("Email not found");
     const userId = await getCurrentUserId(ctx);
     const admin = await isAdmin(ctx);
-    if (!admin && email.owner_id && email.owner_id !== userId) {
+    if (!admin && (email.owner_id === undefined || email.owner_id !== userId)) {
       throw new Error("Forbidden: Not your email");
     }
     await ctx.db.patch(id, fields);
@@ -237,7 +237,7 @@ export const updateStatusByZeptomailId = mutation({
     if (!email) return;
     const userId = await getCurrentUserId(ctx);
     const admin = await isAdmin(ctx);
-    if (!admin && email.owner_id && email.owner_id !== userId) {
+    if (!admin && (email.owner_id === undefined || email.owner_id !== userId)) {
       throw new Error("Forbidden: Not your email");
     }
     await ctx.db.patch(email._id, {
@@ -453,7 +453,7 @@ export const updateDraft = mutation({
     if (!email) throw new Error("Email not found");
     const userId = await getCurrentUserId(ctx);
     const admin = await isAdmin(ctx);
-    if (!admin && email.owner_id && email.owner_id !== userId) {
+    if (!admin && (email.owner_id === undefined || email.owner_id !== userId)) {
       throw new Error("Forbidden: Not your draft");
     }
     if (email.status !== "pending_approval") {
@@ -474,7 +474,7 @@ export const rejectDraft = mutation({
 
     const userId = await getCurrentUserId(ctx);
     const admin = await isAdmin(ctx);
-    if (!admin && email.owner_id && email.owner_id !== userId) {
+    if (!admin && (email.owner_id === undefined || email.owner_id !== userId)) {
       throw new Error("Forbidden: Not your draft");
     }
 

@@ -47,3 +47,5 @@ test-results/
 
 .playwright-mcp/
 scripts/
+.vercel
+.env*

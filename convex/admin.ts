@@ -1,6 +1,40 @@
-import { mutation } from "./_generated/server";
+import { mutation, internalMutation } from "./_generated/server";
 import { v } from "convex/values";
 import { validateAdmin } from "./lib/auth_utils";
+
+/**
+ * Ops: force-logout all users by clearing the authSessions table.
+ * Use after a JWT key rotation or auth-library upgrade that invalidates
+ * stored refresh tokens (symptom: "Can't parse refresh token" on sign-in
+ * or password reset). Users simply sign in again.
+ * Run via: npx convex run 'admin:clearAllAuthSessions'
+ */
+export const clearAllAuthSessions = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const sessions = await ctx.db.query("authSessions").collect();
+    for (const s of sessions) {
+      await ctx.db.delete(s._id);
+    }
+    return { sessionsDeleted: sessions.length };
+  },
+});
+
+/**
+ * Ops: purge stale password-reset verification codes.
+ * Safe to run anytime; expired codes are ignored by the auth library anyway.
+ * Run via: npx convex run 'admin:clearAuthVerificationCodes'
+ */
+export const clearAuthVerificationCodes = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const codes = await ctx.db.query("authVerificationCodes").collect();
+    for (const c of codes) {
+      await ctx.db.delete(c._id);
+    }
+    return { codesDeleted: codes.length };
+  },
+});
 
 export const resetUniversityEnrichment = mutation({
   args: { nameKeyword: v.string() },

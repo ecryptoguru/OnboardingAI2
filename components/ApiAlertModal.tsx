@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../convex/_generated/api";
 import { ExclamationTriangleIcon, XMarkIcon } from "@heroicons/react/24/outline";
+import { selectVisibleAlert } from "./apiAlertSelection";
 
 const API_LABELS: Record<string, string> = {
   gemini: "Gemini",
@@ -20,13 +21,41 @@ const API_LABELS: Record<string, string> = {
 export function ApiAlertModal() {
   const alerts = useQuery(api.apiAlerts.list);
   const acknowledge = useMutation(api.apiAlerts.acknowledge);
-  const [sessionDismissed, setSessionDismissed] = useState<string | null>(null);
-
-  const unacked = (alerts ?? []).filter(
-    (a) => a.acknowledged_at === undefined,
+  // Track every alert dismissed for this session so a NEW alert can still
+  // surface while previously dismissed ones stay hidden until acknowledged
+  // elsewhere or the page reloads.
+  const [sessionDismissed, setSessionDismissed] = useState<Set<string>>(
+    () => new Set(),
   );
-  const alert =
-    unacked.find((a) => a._id !== sessionDismissed) ?? null;
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  const dismissForSession = useCallback((id: string) => {
+    setSessionDismissed((prev) => {
+      const next = new Set(prev);
+      next.add(id);
+      return next;
+    });
+  }, []);
+
+  const alert = selectVisibleAlert(alerts, sessionDismissed);
+  const alertId = alert?._id ?? null;
+
+  useEffect(() => {
+    if (alertId) {
+      dialogRef.current?.focus();
+    }
+  }, [alertId]);
+
+  useEffect(() => {
+    if (!alertId) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        dismissForSession(alertId);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [alertId, dismissForSession]);
 
   if (!alert) return null;
 
@@ -34,18 +63,25 @@ export function ApiAlertModal() {
 
   return (
     <div className="fixed inset-0 z-[110] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
-      <div className="bg-card border border-red-500/30 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="api-alert-title"
+        tabIndex={-1}
+        className="bg-card border border-red-500/30 rounded-2xl shadow-2xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in-95 duration-200 outline-none"
+      >
         <div className="flex justify-between items-center p-5 border-b border-card-border/60">
           <div className="flex items-center space-x-2">
             <div className="p-2 bg-red-500/10 rounded-xl">
               <ExclamationTriangleIcon className="w-5 h-5 text-red-500" />
             </div>
-            <h3 className="font-semibold text-lg text-foreground tracking-tight">
+            <h3 id="api-alert-title" className="font-semibold text-lg text-foreground tracking-tight">
               {apiLabel} Provider Issue
             </h3>
           </div>
           <button
-            onClick={() => setSessionDismissed(alert._id)}
+            onClick={() => dismissForSession(alert._id)}
             className="text-muted-foreground hover:text-foreground transition-colors p-1"
             aria-label="Dismiss for this session"
           >
@@ -68,7 +104,7 @@ export function ApiAlertModal() {
           </p>
           <div className="flex justify-end gap-3 mt-2">
             <button
-              onClick={() => setSessionDismissed(alert._id)}
+              onClick={() => dismissForSession(alert._id)}
               className="px-4 py-2.5 text-sm font-medium text-muted-foreground bg-muted hover:bg-zinc-700/50 rounded-xl transition-colors"
             >
               Dismiss

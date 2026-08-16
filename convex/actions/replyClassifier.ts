@@ -9,7 +9,7 @@ import {
   REPLY_CLASSIFIER_SYSTEM_PROMPT,
   REPLY_CLASSIFIER_SCHEMA,
 } from "../lib/prompts";
-import { sanitizeLlmInput } from "../lib/utils";
+import { parseJsonResponse, sanitizeLlmInput } from "../lib/utils";
 import * as Sentry from "@sentry/node";
 
 /**
@@ -48,7 +48,7 @@ export const classifyReplyInternal = internalAction({
         systemPrompt,
         userPrompt: userMessage,
         temperature: TEMP.deterministic,
-        maxOutputTokens: 32, // classification needs only a few tokens
+        maxOutputTokens: 64, // classification needs only a few tokens
         responseAsJson: true,
         responseSchema: REPLY_CLASSIFIER_SCHEMA,
         ctx,
@@ -57,7 +57,10 @@ export const classifyReplyInternal = internalAction({
       const latencyMs = Date.now() - startMs;
       console.log(`[ReplyClassifier] Flash-Lite latency: ${latencyMs}ms`);
 
-      const classificationData = JSON.parse(response);
+      const classificationData = parseJsonResponse<{
+        category?: string;
+        confidence?: number;
+      }>(response, "Reply classification");
       const rawConfidence =
         typeof classificationData.confidence === "number"
           ? classificationData.confidence
@@ -85,17 +88,25 @@ export const classifyReplyInternal = internalAction({
         result = "other";
         confidence = 0.5; // Low confidence when we had to fall back
       }
+      const category = result as
+        | "meeting_request"
+        | "positive_interest"
+        | "request_info"
+        | "not_interested"
+        | "opt_out"
+        | "out_of_office"
+        | "other";
 
       // 2. Update classification in database
       await ctx.runMutation(internal.replies.classify, {
         id: args.replyId,
-        classification: result,
+        classification: category,
         confidence, // computed above — not a stub
       });
 
       // 3. Trigger Auto-Reply if applicable (enabled by default)
       // HITL GATE: Low-confidence high-stakes classifications require human review.
-      const isHighStakes = result === "meeting_request" || result === "positive_interest";
+      const isHighStakes = category === "meeting_request" || category === "positive_interest";
       const hasLowConfidence = confidence < 0.85;
       const shouldTriggerAutoReply = args.triggerAutoReply !== false && !(isHighStakes && hasLowConfidence);
 

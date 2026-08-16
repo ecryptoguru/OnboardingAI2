@@ -4,6 +4,7 @@ import { extractText, extractTextItems } from "unpdf";
 
 import { normalizeIndianPhone, withRetry } from "./utils";
 import { normalizeRoleText, normalizeStakeholderRole } from "./roleRegistry";
+import { assertPublicTarget } from "./urlSafetyNode";
 
 // ─── Firecrawl API Client ──────────────────────────────────────────────────
 // Provides synchronous Map (sitemap discovery) and Scrape (single-page) calls.
@@ -14,6 +15,8 @@ const FIRECRAWL_BASE = "https://api.firecrawl.dev/v2";
 export interface FirecrawlMapResult {
   success: boolean;
   links: { url: string; title?: string; description?: string }[];
+  /** Number of HTTP attempts actually made (each attempt consumes a credit). */
+  attempts?: number;
 }
 
 export interface FirecrawlScrapeResult {
@@ -23,6 +26,8 @@ export interface FirecrawlScrapeResult {
     title?: string;
     metadata?: Record<string, unknown>;
   };
+  /** Number of HTTP attempts actually made (each attempt consumes a credit). */
+  attempts?: number;
 }
 
 function firecrawlRetryAfterMs(res: Response): number | null {
@@ -49,9 +54,13 @@ export async function firecrawlMap(
   apiKey: string,
   limit = 5000,
   maxAttempts = 2,
+  onAttempt?: (attempt: number) => void,
 ): Promise<FirecrawlMapResult> {
   let lastText = "";
+  let attempts = 0;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    attempts = attempt;
+    onAttempt?.(attempt);
     const res = await fetch(`${FIRECRAWL_BASE}/map`, {
       method: "POST",
       headers: {
@@ -72,8 +81,9 @@ export async function firecrawlMap(
     });
 
     if (res.ok) {
-      const json = await res.json();
-      return json as FirecrawlMapResult;
+      const json = (await res.json()) as FirecrawlMapResult;
+      json.attempts = attempts;
+      return json;
     }
 
     lastText = await res.text();
@@ -104,9 +114,13 @@ export async function firecrawlScrape(
   url: string,
   apiKey: string,
   maxAttempts = 4,
+  onAttempt?: (attempt: number) => void,
 ): Promise<FirecrawlScrapeResult> {
   let lastText = "";
+  let attempts = 0;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    attempts = attempt;
+    onAttempt?.(attempt);
     const res = await fetch(`${FIRECRAWL_BASE}/scrape`, {
       method: "POST",
       headers: {
@@ -122,8 +136,9 @@ export async function firecrawlScrape(
     });
 
     if (res.ok) {
-      const json = await res.json();
-      return json as FirecrawlScrapeResult;
+      const json = (await res.json()) as FirecrawlScrapeResult;
+      json.attempts = attempts;
+      return json;
     }
 
     lastText = await res.text();
@@ -265,6 +280,9 @@ export function filterPdfUrls(
  * Centralises fetch logic so extractPdfText + extractPdfTables can share one download.
  */
 export async function downloadPdfBuffer(url: string): Promise<Buffer> {
+  // SSRF guard: only fetch public http(s) targets (DNS rebinding defense).
+  // Runs before the retry loop so unsafe URLs fail fast without retries.
+  await assertPublicTarget(url);
   return withRetry(
     async () => {
       const response = await fetch(url, { signal: AbortSignal.timeout(15000) });

@@ -38,20 +38,18 @@ test.describe("Approvals Page E2E", () => {
 
   test("Approvals page has expected UI elements", async ({ page }) => {
     await page.goto("/dashboard/approvals", { waitUntil: "domcontentloaded", timeout: 60000 });
-    // Network idle skipped — Convex WebSocket keeps connection alive
+    // Client-side AuthGuard redirects unauthenticated users to sign-in;
+    // wait for the redirect so we don't snapshot the loading spinner.
+    await page.waitForURL(/.*sign-in.*/, { timeout: 15000 });
 
     // Body should render real content (not blank 404 or auth spinner forever)
     const bodyText = await page.locator("body").textContent();
     expect(bodyText).toBeTruthy();
     expect(bodyText!.length).toBeGreaterThan(50);
 
-    // Should contain at least one of the known approval page phrases
-    // (exact text depends on auth state, but we look for structural hints)
+    // Unauthenticated session should land on the sign-in page.
     const hasApprovalContent =
-      bodyText!.includes("Pending") ||
-      bodyText!.includes("Approval") ||
-      bodyText!.includes("Sign in") ||
-      bodyText!.includes("Dashboard");
+      bodyText!.includes("Sign in") || bodyText!.includes("Fretbox Outreach AI");
 
     expect(hasApprovalContent).toBe(true);
   });

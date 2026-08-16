@@ -8,7 +8,7 @@ This document is the central reference for navigating the `fretbox-outreach-v2` 
 
 ## Tech Stack
 
-- **Framework:** Next.js 16.3.1 (Webpack-pinned via `--webpack`), React 19, App Router. `middleware.ts` renamed to `proxy.ts` per Next.js 16 migration.
+- **Framework:** Next.js 16.3.1 (Webpack-pinned via `--webpack`), React 19, App Router. The legacy `middleware.ts` / `proxy.ts` edge middleware was removed; dashboard auth protection is now client-side via `components/AuthGuard.tsx`.
 - **Backend & Database:** Convex `^1.42.1` (serverless queries/mutations/actions, real-time DB, HTTP actions, crons, vector search, scheduler)
 - **Auth:** `@convex-dev/auth` `^0.0.95` with Password provider and password-reset email config; `@auth/core` `^0.41.3`
 - **Styling:** Tailwind CSS `^3.4.1`, glassmorphism / flat design system in `design-system/onboardingai/MASTER.md`
@@ -42,7 +42,7 @@ Next.js 15 App Router frontend.
   - `forgot-password/page.tsx`: Requests a password reset code via `signIn("password", { flow: "reset" })`
   - `reset-password/page.tsx`: Code + new password entry via `signIn("password", { flow: "reset-verification" })`, pre-fills email from query params
 - `/(dashboard)/`
-  - `layout.tsx`: Dashboard shell with `<Sidebar />`, glassmorphism styling, theme support
+  - `layout.tsx`: Dashboard shell wrapping children in `<AuthGuard>`, `<Sidebar />`, glassmorphism styling, theme support, and `<ApiAlertModal />`
   - `dashboard/page.tsx`: Universities list & detail view with filters, search, CSV upload, and the `Sync IITs / NITs / IIITs` button (`<SyncIniButton />`)
   - `dashboard/enrichment/page.tsx`: Signal enrichment & scoring overview
   - `dashboard/analytics/page.tsx`: Pipeline analytics & KPIs
@@ -57,7 +57,7 @@ Next.js 15 App Router frontend.
 - `not-found.tsx`: Global 404 page
 - `globals.css`: Global styles, Tailwind directives, glassmorphism CSS variables, blue brand scale
 - `layout.tsx`: Root layout with `ConvexClientProvider`, `ThemeProvider`, Sentry instrumentation
-- `page.tsx`: Marketing / landing page
+- `page.tsx`: Marketing / landing page. Renders instantly without a blocking loading spinner. Uses `<RedirectIfAuthenticated />` to redirect authenticated users to `/dashboard`.
 - `global-error.tsx`: Global error boundary
 
 ### `/convex`
@@ -76,7 +76,7 @@ The entire backend ecosystem (queries, mutations, actions, HTTP routes, crons).
   - `apiAlerts.ts`: Provider quota/error alert store. `recordInternal` (internalMutation) deduplicates identical unacknowledged alerts for 6 hours. `list` / `acknowledge` / `acknowledgeAll` are public + `validateAuth`-gated. Surfaced in the frontend by `components/ApiAlertModal.tsx`.
   - `settings.ts`: System settings key-value store. API keys are stored in the `systemSettings` table with XOR obfuscation (`SETTINGS_OBFUSCATION_SECRET`). Provides `getObfuscationSecretStatus`, status queries, set/remove mutations, test actions, and internal getters with env fallbacks.
   - `rateLimits.ts`: Distributed persistent rate limiter used by external API calls and email dispatch
-  - `admin.ts`: Admin operations (e.g., `resetUniversityEnrichment`)
+  - `admin.ts`: Admin operations (`resetUniversityEnrichment` — admin-gated) + CLI ops `clearAllAuthSessions` and `clearAuthVerificationCodes` (internalMutation — force-logout all users / purge stale reset codes after a JWT key rotation; run via `npx convex run 'admin:<name>'`)
   - `users.ts`: Basic user listing/count queries
   - `dbReset.ts`: Database reset utilities
   - `wipeAllData.ts`: Danger-zone wipe helpers (`wipeEverything`, `wipeUniversityInternal`)
@@ -144,7 +144,7 @@ Shared backend utilities:
 - `universityUtils.ts`: `namesMatch()` — normalized fuzzy name matcher for university deduplication, with stop-word, acronym, and campus/branch filtering.
 - `institutesOfNationalImportance.ts`: Curated 80-record list of IITs/NITs/IIITs used by `actions/iniSeed.ts`.
 - `auth_utils.ts`: `validateAuth` and admin helpers.
-- `utils.ts`: Shared utilities — `withRetry`, `withConcurrencyLimit`, `truncateAtNewline`, `sanitizeLlmInput`, `sanitizeLlmOutput`, `validateJsonOutput`, phone helpers.
+- `utils.ts`: Shared utilities — `withRetry`, `withConcurrencyLimit`, `truncateAtNewline`, `sanitizeLlmInput`, `sanitizeLlmOutput`, `validateJsonOutput`, `parseJsonResponse` (robust LLM-JSON parsing: raw → fence-stripped → balanced-extraction), phone helpers.
 - `async.ts`: `raceWithTimeout` helper. **Must NEVER wrap `ctx.runAction(...)`**.
 - `contactInference.ts`: Role-based institutional email inference and canonical singleton roles.
 - `discoveryCandidates.ts`: Website discovery candidate ranking.
@@ -162,7 +162,8 @@ Shared React UI components:
 
 - `ApiKeyModal.tsx`: API key input modal
 - `ApiAlertModal.tsx`: Global modal surfaced when a provider (Gemini / Firecrawl / Serper) hits quota exhaustion or an error during any background activity. Subscribes to `api.apiAlerts.list`, shows the latest unacknowledged alert, and offers Dismiss (session-only) / Got-it (persists `acknowledged_at`). Mounted in `app/(dashboard)/layout.tsx`.
-- `ConvexClientProvider.tsx`: Convex client context provider
+- `AuthGuard.tsx`: Client-side auth guard. Uses `useConvexAuth` + `next/navigation` `useRouter` to redirect unauthenticated users to `/sign-in`. Shows a loading spinner while auth state resolves. Wraps the dashboard layout. Replaces the deleted edge middleware (`proxy.ts`).
+- `ConvexClientProvider.tsx`: Convex client context provider. Falls back to the production Convex URL (`https://energetic-raven-535.convex.cloud`) when `NEXT_PUBLIC_CONVEX_URL` is not set, so the app works on any host without extra env configuration.
 - `DocumentMailerModal.tsx`: Upload a `.docx`, optionally attach extra files, choose a stakeholder or custom email per university, and draft to the HITL queue.
 - `Sidebar.tsx`: Dashboard navigation sidebar with badge counts (approvals + unclassified replies)
 - `ErrorBoundary.tsx`: React error boundary
@@ -176,7 +177,7 @@ Shared React UI components:
 
 ### `/tests`
 
-- `e2e/`: Playwright E2E specs (22 files, baseURL `http://localhost:3000`). Includes `approvals`, `auth`, `dashboard`, `enrichment`, `landing`, `navigation`, `proposals`, `settings`, `responsive`, `smoke`, `thorough`, and authenticated workflows.
+- `e2e/`: Playwright E2E specs (22 files, baseURL `http://localhost:3000`). Includes `approvals`, `auth`, `dashboard`, `enrichment`, `landing`, `navigation`, `proposals`, `settings`, `responsive`, `smoke`, `thorough`, and authenticated workflows. Navigation tests wait for client-side `AuthGuard` redirect (`waitForURL`). Responsive tests target the landing page and auth pages (not the dashboard, which requires authentication).
 - `unit/`: 39+ hermetic unit test files (~496 tests, no API keys required) covering:
   - Admin auth, anti-ragging persistence
   - `async.test.ts` — `raceWithTimeout`, `serperBudget` caps
@@ -227,14 +228,14 @@ Shared React UI components:
 
 ### Root Config & Scripts
 
-- `proxy.ts`: Next.js 16 middleware (renamed from `middleware.ts` per the Next.js 16 migration guide) — protects `/dashboard` routes and redirects authenticated users away from `/sign-in` / `/sign-up`. `/forgot-password` and `/reset-password` are public.
-- `next.config.ts`: Next.js 16 configuration. The obsolete `eslint` config property was removed (lint is enforced via the npm script). Custom webpack config is preserved; `dev` and `build` scripts pass `--webpack` to avoid Turbopack.
+- `next.config.ts`: Next.js 16 configuration. The obsolete `eslint` config property was removed (lint is enforced via the npm script). Custom webpack config is preserved for production builds (`npm run build` passes `--webpack`); `next dev` runs on Turbopack. The legacy `middleware.ts` / `proxy.ts` edge middleware was removed; auth protection is now client-side via `AuthGuard`.
 - `tailwind.config.ts`: Tailwind theme config (blue brand scale; banned violet references removed)
 - `playwright.config.ts`: Playwright E2E config (`testDir: "./tests/e2e"`, `baseURL: "http://localhost:3000"`, `workers: 1`)
 - `instrumentation.ts` / `instrumentation-client.ts`: Sentry instrumentation
 - `generateKeys.mjs`, `setAuthKeys.mjs`, `setJwtKey.mjs`, `setConvexAuth.sh`: Auth key setup scripts
 - `get_console_errors.ts`: Console error capture utility
-- `netlify.toml` / `vercel.json`: Deployment configs
+- `vercel.json`: Vercel deployment config — pins the `@vercel/next` builder (CLI framework detection is unreliable for Next.js 16 and falls back to a static build) and security headers incl. a CSP with `wss://*.convex.cloud` (required for the Convex realtime connection)
+- `vercel.json`: Vercel deployment config
 - `.devin/scripts/checklist.py`: Master validation checklist runner
 - `test_universities.csv` / `ugc_data_sample.json`: Sample data files
 
@@ -360,11 +361,12 @@ ZeptoMail response `request_id` is stored in `emailsSent.zeptomail_message_id` a
 - The `Sync IITs / NITs / IIITs` button in `components/SyncIniButton.tsx` calls `api.actions.iniSeed.syncInstitutesOfNationalImportance`.
 - `convex/actions/ugcSync.ts` and `convex/universities.ts` (`bulkSyncUgc`) skip any record where `data_source === "curated"`, preventing the UGC dataset from overwriting curated institutes.
 
-### 10. Auth & Middleware
+### 10. Auth & Client-Side Guard
 
 - `@convex-dev/auth` `^0.0.95` with Password provider (`convex/auth.ts`). Password reset uses a custom `reset` email provider that generates a 32-character code and sends it through `internal.actions.email.sendEmail`.
 - Password reset flow: `/forgot-password` submits email → reset code is stored in `authVerificationCodes` and emailed → `/reset-password` verifies code and sets a new password.
-- `proxy.ts` (renamed from `middleware.ts` in the Next.js 16 migration) protects `/dashboard` routes and redirects authenticated users away from `/sign-in` / `/sign-up`. `/forgot-password` and `/reset-password` are public.
+- **Client-side auth guard**: `components/AuthGuard.tsx` replaces the deleted edge middleware (`proxy.ts`). It uses `useConvexAuth` + `next/navigation` `useRouter` to redirect unauthenticated users from `/dashboard` to `/sign-in`. The dashboard layout (`app/(dashboard)/layout.tsx`) wraps its content in `<AuthGuard>`. The landing page (`app/page.tsx`) renders instantly without a blocking spinner and uses `<RedirectIfAuthenticated />` to redirect authenticated users to `/dashboard`. `/forgot-password` and `/reset-password` are public.
+- `ConvexClientProvider.tsx` falls back to the production Convex URL (`https://energetic-raven-535.convex.cloud`) when `NEXT_PUBLIC_CONVEX_URL` is not set, so the app works on any host without additional env configuration.
 
 ### 11. Design System
 
@@ -415,14 +417,14 @@ Flat design with glassmorphism accents. Fonts: Poppins (headings) + Open Sans (b
 25. **Provenance Self-Consistency:** When a phone/LinkedIn value is stripped, set `phone_source` / `linkedin_source` to `"none"`. A nonempty value must never have `"none"` provenance. Existing valid provenance must not be overwritten by a new `"none"`. Scraper-only records without evidence lose unverified phone/LinkedIn values.
 26. **No Fabricated Data:** Do not invent missing VC, Registrar, or demographic data. When no official numeric enrollment data exists across all fallback tiers (NIRF → AISHE → Round-2 NAAC/site → Gemini grounding), preserve `null` and emit an explicit warning. The pipeline reports what it cannot find rather than hallucinating.
 27. **unpdf for PDFs:** Use `unpdf` (`extractPdfText` / `extractPdfTables` in `convex/lib/scrapers.ts`) for serverless-safe PDF extraction. Do not reintroduce `pdfjs-dist` or worker-dependent PDF libraries. Distinguish parser success from data availability — a parsed PDF with no numeric enrollment values is not a demographic success.
-28. **Next.js 16 Webpack Pin:** `dev` and `build` scripts pass `--webpack` to preserve the custom webpack config in `next.config.ts`. Do not switch to Turbopack without re-evaluating the webpack config. The middleware file is `proxy.ts` (renamed from `middleware.ts` per the Next.js 16 migration).
+28. **Next.js 16 Build Webpack Pin:** the production build passes `--webpack` (`npm run build`) to preserve the custom webpack config in `next.config.ts`; the dev server runs on Turbopack. Do not switch the build to Turbopack without re-evaluating the webpack config. The edge middleware (`proxy.ts` / `middleware.ts`) was removed; dashboard auth protection is client-side via `components/AuthGuard.tsx`.
 
 ## Useful Commands
 
-- **Dev Console:** `npm run dev` starts both Convex and Next.js concurrently (Next uses `--webpack`).
-- **Dev Split:** `npm run dev:next` (`next dev --webpack`) or `npm run dev:convex` (`npx convex dev`) for individual services.
+- **Dev Console:** `npm run dev` starts both Convex and Next.js concurrently (Next dev runs on Turbopack).
+- **Dev Split:** `npm run dev:next` (`next dev`, Turbopack) or `npm run dev:convex` (`npx convex dev`) for individual services.
 - **Test (E2E):** `npm run test` — Playwright tests (`tests/e2e`, baseURL `http://localhost:3000`).
-- **Test (Unit):** `npm run test:unit` — tsx unit tests (~496 tests, hermetic — no API keys required).
+- **Test (Unit):** `npm run test:unit` — tsx unit tests (~517 tests, hermetic — no API keys required).
 - **Lint:** `npm run lint` — ESLint.
 - **Build:** `npm run build` — `next build --webpack` production build.
 - **Master Checklist:** `python3 .devin/scripts/checklist.py .` — runs security, lint, schema, tests, UX, SEO in priority order.

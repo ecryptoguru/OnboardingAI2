@@ -1,4 +1,5 @@
 {
+  "builds": [{ "src": "package.json", "use": "@vercel/next" }],
   "headers": [
     {
       "source": "/(.*)",
@@ -21,7 +22,7 @@
         },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https://images.unsplash.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.convex.cloud https://*.convex.site https://google.serper.dev https://r.jina.ai https://*.sentry.io https://*.ingest.sentry.io; frame-ancestors 'none';"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data: https://images.unsplash.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self' https://*.convex.cloud wss://*.convex.cloud https://*.convex.site wss://*.convex.site https://google.serper.dev https://r.jina.ai https://*.sentry.io https://*.ingest.sentry.io; frame-ancestors 'none';"
         }
       ]
     }

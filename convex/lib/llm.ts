@@ -13,7 +13,7 @@ function hashPrompt(inputs: string[]): string {
   return createHash("sha256").update(text).digest("hex");
 }
 
-async function checkDailyBudget(ctx: ActionCtx): Promise<void> {
+export async function checkDailyBudget(ctx: ActionCtx): Promise<void> {
   // NOTE: This is a soft cap. Concurrent LLM calls may read the same budget
   // value before any has been incremented, so the actual spend can slightly
   // exceed the cap under burst load. This is acceptable for cost guardrails;
@@ -30,7 +30,7 @@ async function checkDailyBudget(ctx: ActionCtx): Promise<void> {
   }
 }
 
-async function recordLlmSpend(ctx: ActionCtx, usage: LlmUsageEntry): Promise<void> {
+export async function recordLlmSpend(ctx: ActionCtx, usage: LlmUsageEntry): Promise<void> {
   await ctx.runMutation(internal.llmBudget.incrementBudgetInternal, {
     costUsd: usage.totalCostUsd,
     tokens: usage.totalTokens,
@@ -725,6 +725,7 @@ export async function callGeminiWithGrounding({
   skipBudgetCheck,
   skipCache,
   cacheTtlMs,
+  timeoutMs = 25000,
 }: {
   systemPrompt: string;
   userPrompt: string;
@@ -736,6 +737,7 @@ export async function callGeminiWithGrounding({
   skipBudgetCheck?: boolean;
   skipCache?: boolean;
   cacheTtlMs?: number;
+  timeoutMs?: number;
 }): Promise<{ text: string; sources: string[] }> {
   const result = await callGeminiWithGroundingAndUsage({
     systemPrompt,
@@ -748,6 +750,7 @@ export async function callGeminiWithGrounding({
     skipBudgetCheck,
     skipCache,
     cacheTtlMs,
+    timeoutMs,
   });
   return { text: result.text, sources: result.sources };
 }
@@ -764,6 +767,7 @@ export async function callGeminiWithGroundingAndUsage({
   skipBudgetCheck,
   skipCache,
   cacheTtlMs,
+  timeoutMs = 25000,
 }: {
   systemPrompt: string;
   userPrompt: string;
@@ -776,6 +780,7 @@ export async function callGeminiWithGroundingAndUsage({
   skipBudgetCheck?: boolean;
   skipCache?: boolean;
   cacheTtlMs?: number;
+  timeoutMs?: number;
 }): Promise<{ text: string; sources: string[]; usage: LlmUsageEntry }> {
   // ─── Guardrail 1: Cache lookup ────────────────────────────────────────────
   if (ctx && !skipCache) {
@@ -821,7 +826,7 @@ export async function callGeminiWithGroundingAndUsage({
           temperature,
           maxOutputTokens,
           tools: [{ googleSearch: {} }],
-          httpOptions: { timeout: 25000 },
+          httpOptions: { timeout: timeoutMs },
         },
       });
 

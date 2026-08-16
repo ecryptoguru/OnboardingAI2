@@ -43,14 +43,11 @@ export default function ForgotPasswordPage() {
         message.includes("RATE_LIMITED")
       ) {
         setError("Unable to send reset email. Please check server configuration or try again later.");
-      } else if (
-        message.includes("InvalidAccountId") ||
-        message.includes("TooManyFailedAttempts")
-      ) {
-        // Show the same message whether the account exists or not.
-        setSent(true);
       } else {
-        setError("Something went wrong. Please try again.");
+        // Convex masks backend errors as "Server Error", so InvalidAccountId /
+        // TooManyFailedAttempts arrive indistinguishable from other failures.
+        // Show the same message whether the account exists or not (privacy).
+        setSent(true);
       }
     } finally {
       setLoading(false);

@@ -23,7 +23,7 @@ Convex agent skills for common tasks can be installed by running
 - AI: Google Gemini `@google/genai` `^1.43.0` — `gemini-3.7-flash` (complex / per-source / merge), `gemini-3.5-flash-lite` (scraper / scoring / personalization), `gemini-embedding-001` (768-dim). Constants in `convex/lib/models.ts`.
 - PDF: `unpdf` `^1.8.1` (serverless-safe; replaces `pdfjs-dist`).
 - Convex backend: queries, mutations, actions, crons, HTTP routes, vector search, scheduler, and a `systemSettings` key-value store for API keys
-- Next.js 16 notes: `middleware.ts` renamed to `proxy.ts`; `dev`/`build` scripts pass `--webpack` to preserve the custom webpack config; the obsolete `eslint` config property was removed from `next.config.ts`.
+- Next.js 16 notes: the edge middleware (`middleware.ts` / `proxy.ts`) was removed entirely; dashboard auth protection is now client-side via `components/AuthGuard.tsx`. The production build passes `--webpack` (`npm run build`); `next dev` runs on Turbopack (Next 16 default) — the webpack `resolve.fallback` in `next.config.ts` only applies to the build. The obsolete `eslint` config property was removed from `next.config.ts`. `ConvexClientProvider.tsx` falls back to the production Convex URL when `NEXT_PUBLIC_CONVEX_URL` is not set (host-independent). Deployment: Vercel only (`vercel.json` — pins `@vercel/next` builder + CSP with `wss://*.convex.cloud`); live at `https://onboardingai2.vercel.app`. Netlify retired 2026-08-16.
 
 ### Data seeding
 
@@ -60,6 +60,9 @@ Convex agent skills for common tasks can be installed by running
 - Gap-fill for missing VC/Registrar runs free passes first, Serper last, with `verifyNameRoleProximity` + URL/department guards to prevent false positives.
 - PDF extraction uses `unpdf` (serverless-safe); do not reintroduce `pdfjs-dist`.
 - Do not fabricate missing VC/Registrar/demographic data — preserve `null` and emit warnings when no official data exists.
+- Auth forms (`app/(auth)/sign-in`, `sign-up`) share client helpers in `app/(auth)/authSubmit.ts`: `withTimeout` (20s guard so submit buttons never stay stuck in a loading state) and `getAuthErrorMessage` (maps Convex "Server Error" to user-facing messages, reads `err.data` for ConvexError). They only redirect to `/dashboard` when `signIn` returns `signingIn: true`.
+- SSRF hardening: `convex/lib/urlSafety.ts` validates `website` inputs at write time (`universities.create`/`update`) and `discovery.ts` rejects private/loopback/link-local/metadata hosts (incl. DNS resolution check) before any server-side fetch. Admin-gated: `dispatchWebsiteValidation`, `runEnrichmentChain`, `bulkSyncUgc`, `cleanupLegacyStakeholders`, `purgeTestStakeholders`.
+- Cost guardrails: grounding/inline-PDF Gemini calls in `enrichGovernmentData.ts` route through the daily LLM budget (`checkDailyBudget`/`recordLlmSpend`); Firecrawl credit accounting counts real attempts (`firecrawlScrape`/`firecrawlMap` return `attempts`); `maxSerperQueries: 0` is honored by `serperBudget.ts`.
 
 ## Documentation update reminders
 

@@ -2,6 +2,7 @@
 
 import { useAuthActions } from "@convex-dev/auth/react";
 import { RedirectIfAuthenticated } from "@/components/RedirectIfAuthenticated";
+import { getAuthErrorMessage, withTimeout } from "../authSubmit";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -17,28 +18,31 @@ export default function SignUpPage() {
     setError("");
     const formData = new FormData(e.currentTarget);
     const emailValue = (formData.get("email") as string).trim().toLowerCase();
+    const password = formData.get("password") as string;
+
+    if (!password || password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      setLoading(false);
+      return;
+    }
 
     try {
-      await signIn("password", {
-        email: emailValue,
-        password: formData.get("password") as string,
-        flow: formData.get("flow") as string,
-      });
-      window.location.href = "/dashboard";
+      const result = await withTimeout(
+        signIn("password", {
+          email: emailValue,
+          password,
+          flow: formData.get("flow") as string,
+        }),
+      );
+      if (result.signingIn) {
+        window.location.href = "/dashboard";
+        return;
+      }
+      setError("Account creation did not complete. Please try again.");
     } catch (err: unknown) {
       console.error(err);
-      const message = (err as Error).message || "";
-      if (message.includes("Server Error")) {
-        setError("Could not create account. This email may already be registered. Try signing in instead.");
-      } else if (message.toLowerCase().includes("already") || message.toLowerCase().includes("exist")) {
-        setError("An account with this email already exists. Please sign in instead.");
-      } else if (message.toLowerCase().includes("password")) {
-        setError("Password must be at least 8 characters.");
-      } else if (message) {
-        setError(message);
-      } else {
-        setError("Could not create account. Try a different email.");
-      }
+      setError(getAuthErrorMessage(err, "signUp"));
+    } finally {
       setLoading(false);
     }
   };

@@ -16,11 +16,11 @@ The app runs at `http://localhost:3000` (Playwright `baseURL` is `http://localho
 Run the frontend and backend separately if needed:
 
 ```bash
-npm run dev:next   # next dev --webpack
+npm run dev:next   # next dev (Turbopack)
 npm run dev:convex # npx convex dev
 ```
 
-> Next.js 16 defaults to Turbopack. This project pins **Webpack** for both `dev` and `build` (`--webpack` flag) to preserve the existing custom webpack config in `next.config.ts`. The legacy `middleware.ts` was renamed to `proxy.ts` per the Next.js 16 migration guide.
+> Next.js 16 defaults to Turbopack. The production build pins **Webpack** (`next build --webpack`) to preserve the existing custom webpack config in `next.config.ts`; the dev server runs on Turbopack.
 
 ## Environment Setup
 
@@ -62,6 +62,7 @@ API keys and sender details are managed in **Settings → API Keys**. Values are
 
 - **Email / Password Auth**: Convex Auth Password provider (`convex/auth.ts` and `convex/auth.config.ts`).
 - **Forgot Password**: Request a reset code at `/forgot-password` and set a new password on `/reset-password`. Reset codes are sent through ZeptoMail and expire in one hour.
+- **Client-Side Auth Guard**: Dashboard routes are protected by `components/AuthGuard.tsx`, which uses `useConvexAuth` + `next/navigation` to redirect unauthenticated users to `/sign-in`. The landing page (`/`) renders instantly without a blocking loading spinner and redirects authenticated users via `RedirectIfAuthenticated`.
 - **Admin gating**: Use `ADMIN_EMAILS` to restrict access to admin-only routes; leave empty in local dev to allow all authenticated users.
 
 ## Tech Stack
@@ -76,6 +77,7 @@ API keys and sender details are managed in **Settings → API Keys**. Values are
 - **Discovery**: Serper (≤14 queries/university, budget-enforced)
 - **Testing**: Playwright E2E (`tests/e2e`, baseURL `http://localhost:3000`) + tsx unit tests (`tests/unit/*.test.ts`, ~496 tests)
 - **Monitoring**: Sentry (`@sentry/nextjs` frontend, `@sentry/node` backend)
+- **Deployment**: Vercel (live: `https://onboardingai2.vercel.app`; `vercel.json` pins the `@vercel/next` builder and a CSP that includes `wss://*.convex.cloud` — both required). Netlify was retired 2026-08-16 — Vercel is the only frontend host.
 
 ## Core Features
 
@@ -113,7 +115,7 @@ Webhook endpoints are disabled until their specific secret is configured; unconf
 - **Rate Limits**: Per-destination rate limits (e.g., three emails per minute to a single address). Use `SKIP_RATE_LIMITS` only for local testing.
 - **LLM Budget**: `LLM_DAILY_BUDGET_USD` acts as a daily soft cap for LLM spend.
 - **Monitoring**: Sentry error tracking and performance profiling.
-- **Resilience**: Exponential backoff with `withRetry` for external API calls.
+- **Resilience**: Exponential backoff with `withRetry` for external API calls. `ConvexClientProvider` falls back to the production Convex URL when `NEXT_PUBLIC_CONVEX_URL` is not set, so the app works on any host without extra env configuration.
 - **Intelligence**: Centralized prompt library in `convex/lib/prompts.ts` for unified AI governance.
 - **Optimization**: Batch mutations for high-frequency signal ingestion; `getFunnelStats` uses full counts for accurate analytics.
 
@@ -162,6 +164,20 @@ The chain runs as: `scheduleEnrichmentInternal` → `runEnrichmentChainInternal`
 - [Requirements](./docs/Requirement.md)
 - [Roadmap / as-built record](./docs/roadmap.md)
 - [Design system](./design-system/onboardingai/MASTER.md)
+- [Production readiness report](./docs/PRODUCTION_READINESS.md)
+- [Operations runbook](./docs/runbook.md)
+- [Client onboarding guide](./docs/CLIENT_ONBOARDING.md)
+
+## Admin ops (CLI)
+
+```bash
+# Force-logout all users after a JWT key rotation / auth upgrade
+npx convex run 'admin:clearAllAuthSessions'
+# Purge stale password-reset verification codes
+npx convex run 'admin:clearAuthVerificationCodes'
+```
+
+Both are `internalMutation`s — safe to run anytime; users simply sign in again.
 
 ---
 

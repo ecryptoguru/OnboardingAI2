@@ -47,6 +47,14 @@ const UniversityDetail = dynamic(
 export default function EnrichmentPage() {
   const [selectedId, setSelectedId] = useState<Id<"universities"> | null>(null);
 
+  // Live clock for the enrichment elapsed-time display (30s tick). Keeps the
+  // timer fresh even when no Convex query re-renders.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = setInterval(() => setNow(Date.now()), 30_000);
+    return () => clearInterval(interval);
+  }, []);
+
   // Custom filter if needed, but we can use the existing list with stage param
   const rawNewUniversities = useQuery(api.universities.list, { stage: "new" });
   const rawEnrichingUniversities = useQuery(api.universities.list, {
@@ -321,11 +329,11 @@ export default function EnrichmentPage() {
                   {Math.max(
                     0,
                     Math.round(
-                      (Date.now() - uni.enrichment_started_at) / 60000,
+                      (now - uni.enrichment_started_at) / 60000,
                     ),
                   )}
                   m
-                  {Date.now() - uni.enrichment_started_at > 10 * 60 * 1000 && (
+                  {now - uni.enrichment_started_at > 10 * 60 * 1000 && (
                     <span className="text-amber-500 ml-1">
                       (may have timed out)
                     </span>

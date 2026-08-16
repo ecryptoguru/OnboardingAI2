@@ -7,7 +7,8 @@ import {
 import type { Doc, Id } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
-import { validateAuth } from "./lib/auth_utils";
+import { validateAdmin, validateAuth } from "./lib/auth_utils";
+import { validateWebsiteField } from "./lib/urlSafety";
 import { namesMatch, normalizeState } from "./lib/universityUtils";
 
 function isDuplicateOfExisting(
@@ -456,8 +457,13 @@ export const create = mutation({
   handler: async (ctx, args) => {
     await validateAuth(ctx);
     const now = Date.now();
+    const website =
+      args.website && args.website.trim()
+        ? validateWebsiteField(args.website)
+        : undefined;
     return await ctx.db.insert("universities", {
       ...args,
+      website,
       website_status: "pending",
       outreach_stage: "new",
       created_at: now,
@@ -502,6 +508,11 @@ export const update = mutation({
   handler: async (ctx, args) => {
     await validateAuth(ctx);
     const { id, ...fields } = args;
+    if (fields.website !== undefined) {
+      fields.website = fields.website.trim()
+        ? validateWebsiteField(fields.website)
+        : undefined;
+    }
     await ctx.db.patch(id, { ...fields, updated_at: Date.now() });
   },
 });
@@ -988,6 +999,7 @@ export const bulkSyncUgc = mutation({
   },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
+    await validateAdmin(ctx);
 
     const BATCH_SIZE_LIMIT = 2000;
     if (args.universities.length > BATCH_SIZE_LIMIT) {

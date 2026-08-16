@@ -9,6 +9,7 @@ import {
   looksLikeOwnedDomain,
   rankWebsiteCandidates,
 } from "../lib/discoveryCandidates";
+import { assertPublicTarget } from "../lib/urlSafetyNode";
 import { withRetry } from "../lib/utils";
 import { createSerperBudget, runWithSerperBudget } from "../lib/serperBudget";
 
@@ -122,6 +123,21 @@ export const validateWebsite = internalAction({
 
     if (!url.startsWith("http")) {
       url = `https://${url}`;
+    }
+
+    // ── SSRF guard ──────────────────────────────────────────────────────────
+    // Reject non-http(s) schemes, credentials, private/loopback IP literals,
+    // localhost, and hostnames that resolve to non-public addresses (DNS
+    // rebinding defense) BEFORE any server-side request is made.
+    try {
+      await assertPublicTarget(url);
+    } catch (e) {
+      console.warn(`[Discovery] Rejected unsafe website URL ${url}:`, e);
+      await ctx.runMutation(internal.universities.updateInternal, {
+        id: args.universityId,
+        website_status: "invalid",
+      });
+      return false;
     }
 
     // Verify the domain actually looks like it belongs to this university.

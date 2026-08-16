@@ -993,13 +993,19 @@ export const runDeepEnrichment = internalAction({
       // run goes Jina-only without wasting scrape attempts.
       let firecrawlDisabled = false;
 
+      let mapAttempts = 0;
       try {
-        firecrawlCreditsUsed += 1;
+        firecrawlCreditsUsed += 1; // reserve one credit for the map call
         firecrawlMapCount += 1;
-        mapResult = await withRetry(
-          async () => firecrawlMap(workingUrl, firecrawlKey),
-          { maxRetries: 1 },
-        );
+        // firecrawlMap already retries internally; count REAL attempts so the
+        // credit accounting and cost ceiling reflect actual API spend.
+        mapResult = await firecrawlMap(workingUrl, firecrawlKey, 5000, 2, () => {
+          mapAttempts += 1;
+        });
+        if (mapAttempts > 1) {
+          firecrawlCreditsUsed += mapAttempts - 1;
+          firecrawlMapCount += mapAttempts - 1;
+        }
         if (mapResult.links && mapResult.links.length > 0) {
           highYieldUrls = filterHighYieldUrls(mapResult, MAX_URLS_TO_SCRAPE);
           const branchPriorityUrls = buildBranchScopedPriorityUrls(
@@ -1020,6 +1026,11 @@ export const runDeepEnrichment = internalAction({
         }
       } catch (e) {
         const mapErr = e instanceof Error ? e.message : String(e);
+        // Account for whatever attempts actually happened before the failure.
+        if (mapAttempts > 1) {
+          firecrawlCreditsUsed += mapAttempts - 1;
+          firecrawlMapCount += mapAttempts - 1;
+        }
         console.warn(
           `[DeepEnrichment] Firecrawl map failed for ${workingUrl}:`,
           mapErr,
@@ -1166,17 +1177,32 @@ export const runDeepEnrichment = internalAction({
         let markdown = "";
         let firecrawlAttempted = false;
         if (!firecrawlDisabled && firecrawlCreditsUsed < maxFirecrawlTotal) {
-          firecrawlCreditsUsed += 1;
+          firecrawlCreditsUsed += 1; // reserve one credit
           firecrawlScrapeCount += 1;
           firecrawlAttempted = true;
+          let scrapeAttempts = 0;
           try {
-            const result = await withRetry(
-              async () => firecrawlScrape(targetUrl, firecrawlKey),
-              { maxRetries: 1 },
+            // firecrawlScrape already retries internally; count REAL attempts
+            // so the credit accounting / cost ceiling reflect actual spend.
+            const result = await firecrawlScrape(
+              targetUrl,
+              firecrawlKey,
+              4,
+              () => {
+                scrapeAttempts += 1;
+              },
             );
+            if (scrapeAttempts > 1) {
+              firecrawlCreditsUsed += scrapeAttempts - 1;
+              firecrawlScrapeCount += scrapeAttempts - 1;
+            }
             markdown = result.data?.markdown || "";
           } catch (e) {
             const msg = e instanceof Error ? e.message : String(e);
+            if (scrapeAttempts > 1) {
+              firecrawlCreditsUsed += scrapeAttempts - 1;
+              firecrawlScrapeCount += scrapeAttempts - 1;
+            }
             console.warn(
               `[DeepEnrichment] Firecrawl failed for ${targetUrl}, trying Jina Reader fallback:`,
               msg,
@@ -1701,6 +1727,7 @@ export const runDeepEnrichment = internalAction({
       interface StakeholderCandidate {
         name?: string;
         email?: string;
+        email_source?: string;
         phone?: string;
         phone_source?: string;
         linkedin_url?: string;
@@ -2080,7 +2107,7 @@ export const runDeepEnrichment = internalAction({
         sources:
           st.sources ??
           (st.source_url ? [st.source_url] : undefined),
-        email_source: st.email ? "scraped" : undefined,
+        email_source: st.email_source || (st.email ? "scraped" : undefined),
         contact_confidence:
           typeof st.contact_confidence === "number"
             ? Math.max(0, Math.min(1, st.contact_confidence))

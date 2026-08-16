@@ -809,6 +809,9 @@ function SimulateReplyModal({
         replyId,
         triggerAutoReply: false,
       });
+      if (!result.success) {
+        throw new Error(result.error || "Classification failed");
+      }
       setDone(result.classification ?? "other");
     } catch (e) {
       setError(`Simulation failed: ${String(e)}`);

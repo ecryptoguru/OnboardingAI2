@@ -36,7 +36,7 @@ webhooks — all in TypeScript with zero infrastructure to manage.
 | Frontend | Next.js 16.3.1 (App Router, Webpack-pinned) + React 19 + Tailwind CSS |
 | Data Fetching | Convex React hooks (`useQuery`, `useMutation`, `useAction`) |
 | Auth | `@convex-dev/auth` `^0.0.95` + `@auth/core` `^0.41.3` with Password provider |
-| Deployment | Vercel (frontend) + Convex Cloud (backend, production: `energetic-raven-535`) |
+| Deployment | Vercel only (`vercel.json` — `@vercel/next` builder + CSP with `wss://*.convex.cloud`; live `https://onboardingai2.vercel.app`) + Convex Cloud (backend, production: `energetic-raven-535`). Netlify retired 2026-08-16. |
 | Monitoring | Convex Dashboard + Sentry SDK (`@sentry/nextjs` / `@sentry/node`) |
 | Provider Alerts | `apiAlerts` table + `components/ApiAlertModal.tsx` (6h dedup, surfaced in dashboard) |
 
@@ -324,7 +324,7 @@ This section records the production-reliability work completed after the initial
 
 ### 5.10 Next.js 16 migration
 
-- Next.js 15 → 16.3.1. `middleware.ts` renamed to `proxy.ts`. `next.config.ts` lost the obsolete `eslint` property. `dev`/`build` scripts pass `--webpack` to preserve the custom webpack config.
+- Next.js 15 → 16.3.1. `middleware.ts` was renamed to `proxy.ts` and subsequently **removed entirely** (see §5.13). `next.config.ts` lost the obsolete `eslint` property. The production build passes `--webpack` (`npm run build`) to preserve the custom webpack config; `next dev` runs on Turbopack.
 - Auth packages upgraded: `@convex-dev/auth` → `0.0.95`, `@auth/core` → `0.41.3`.
 - Build, lint, and TypeScript pass after migration. `npm audit` clean.
 
@@ -339,12 +339,20 @@ This section records the production-reliability work completed after the initial
 | Acharya Nagarjuna University | Prof. Kancharla Gangadhara Rao (I/c) | — | False-positive VC Patteti deleted; 5,433 students (NIRF 2025-26). |
 | Adamas University | — | Dr. Rajat Ray (Acting) | Deep enrichment succeeds after scheduled-action split; demographics unavailable (no public data). |
 
-### 5.12 Honest limits
+### 5.13 Client-side auth guard & edge middleware removal
+
+- The edge middleware (`proxy.ts` / `middleware.ts`) was removed because it was incompatible with the Netlify edge runtime and caused deployment failures.
+- Dashboard route protection is now client-side via `components/AuthGuard.tsx`, which uses `useConvexAuth` + `next/navigation` `useRouter` to redirect unauthenticated users to `/sign-in`.
+- The landing page (`app/page.tsx`) was refactored to render marketing content instantly without a blocking loading spinner. Authenticated users are redirected to `/dashboard` via `<RedirectIfAuthenticated />`.
+- `ConvexClientProvider.tsx` now falls back to the production Convex URL (`https://energetic-raven-535.convex.cloud`) when `NEXT_PUBLIC_CONVEX_URL` is not set, ensuring the app works on Netlify without additional env configuration.
+- E2E navigation tests updated to wait for client-side `AuthGuard` redirect (`waitForURL`). Responsive tests now target the landing page and auth pages instead of the dashboard (which requires authentication).
+
+### 5.14 Honest limits
 
 - No pipeline can extract data that is not published. Anna University's VC and Adamas's demographics are absent from reachable official sources; the pipeline reports this honestly rather than hallucinating.
 - Firecrawl depends on account credits; Jina-only mode works but is slower/lower-quality for JS-rendered sites.
 - Gap-fill false-positive guards are robust against the known Nagarjuna pattern but new ambiguous department-page patterns may emerge.
-- Frontend deployment to Vercel was not completed in this work cycle; the backend and component are deployed and ready.
+- Frontend deployment is Vercel-only (`vercel.json` pins the `@vercel/next` builder because CLI framework detection is unreliable for Next.js 16, and the CSP must include `wss://*.convex.cloud` for the Convex realtime connection). Netlify was retired 2026-08-16 (`netlify.toml` removed).
 
 ---
 

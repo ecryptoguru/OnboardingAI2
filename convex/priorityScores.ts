@@ -77,6 +77,7 @@ export const upsert = mutation({
     }),
   },
   handler: async (ctx, args) => {
+    await validateAuth(ctx);
     return await doUpsertScore(ctx, args);
   },
 });

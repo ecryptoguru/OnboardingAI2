@@ -33,7 +33,8 @@ export function createSerperBudget(
 ): SerperBudget {
   return {
     used: 0,
-    max: Math.max(1, config.maxQueries),
+    // Allow maxQueries: 0 (a zero-Serper phase should spend nothing).
+    max: Math.max(0, Math.floor(config.maxQueries)),
     exhausted: false,
   };
 }

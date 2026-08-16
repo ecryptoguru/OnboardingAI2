@@ -173,7 +173,7 @@ export const approveAndSend = action({
       throw new Error("Email is not pending approval");
     const userId = await getCurrentUserId(ctx);
     const admin = await isAdmin(ctx);
-    if (!admin && email.owner_id && email.owner_id !== userId) {
+    if (!admin && (email.owner_id === undefined || email.owner_id !== userId)) {
       throw new Error("Forbidden: Not your draft");
     }
 
