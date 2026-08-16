@@ -42,6 +42,7 @@ Thumbs.db
 # Testing
 coverage/
 playwright-report/
+screenshots/
 test-results/
 
 .playwright-mcp/

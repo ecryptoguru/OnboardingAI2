@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { ConvexAuthNextjsServerProvider } from "@convex-dev/auth/nextjs/server";
 import { ConvexClientProvider } from "@/components/ConvexClientProvider";
 import "./globals.css";
 
@@ -43,14 +42,12 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <ConvexAuthNextjsServerProvider>
-      <html lang="en" className={`${openSans.variable} ${poppins.variable}`} suppressHydrationWarning>
-        <body suppressHydrationWarning>
-          <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
-            <ConvexClientProvider>{children}</ConvexClientProvider>
-          </ThemeProvider>
-        </body>
-      </html>
-    </ConvexAuthNextjsServerProvider>
+    <html lang="en" className={`${openSans.variable} ${poppins.variable}`} suppressHydrationWarning>
+      <body suppressHydrationWarning>
+        <ThemeProvider attribute="class" defaultTheme="system" enableSystem>
+          <ConvexClientProvider>{children}</ConvexClientProvider>
+        </ThemeProvider>
+      </body>
+    </html>
   );
 }
