@@ -7,6 +7,7 @@ import {
 } from "./_generated/server";
 import { v } from "convex/values";
 import { validateAuth } from "./lib/auth_utils";
+import { clampVectorSearchLimit } from "./lib/limits";
 
 export const listByUniversity = query({
   args: { university_id: v.id("universities") },
@@ -53,12 +54,13 @@ export const vectorSearch = action({
   handler: async (ctx, args) => {
     await validateAuth(ctx);
     const universityId = args.university_id;
+    const limit = clampVectorSearchLimit(args.limit);
     return await ctx.vectorSearch("universitySignals", "by_embedding", {
       vector: args.embedding,
       filter: universityId
         ? (q) => q.eq("university_id", universityId)
         : undefined,
-      limit: args.limit ?? 10,
+      limit,
     });
   },
 });

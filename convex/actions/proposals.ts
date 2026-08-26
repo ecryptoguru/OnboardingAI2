@@ -11,6 +11,7 @@ import { validateJsonOutput, sanitizeLlmInput, sanitizeLlmOutput, isValidEmail }
 import { recommendModules, suggestPricingTier } from "../lib/moduleRecommender";
 import { PROPOSAL_SYSTEM_PROMPT, PROPOSAL_SCHEMA } from "../lib/prompts";
 import { createMeetingEvent, updateEvent } from "../lib/googleCalendar";
+import { MAX_PROPOSAL_RECIPIENTS } from "../lib/limits";
 import * as Sentry from "@sentry/node";
 
 interface ProposalContent extends Record<string, unknown> {
@@ -393,8 +394,13 @@ export const emailProposal = action({
     if (!args.toEmails || args.toEmails.length === 0) {
       throw new Error("At least one recipient is required");
     }
-    if (args.toEmails.length > 50 || (args.ccEmails ?? []).length > 50) {
-      throw new Error("Too many recipients (max 50 per list)");
+    if (
+      args.toEmails.length > MAX_PROPOSAL_RECIPIENTS ||
+      (args.ccEmails ?? []).length > MAX_PROPOSAL_RECIPIENTS
+    ) {
+      throw new Error(
+        `Too many recipients (max ${MAX_PROPOSAL_RECIPIENTS} per list)`,
+      );
     }
 
     // Atomically claim the proposal so concurrent sends cannot duplicate.

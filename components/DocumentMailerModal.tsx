@@ -6,6 +6,16 @@ import { api } from "../convex/_generated/api";
 import { Doc, Id } from "../convex/_generated/dataModel";
 import { useToast } from "./Toast";
 import {
+  MAX_ATTACHMENT_BYTES_TOTAL,
+  MAX_BODY_DOCUMENT_BYTES,
+  MAX_SUBJECT_LENGTH,
+  LIMIT_LABELS,
+  validateAttachmentLimits,
+  validateBodyLength,
+  validateRecipientCount,
+  validateSubjectLength,
+} from "../convex/lib/limits";
+import {
   XMarkIcon,
   DocumentTextIcon,
   PaperClipIcon,
@@ -23,6 +33,7 @@ interface UploadedFile {
   storageId: Id<"_storage">;
   filename: string;
   mime_type: string;
+  size: number;
 }
 
 type RecipientMode = "stakeholder" | "custom";
@@ -127,7 +138,15 @@ export function DocumentMailerModal({
     return "application/octet-stream";
   }
 
-  async function uploadFile(file: File): Promise<UploadedFile> {
+  async function uploadFile(
+    file: File,
+    maxBytes: number,
+  ): Promise<UploadedFile> {
+    if (file.size > maxBytes) {
+      throw new Error(
+        `"${file.name}" exceeds the ${Math.floor(maxBytes / (1024 * 1024))} MB size limit`,
+      );
+    }
     const postUrl = await generateUploadUrl();
     const mimeType =
       file.type && file.type !== "application/octet-stream"
@@ -146,7 +165,28 @@ export function DocumentMailerModal({
       storageId: storageId as Id<"_storage">,
       filename: file.name,
       mime_type: mimeType,
+      size: file.size,
     };
+  }
+
+  /** Run async tasks with a bounded concurrency pool. */
+  async function mapWithConcurrency<T, R>(
+    items: T[],
+    limit: number,
+    fn: (item: T) => Promise<R>,
+  ): Promise<R[]> {
+    const results: R[] = new Array(items.length);
+    let next = 0;
+    async function worker() {
+      while (next < items.length) {
+        const index = next++;
+        results[index] = await fn(items[index]);
+      }
+    }
+    await Promise.all(
+      Array.from({ length: Math.min(limit, items.length) }, worker),
+    );
+    return results;
   }
 
   function isDocx(file: File): boolean {
@@ -166,7 +206,7 @@ export function DocumentMailerModal({
     }
     setIsParsingBody(true);
     try {
-      const uploaded = await uploadFile(file);
+      const uploaded = await uploadFile(file, MAX_BODY_DOCUMENT_BYTES);
       const result = await parseDocx({ storageId: uploaded.storageId });
       setBodyFile(uploaded);
       setBodyText(result.text);
@@ -196,9 +236,33 @@ export function DocumentMailerModal({
       if (attachmentInputRef.current) attachmentInputRef.current.value = "";
       return;
     }
+    const existingTotal = additionalAttachments.reduce(
+      (sum, a) => sum + a.size,
+      0,
+    );
+    const incoming = Array.from(files);
+    const incomingTotal = incoming.reduce((sum, f) => sum + f.size, 0);
+    const attachmentError = validateAttachmentLimits(
+      additionalAttachments.length + incoming.length,
+      existingTotal + incomingTotal,
+    );
+    if (attachmentError) {
+      show(attachmentError, "error");
+      if (attachmentInputRef.current) attachmentInputRef.current.value = "";
+      return;
+    }
+    const existingNames = new Set(additionalAttachments.map((a) => a.filename));
+    const duplicates = incoming.filter((f) => existingNames.has(f.name));
+    if (duplicates.length > 0) {
+      show(`Duplicate attachment filename: ${duplicates[0].name}`, "error");
+      if (attachmentInputRef.current) attachmentInputRef.current.value = "";
+      return;
+    }
     setIsUploadingAttachment(true);
     try {
-      const uploads = await Promise.all(Array.from(files).map(uploadFile));
+      const uploads = await mapWithConcurrency(incoming, 2, (file) =>
+        uploadFile(file, MAX_ATTACHMENT_BYTES_TOTAL),
+      );
       setAdditionalAttachments((prev) => [...prev, ...uploads]);
     } catch (err) {
       console.error(err);
@@ -271,16 +335,19 @@ export function DocumentMailerModal({
   }
 
   async function handleSubmit() {
-    if (!subject.trim()) {
-      show("Subject is required", "error");
+    const subjectError = validateSubjectLength(subject);
+    if (subjectError) {
+      show(subjectError, "error");
       return;
     }
-    if (!bodyText.trim()) {
-      show("Email body is required", "error");
+    const bodyError = validateBodyLength(bodyText);
+    if (bodyError) {
+      show(bodyError, "error");
       return;
     }
-    if (selectedIds.length === 0) {
-      show("Select at least one university", "error");
+    const recipientError = validateRecipientCount(selectedIds.length);
+    if (recipientError) {
+      show(recipientError, "error");
       return;
     }
 
@@ -387,9 +454,13 @@ export function DocumentMailerModal({
               type="text"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
+              maxLength={MAX_SUBJECT_LENGTH}
               placeholder="e.g. Partnership proposal for Fretbox hostel management"
               className="w-full px-3 py-2 bg-background border border-card-border rounded-lg text-sm text-foreground placeholder:text-zinc-600 focus:outline-none focus:border-blue-500 transition-colors"
             />
+            <p className="text-[10px] text-muted-foreground mt-1">
+              Max {MAX_SUBJECT_LENGTH} characters
+            </p>
           </div>
 
           {/* Body document */}
@@ -465,6 +536,10 @@ export function DocumentMailerModal({
             <label className="block text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
               Additional attachments
             </label>
+            <p className="text-[10px] text-muted-foreground -mt-1 mb-2">
+              Max {LIMIT_LABELS.attachmentCount} files,{" "}
+              {LIMIT_LABELS.attachmentTotalMB} MB total
+            </p>
             <input
               ref={attachmentInputRef}
               type="file"
@@ -522,6 +597,9 @@ export function DocumentMailerModal({
             <label className="block text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
               Recipients
             </label>
+            <p className="text-[10px] text-muted-foreground -mt-1 mb-2">
+              Max {LIMIT_LABELS.recipientsPerBatch} universities per batch
+            </p>
 
             {/* Search */}
             <div className="relative mb-3">

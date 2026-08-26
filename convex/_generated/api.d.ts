@@ -54,6 +54,7 @@ import type * as lib_evidenceSanitizer from "../lib/evidenceSanitizer.js";
 import type * as lib_gapFill from "../lib/gapFill.js";
 import type * as lib_googleCalendar from "../lib/googleCalendar.js";
 import type * as lib_institutesOfNationalImportance from "../lib/institutesOfNationalImportance.js";
+import type * as lib_limits from "../lib/limits.js";
 import type * as lib_llm from "../lib/llm.js";
 import type * as lib_models from "../lib/models.js";
 import type * as lib_moduleRecommender from "../lib/moduleRecommender.js";
@@ -141,6 +142,7 @@ declare const fullApi: ApiFromModules<{
   "lib/gapFill": typeof lib_gapFill;
   "lib/googleCalendar": typeof lib_googleCalendar;
   "lib/institutesOfNationalImportance": typeof lib_institutesOfNationalImportance;
+  "lib/limits": typeof lib_limits;
   "lib/llm": typeof lib_llm;
   "lib/models": typeof lib_models;
   "lib/moduleRecommender": typeof lib_moduleRecommender;

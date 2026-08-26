@@ -5,11 +5,38 @@ import { internal } from "../_generated/api";
 import { v, ConvexError } from "convex/values";
 import mammoth from "mammoth";
 import { validateAuth, getCurrentUserId } from "../lib/auth_utils";
+import {
+  MAX_ATTACHMENT_BYTES_TOTAL,
+  MAX_BODY_DOCUMENT_BYTES,
+  validateAttachmentLimits,
+  validateBodyLength,
+  validateRecipientCount,
+  validateSubjectLength,
+} from "../lib/limits";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function validateEmail(email: string): boolean {
   return EMAIL_REGEX.test(email);
+}
+
+/** Fetch a storage object with a byte cap. Rejects oversized/missing files. */
+async function fetchStorageObject(
+  ctx: { storage: { getUrl: (id: unknown) => Promise<string | null> } },
+  storageId: unknown,
+  maxBytes: number,
+): Promise<ArrayBuffer> {
+  const url = await ctx.storage.getUrl(storageId as never);
+  if (!url) throw new ConvexError("Uploaded file not found in storage");
+  const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+  if (!response.ok) throw new ConvexError("Failed to fetch uploaded file");
+  const buffer = await response.arrayBuffer();
+  if (buffer.byteLength > maxBytes) {
+    throw new ConvexError(
+      `File exceeds the ${Math.floor(maxBytes / (1024 * 1024))} MB size limit`,
+    );
+  }
+  return buffer;
 }
 
 /**
@@ -21,15 +48,9 @@ export const parseDocx = action({
   handler: async (ctx, args) => {
     await validateAuth(ctx);
     try {
-      const fileUrl = await ctx.storage.getUrl(args.storageId);
-      if (!fileUrl) throw new ConvexError("File not found");
-
-      const response = await fetch(fileUrl, {
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!response.ok) throw new ConvexError("Failed to fetch uploaded file");
-
-      const buffer = Buffer.from(await response.arrayBuffer());
+      const buffer = Buffer.from(
+        await fetchStorageObject(ctx, args.storageId, MAX_BODY_DOCUMENT_BYTES),
+      );
 
       const [raw, html] = await Promise.all([
         mammoth.extractRawText({ buffer }),
@@ -79,22 +100,45 @@ export const createDocumentDrafts = action({
     await validateAuth(ctx);
     const owner_id = await getCurrentUserId(ctx);
 
-    if (args.recipients.length === 0) {
-      throw new ConvexError("At least one recipient is required");
+    const recipientError = validateRecipientCount(args.recipients.length);
+    if (recipientError) throw new ConvexError(recipientError);
+    const subjectError = validateSubjectLength(args.subject);
+    if (subjectError) throw new ConvexError(subjectError);
+    const bodyError = validateBodyLength(args.body);
+    if (bodyError) throw new ConvexError(bodyError);
+
+    // Deduplicate attachment storage ids so the same file is never attached twice.
+    const seenStorage = new Set<string>();
+    const attachments = (args.attachments ?? []).filter((a) => {
+      const key = a.storage_id;
+      if (seenStorage.has(key)) return false;
+      seenStorage.add(key);
+      return true;
+    });
+    const attachmentError = validateAttachmentLimits(
+      attachments.length,
+      0,
+    );
+    if (attachmentError) throw new ConvexError(attachmentError);
+    if (attachments.length > 0) {
+      let totalBytes = 0;
+      for (const a of attachments) {
+        const buffer = await fetchStorageObject(
+          ctx,
+          a.storage_id,
+          MAX_ATTACHMENT_BYTES_TOTAL,
+        );
+        totalBytes += buffer.byteLength;
+        if (totalBytes > MAX_ATTACHMENT_BYTES_TOTAL) {
+          throw new ConvexError(
+            `Attachments exceed the ${Math.floor(MAX_ATTACHMENT_BYTES_TOTAL / (1024 * 1024))} MB total size limit`,
+          );
+        }
+      }
     }
 
     if (args.bodyStorageId) {
-      const bodyUrl = await ctx.storage.getUrl(args.bodyStorageId);
-      if (!bodyUrl) throw new ConvexError("Body document not found in storage");
-    }
-
-    if (args.attachments) {
-      for (const a of args.attachments) {
-        const url = await ctx.storage.getUrl(a.storage_id);
-        if (!url) {
-          throw new ConvexError(`Attachment not found in storage: ${a.filename}`);
-        }
-      }
+      await fetchStorageObject(ctx, args.bodyStorageId, MAX_BODY_DOCUMENT_BYTES);
     }
 
     const now = Date.now();
@@ -143,7 +187,7 @@ export const createDocumentDrafts = action({
         body: args.body,
         html_body: args.htmlBody,
         document_storage_id: args.bodyStorageId,
-        attachments: args.attachments,
+        attachments: attachments.length > 0 ? attachments : undefined,
         status: "pending_approval",
         owner_id,
         drafted_at: now,

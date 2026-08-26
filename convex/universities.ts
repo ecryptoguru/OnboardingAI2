@@ -5,6 +5,8 @@ import {
   internalMutation,
 } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
+import type { GenericMutationCtx } from "convex/server";
+import type { DataModel } from "./_generated/dataModel";
 import { v } from "convex/values";
 import { paginationOptsValidator } from "convex/server";
 import { validateAdmin, validateAuth } from "./lib/auth_utils";
@@ -517,6 +519,68 @@ export const update = mutation({
   },
 });
 
+type BulkInsertRow = {
+  university_name: string;
+  state?: string;
+  city?: string;
+  website?: string;
+  student_count?: number;
+  type?: string;
+  category?: string;
+  data_source?: string;
+  naac_grade?: string;
+};
+
+async function doBulkInsert(
+  ctx: GenericMutationCtx<DataModel>,
+  rows: BulkInsertRow[],
+) {
+  const now = Date.now();
+
+  // Fetch existing universities for deduplication
+  const existing = await ctx.db.query("universities").collect();
+
+  const ids: string[] = [];
+  const skipped: string[] = [];
+
+  for (const row of rows) {
+    if (isDuplicateOfExisting(row, existing)) {
+      skipped.push(row.university_name);
+      continue;
+    }
+
+    const inserted = await ctx.db.insert("universities", {
+      ...row,
+      website_status: "pending",
+      outreach_stage: "new",
+      created_at: now,
+      updated_at: now,
+    });
+
+    ids.push(inserted);
+    // Update local cache so subsequent rows in same batch don't duplicate each other
+    existing.push({
+      _id: inserted,
+      _creationTime: now,
+      university_name: row.university_name,
+      state: row.state,
+      city: row.city,
+      website: row.website,
+      website_status: "pending",
+      outreach_stage: "new",
+      student_count: row.student_count,
+      type: row.type,
+      category: row.category,
+      data_source: row.data_source,
+      naac_grade: row.naac_grade,
+      created_at: now,
+      updated_at: now,
+    } as (typeof existing)[0]);
+  }
+
+  return { inserted: ids.length, skipped: skipped.length, skippedNames: skipped };
+}
+
 export const bulkInsert = mutation({
   args: {
     rows: v.array(
@@ -535,50 +599,28 @@ export const bulkInsert = mutation({
   },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
-    const now = Date.now();
+    return await doBulkInsert(ctx, args.rows);
+  },
+});
 
-    // Fetch existing universities for deduplication
-    const existing = await ctx.db.query("universities").collect();
-
-    const ids: string[] = [];
-    const skipped: string[] = [];
-
-    for (const row of args.rows) {
-      if (isDuplicateOfExisting(row, existing)) {
-        skipped.push(row.university_name);
-        continue;
-      }
-
-      const inserted = await ctx.db.insert("universities", {
-        ...row,
-        website_status: "pending",
-        outreach_stage: "new",
-        created_at: now,
-        updated_at: now,
-      });
-
-      ids.push(inserted);
-      // Update local cache so subsequent rows in same batch don't duplicate each other
-      existing.push({
-        _id: inserted,
-        _creationTime: now,
-        university_name: row.university_name,
-        state: row.state,
-        city: row.city,
-        website: row.website,
-        website_status: "pending",
-        outreach_stage: "new",
-        student_count: row.student_count,
-        type: row.type,
-        category: row.category,
-        data_source: row.data_source,
-        naac_grade: row.naac_grade,
-        created_at: now,
-        updated_at: now,
-      } as (typeof existing)[0]);
-    }
-
-    return { inserted: ids.length, skipped: skipped.length, skippedNames: skipped };
+export const bulkInsertInternal = internalMutation({
+  args: {
+    rows: v.array(
+      v.object({
+        university_name: v.string(),
+        state: v.optional(v.string()),
+        city: v.optional(v.string()),
+        website: v.optional(v.string()),
+        student_count: v.optional(v.number()),
+        type: v.optional(v.string()),
+        category: v.optional(v.string()),
+        data_source: v.optional(v.string()),
+        naac_grade: v.optional(v.string()),
+      }),
+    ),
+  },
+  handler: async (ctx, args) => {
+    return await doBulkInsert(ctx, args.rows);
   },
 });
 
