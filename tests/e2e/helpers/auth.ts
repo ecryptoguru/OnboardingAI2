@@ -42,29 +42,41 @@ const ALLOWED_FAILURE_PATTERNS = [
  * the guard on cold connections; we wait out that window).
  */
 export async function signIn(page: Page) {
-  await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
-  await page.locator('input[name="email"]').fill(E2E_EMAIL!);
-  await page.locator('input[name="password"]').fill(E2E_PASSWORD!);
-  await page.locator('button[type="submit"]').click();
+  // Convex auth cold-start can briefly land on /dashboard then bounce back to
+  // /sign-in while the token refresh settles. Retry the whole flow up to 3
+  // times instead of a single long poll that can be caught on the wrong side
+  // of the bounce.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+    await page.locator('input[name="email"]').fill(E2E_EMAIL!);
+    await page.locator('input[name="password"]').fill(E2E_PASSWORD!);
+    await page.locator('button[type="submit"]').click();
 
-  // Wait for the dashboard shell, then confirm it stays put for a beat.
-  await expect
-    .poll(
-      async () => {
-        if (!page.url().includes("/dashboard")) return false;
-        const sidebarVisible = await page
-          .locator("aside nav a")
-          .first()
-          .isVisible()
-          .catch(() => false);
-        return sidebarVisible;
-      },
-      { timeout: 45000 },
-    )
-    .toBe(true);
-  await page.waitForTimeout(1500);
-  await expect(page).toHaveURL(/\/dashboard/);
-  await expect(page.locator("aside nav a").first()).toBeVisible();
+    try {
+      await expect
+        .poll(
+          async () => {
+            if (!page.url().includes("/dashboard")) return false;
+            const sidebarVisible = await page
+              .locator("aside nav a")
+              .first()
+              .isVisible()
+              .catch(() => false);
+            return sidebarVisible;
+          },
+          { timeout: 25000 },
+        )
+        .toBe(true);
+      await page.waitForTimeout(1500);
+      await expect(page).toHaveURL(/\/dashboard/);
+      await expect(page.locator("aside nav a").first()).toBeVisible();
+      return;
+    } catch (e) {
+      if (attempt === 2) throw e;
+      console.warn(`[signIn] attempt ${attempt + 1} bounced/timed out, retrying...`);
+      await page.waitForTimeout(1500);
+    }
+  }
 }
 
 /**
