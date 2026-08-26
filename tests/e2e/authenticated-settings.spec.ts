@@ -1,29 +1,35 @@
 import { test, expect } from "@playwright/test";
+import { requireAuth, signIn, gotoAuthenticated, collectErrors } from "./helpers/auth";
 
-test.describe("Settings Page", () => {
-  test("Settings page loads without console errors", async ({ page }) => {
-    const consoleErrors: string[] = [];
-    page.on("console", (msg) => {
-      if (msg.type() === "error") {
-        consoleErrors.push(msg.text());
-      }
-    });
+/**
+ * Settings verification is READ-ONLY: this spec asserts the page renders and
+ * exposes its sections exactly as before. It never writes, tests, or removes
+ * any credential, and it must not fail when provider keys are absent.
+ */
+test.describe("Settings Page (authenticated, read-only)", () => {
+  test.beforeEach(() => requireAuth());
 
-    await page.goto("/dashboard/settings", { waitUntil: "domcontentloaded", timeout: 60000 });
-    await page.waitForTimeout(500);
+  test("settings page renders all provider sections without errors", async ({
+    page,
+  }) => {
+    const errors = collectErrors(page);
+    await signIn(page);
 
-    const criticalErrors = consoleErrors.filter(
-      (e) =>
-        e.includes("Hydration") || e.includes("500") || e.includes("TypeError"),
-    );
+    await gotoAuthenticated(page, "/dashboard/settings");
+    await expect(
+      page.getByRole("heading", { level: 1, name: /Settings/i }),
+    ).toBeVisible();
 
-    expect(criticalErrors).toHaveLength(0);
-  });
+    // Provider sections are present (headings from the settings UI).
+    for (const name of [
+      "Google Gemini API Configuration",
+      "Serper API Configuration",
+      "Firecrawl API Configuration",
+      "ZeptoMail Email API",
+    ]) {
+      await expect(page.getByRole("heading", { name })).toBeVisible();
+    }
 
-  test("Settings page renders content", async ({ page }) => {
-    await page.goto("/dashboard/settings", { waitUntil: "domcontentloaded", timeout: 60000 });
-    const bodyText = await page.locator("body").textContent();
-    expect(bodyText).toBeTruthy();
-    expect(bodyText!.length).toBeGreaterThan(50);
+    errors.assertClean();
   });
 });

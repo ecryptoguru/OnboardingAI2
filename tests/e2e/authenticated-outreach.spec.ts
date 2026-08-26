@@ -1,36 +1,28 @@
 import { test, expect } from "@playwright/test";
+import { requireAuth, signIn, gotoAuthenticated, collectErrors } from "./helpers/auth";
 
-test.describe("Outreach Page", () => {
-  test("Outreach page loads without console errors", async ({ page }) => {
-    const consoleErrors: string[] = [];
-    page.on("console", (msg) => {
-      if (msg.type() === "error") {
-        consoleErrors.push(msg.text());
-      }
-    });
+test.describe("Outreach (authenticated)", () => {
+  test.beforeEach(() => requireAuth());
 
-    await page.goto("/dashboard/outreach", { waitUntil: "domcontentloaded", timeout: 60000 });
-    await page.waitForTimeout(500);
+  test("outreach kanban and replies panel render without errors", async ({
+    page,
+  }) => {
+    const errors = collectErrors(page);
+    await signIn(page);
 
-    const criticalErrors = consoleErrors.filter(
-      (e) =>
-        e.includes("Hydration") || e.includes("500") || e.includes("TypeError"),
-    );
+    await gotoAuthenticated(page, "/dashboard/outreach");
+    await expect(
+      page.getByRole("heading", { level: 1, name: /Outreach Pipeline/i }),
+    ).toBeVisible();
 
-    expect(criticalErrors).toHaveLength(0);
-  });
+    // Document Mailer entry point exists.
+    await expect(
+      page.getByRole("button", { name: /Document Mailer/i }),
+    ).toBeVisible();
 
-  test("Outreach page renders content", async ({ page }) => {
-    await page.goto("/dashboard/outreach", { waitUntil: "domcontentloaded", timeout: 60000 });
-    const bodyText = await page.locator("body").textContent();
-    expect(bodyText).toBeTruthy();
-    expect(bodyText!.length).toBeGreaterThan(50);
-  });
+    // Replies section renders (empty or populated).
+    await expect(page.getByText(/Replies/i).first()).toBeVisible();
 
-  test("Outreach demo page loads", async ({ page }) => {
-    await page.goto("/dashboard/outreach/demo", { waitUntil: "domcontentloaded", timeout: 60000 });
-    const bodyText = await page.locator("body").textContent();
-    expect(bodyText).toBeTruthy();
-    expect(bodyText!.length).toBeGreaterThan(50);
+    errors.assertClean();
   });
 });

@@ -28,6 +28,12 @@ import {
 interface DocumentMailerModalProps {
   universities: Doc<"universities">[];
   onClose: () => void;
+  /**
+   * Called after drafts are created. The modal unmounts immediately after
+   * success, so the success message must be surfaced by the parent (a toast
+   * owned by this component would vanish with it).
+   */
+  onCreated?: (count: number) => void;
 }
 
 interface UploadedFile {
@@ -54,6 +60,7 @@ function classNames(...classes: (string | false | null | undefined)[]) {
 export function DocumentMailerModal({
   universities,
   onClose,
+  onCreated,
 }: DocumentMailerModalProps) {
   const { show, toastElement } = useToast();
   const generateUploadUrl = useMutation(api.files.generateUploadUrl);
@@ -407,8 +414,8 @@ export function DocumentMailerModal({
         attachments: attachments.length > 0 ? attachments : undefined,
         recipients,
       });
-      show(`Created ${recipients.length} draft(s) for approval`, "success");
       onClose();
+      onCreated?.(recipients.length);
     } catch (err) {
       console.error(err);
       show(
@@ -449,10 +456,14 @@ export function DocumentMailerModal({
         <div className="p-6 space-y-6">
           {/* Subject */}
           <div>
-            <label className="block text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
+            <label
+              htmlFor="dm-subject"
+              className="block text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2"
+            >
               Subject
             </label>
             <input
+              id="dm-subject"
               type="text"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
@@ -521,10 +532,14 @@ export function DocumentMailerModal({
 
             {bodyFile && (
               <div className="mt-3">
-                <label className="block text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2">
+                <label
+                  htmlFor="dm-body"
+                  className="block text-xs font-bold text-muted-foreground uppercase tracking-wider mb-2"
+                >
                   Extracted email body (editable)
                 </label>
                 <textarea
+                  id="dm-body"
                   value={bodyText}
                   onChange={(e) => setBodyText(e.target.value)}
                   rows={8}

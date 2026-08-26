@@ -66,6 +66,7 @@ const EMAIL_STATUS_ICON: Record<string, React.ReactNode> = {
 };
 
 export default function OutreachPage() {
+  const { show, toastElement } = useToast();
   const universities = useQuery(api.universities.list, {});
   const replies = useQuery(api.replies.list, {});
   // const funnel = useQuery(api.universities.getFunnelStats);
@@ -314,6 +315,9 @@ export default function OutreachPage() {
         <DocumentMailerModal
           universities={universities}
           onClose={() => setShowDocumentMailer(false)}
+          onCreated={(count) =>
+            show(`Created ${count} draft(s) for approval`, "success")
+          }
         />
       )}
       {showSkipModal && (
@@ -344,6 +348,7 @@ export default function OutreachPage() {
         </>
       )}
 
+      {toastElement}
     </div>
   );
 }

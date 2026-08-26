@@ -4,6 +4,9 @@ import { withSentryConfig } from "@sentry/nextjs";
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   productionBrowserSourceMaps: false,
+  // Local Convex backends bind 127.0.0.1, so E2E must reach the dev server
+  // through the same host; dev-only, no effect on production.
+  allowedDevOrigins: ["127.0.0.1"],
   typescript: {
     ignoreBuildErrors: false,
   },

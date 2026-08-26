@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { ConvexClientProvider } from "@/components/ConvexClientProvider";
 import "./globals.css";
 
@@ -34,6 +34,9 @@ export const metadata: Metadata = {
     title: "Fretbox Outreach AI",
     description: "Automate your university outreach with intelligent insights, automated enrichment, and data-driven engagement.",
   },
+};
+
+export const viewport: Viewport = {
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f8fafc" },
     { media: "(prefers-color-scheme: dark)", color: "#09090b" },

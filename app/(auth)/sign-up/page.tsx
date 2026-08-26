@@ -109,7 +109,7 @@ export default function SignUpPage() {
 
         <p className="text-center text-muted-foreground text-xs mt-6">
           Already have an account?{" "}
-          <Link href="/sign-in" className="text-indigo-400 hover:text-indigo-300">Sign in</Link>
+          <Link href="/sign-in" className="text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300 underline underline-offset-2">Sign in</Link>
         </p>
         <p className="text-[10px] text-zinc-500 mt-4 uppercase tracking-widest text-center">
           Authorized access only

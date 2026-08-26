@@ -1,41 +1,68 @@
 import { test, expect } from "@playwright/test";
+import { requireAuth, signIn } from "./helpers/auth";
 
 test.describe("Keyboard Navigation & Accessibility", () => {
-  test("Sign-in form is keyboard navigable", async ({ page }) => {
+  test("sign-in form is keyboard navigable in order", async ({ page }) => {
     await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
 
-    // Tab through the form elements
+    // The skip link is intentionally the first focusable element.
     await page.keyboard.press("Tab");
-    const focused1 = await page.evaluate(() => document.activeElement?.getAttribute("name"));
-    expect(["email", "password", null]).toContain(focused1);
+    await expect(
+      page.getByRole("link", { name: "Skip to main content" }),
+    ).toBeFocused();
 
     await page.keyboard.press("Tab");
-    const focused2 = await page.evaluate(() => document.activeElement?.getAttribute("name"));
-    expect(["email", "password", null]).toContain(focused2);
+    await expect(page.locator('input[name="email"]')).toBeFocused();
+
+    await page.keyboard.press("Tab");
+    await expect(page.locator('input[name="password"]')).toBeFocused();
+
+    // The "Forgot password?" link sits between the password field and submit.
+    await page.keyboard.press("Tab");
+    await expect(
+      page.getByRole("link", { name: "Forgot password?" }),
+    ).toBeFocused();
+
+    await page.keyboard.press("Tab");
+    await expect(page.locator('button[type="submit"]')).toBeFocused();
   });
 
-  test("Dashboard sidebar links are focusable", async ({ page }) => {
-    await page.goto("/dashboard", { waitUntil: "domcontentloaded" });
+  test("skip link is the first focusable element and targets main content", async ({
+    page,
+  }) => {
+    await page.goto("/", { waitUntil: "domcontentloaded" });
+    await page.keyboard.press("Tab");
+    await expect(
+      page.getByRole("link", { name: "Skip to main content" }),
+    ).toBeFocused();
 
-    // Find the first sidebar link and check it can be focused
+    await page.keyboard.press("Enter");
+    await expect(page.locator("#main-content")).toBeFocused();
+  });
+
+  test("dashboard sidebar links are keyboard focusable", async ({ page }) => {
+    requireAuth();
+    await signIn(page);
+
     const firstLink = page.locator("aside nav a").first();
-    const count = await firstLink.count();
-
-    if (count > 0) {
-      await firstLink.focus();
-      const isFocused = await firstLink.evaluate((el) => el === document.activeElement);
-      expect(isFocused).toBe(true);
-    }
+    await expect(firstLink).toBeVisible();
+    await firstLink.focus();
+    await expect(firstLink).toBeFocused();
   });
 
-  test("Sign-in button is reachable via keyboard", async ({ page }) => {
-    await page.goto("/sign-in", { waitUntil: "domcontentloaded" });
+  test("dialog Escape closes the API-key modal", async ({ page }) => {
+    requireAuth();
+    await signIn(page);
 
-    const submitBtn = page.locator('button[type="submit"]');
-    await expect(submitBtn).toBeVisible();
+    // Navigate to outreach where the Gemini key gate lives.
+    await page.goto("/dashboard/outreach", { waitUntil: "domcontentloaded" });
+    const documentMailer = page.getByRole("button", { name: /Document Mailer/i });
+    await documentMailer.click();
 
-    // The button should be in the tab order
-    const tabIndex = await submitBtn.evaluate((el) => el.tabIndex);
-    expect(tabIndex).toBeLessThanOrEqual(0); // 0 or -1 are both OK for focusable elements
+    // If a Gemini key is configured, the modal opens directly.
+    const dialog = page.getByRole("dialog", { name: "Document Mailer" });
+    await expect(dialog).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(dialog).toBeHidden();
   });
 });

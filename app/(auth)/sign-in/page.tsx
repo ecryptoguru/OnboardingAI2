@@ -92,7 +92,7 @@ export default function SignInPage() {
           <div className="text-right -mt-2">
             <Link
               href="/forgot-password"
-              className="text-sm text-indigo-400 hover:text-indigo-300 font-medium transition-colors"
+              className="text-sm text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300 font-medium transition-colors underline underline-offset-2"
             >
               Forgot password?
             </Link>
@@ -116,7 +116,7 @@ export default function SignInPage() {
         <div className="text-center mt-6 pt-6 border-t border-card-border">
           <p className="text-muted-foreground text-sm">
             Don&apos;t have an account?{" "}
-            <Link href="/sign-up" className="text-indigo-400 hover:text-indigo-300 font-semibold transition-colors">
+            <Link href="/sign-up" className="text-indigo-600 hover:text-indigo-500 dark:text-indigo-400 dark:hover:text-indigo-300 font-semibold transition-colors underline underline-offset-2">
               Sign up
             </Link>
           </p>

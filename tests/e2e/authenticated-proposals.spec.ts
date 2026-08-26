@@ -1,29 +1,30 @@
 import { test, expect } from "@playwright/test";
+import { requireAuth, signIn, gotoAuthenticated, collectErrors } from "./helpers/auth";
 
-test.describe("Proposals Page", () => {
-  test("Proposals page loads without console errors", async ({ page }) => {
-    const consoleErrors: string[] = [];
-    page.on("console", (msg) => {
-      if (msg.type() === "error") {
-        consoleErrors.push(msg.text());
-      }
-    });
+test.describe("Proposals (authenticated)", () => {
+  test.beforeEach(() => requireAuth());
 
-    await page.goto("/dashboard/proposals", { waitUntil: "domcontentloaded", timeout: 60000 });
-    await page.waitForTimeout(500);
+  test("proposals page renders cards or empty state without errors", async ({
+    page,
+  }) => {
+    const errors = collectErrors(page);
+    await signIn(page);
 
-    const criticalErrors = consoleErrors.filter(
-      (e) =>
-        e.includes("Hydration") || e.includes("500") || e.includes("TypeError"),
-    );
+    await gotoAuthenticated(page, "/dashboard/proposals");
+    await expect(
+      page.getByRole("heading", { level: 1, name: /Proposals/i }),
+    ).toBeVisible();
 
-    expect(criticalErrors).toHaveLength(0);
-  });
+    // Either a "Generate Proposal" control or an empty state must exist.
+    await expect
+      .poll(async () => {
+        const hasButton =
+          (await page.getByRole("button", { name: /Generate Proposal/i }).count()) > 0;
+        const hasEmpty = (await page.getByText(/No proposals/i).count()) > 0;
+        return hasButton || hasEmpty;
+      })
+      .toBe(true);
 
-  test("Proposals page renders content", async ({ page }) => {
-    await page.goto("/dashboard/proposals", { waitUntil: "domcontentloaded", timeout: 60000 });
-    const bodyText = await page.locator("body").textContent();
-    expect(bodyText).toBeTruthy();
-    expect(bodyText!.length).toBeGreaterThan(50);
+    errors.assertClean();
   });
 });

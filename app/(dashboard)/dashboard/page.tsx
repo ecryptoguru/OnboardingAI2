@@ -178,7 +178,7 @@ export default function UniversitiesPage() {
               onClick={() => setActiveTab(tab)}
               className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 flex items-center gap-2 ${
                 activeTab === tab
-                  ? "bg-muted text-white shadow-sm"
+                  ? "bg-zinc-800 text-white shadow-sm dark:bg-muted"
                   : "text-muted-foreground hover:text-foreground hover:bg-muted/30"
               }`}
             >
@@ -187,7 +187,7 @@ export default function UniversitiesPage() {
                 <span
                   className={`text-[10px] px-1.5 py-0.5 rounded-md transition-colors font-bold ${
                     activeTab === tab
-                      ? "bg-zinc-700/50 text-white"
+                      ? "bg-zinc-600 text-white dark:bg-zinc-700/50"
                       : "bg-muted/50 text-muted-foreground"
                   }`}
                 >

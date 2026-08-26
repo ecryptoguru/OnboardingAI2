@@ -1,34 +1,24 @@
 import { test, expect } from "@playwright/test";
+import { requireAuth, signIn, gotoAuthenticated, collectErrors } from "./helpers/auth";
 
-test.describe("Analytics Page", () => {
-  test("Analytics page loads without console errors", async ({ page }) => {
-    const consoleErrors: string[] = [];
-    page.on("console", (msg) => {
-      if (msg.type() === "error") {
-        consoleErrors.push(msg.text());
-      }
-    });
+test.describe("Analytics (authenticated)", () => {
+  test.beforeEach(() => requireAuth());
 
-    await page.goto("/dashboard/analytics", { waitUntil: "domcontentloaded", timeout: 60000 });
-    await page.waitForTimeout(500);
+  test("analytics page renders funnel and email stats without errors", async ({
+    page,
+  }) => {
+    const errors = collectErrors(page);
+    await signIn(page);
 
-    const criticalErrors = consoleErrors.filter(
-      (e) =>
-        e.includes("Hydration") || e.includes("500") || e.includes("TypeError"),
-    );
+    await gotoAuthenticated(page, "/dashboard/analytics");
+    await expect(
+      page.getByRole("heading", { level: 1, name: /Analytics/i }),
+    ).toBeVisible();
 
-    expect(criticalErrors).toHaveLength(0);
-  });
+    // Funnel stages render (labels from the analytics UI).
+    await expect(page.getByText("Total Universities", { exact: false }).first()).toBeVisible();
+    await expect(page.getByText("Enriched", { exact: false }).first()).toBeVisible();
 
-  test("Analytics page is not a 500", async ({ page }) => {
-    const response = await page.goto("/dashboard/analytics", { waitUntil: "domcontentloaded", timeout: 60000 });
-    expect(response?.status()).not.toBe(500);
-  });
-
-  test("Analytics page renders content", async ({ page }) => {
-    await page.goto("/dashboard/analytics", { waitUntil: "domcontentloaded", timeout: 60000 });
-    const bodyText = await page.locator("body").textContent();
-    expect(bodyText).toBeTruthy();
-    expect(bodyText!.length).toBeGreaterThan(50);
+    errors.assertClean();
   });
 });
