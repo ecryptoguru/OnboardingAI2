@@ -205,6 +205,30 @@ export const confirmMeeting = action({
       return { success: false, error: "Meeting already confirmed for a different time" };
     }
 
+    // Atomically claim the proposal so concurrent confirms cannot create
+    // duplicate calendar events.
+    const claim = await ctx.runMutation(internal.proposals.claimMeetingInternal, {
+      id: args.proposalId,
+    });
+    if (!claim.claimed) {
+      if (claim.reason === "already_sent" && claim.proposal) {
+        const p = claim.proposal;
+        return {
+          success: true,
+          eventId: p.calendar_event_id ?? undefined,
+          meetLink: p.meet_link ?? undefined,
+          meetingDate: p.meeting_date ?? undefined,
+        };
+      }
+      if (claim.reason === "in_flight") {
+        return {
+          success: false,
+          error: "A meeting is already being created for this proposal. Please wait.",
+        };
+      }
+      return { success: false, error: "Meeting cannot be created in the current state" };
+    }
+
     const university = await ctx.runQuery(internal.universities.getInternal, {
       universityId: proposal.university_id,
     });
@@ -251,10 +275,10 @@ export const confirmMeeting = action({
     });
 
     if (!meeting.success) {
-      await ctx.runMutation(internal.proposals.updateInternal, {
+      // Release the claim back to a retryable `pending` state.
+      await ctx.runMutation(internal.proposals.releaseMeetingClaimInternal, {
         id: args.proposalId,
         meeting_date: startTimeMs,
-        calendar_event_status: "pending",
       });
       return {
         success: false,
@@ -272,6 +296,7 @@ export const confirmMeeting = action({
       meet_link: meeting.meetLink,
       calendar_event_status: "confirmed",
       status: "meeting_confirmed",
+      calendar_claim_started_at: undefined,
     });
 
     return {
@@ -364,6 +389,27 @@ export const emailProposal = action({
     });
     if (!proposal || !proposal.proposal_json)
       throw new Error("Proposal content not found");
+
+    if (!args.toEmails || args.toEmails.length === 0) {
+      throw new Error("At least one recipient is required");
+    }
+    if (args.toEmails.length > 50 || (args.ccEmails ?? []).length > 50) {
+      throw new Error("Too many recipients (max 50 per list)");
+    }
+
+    // Atomically claim the proposal so concurrent sends cannot duplicate.
+    const claim = await ctx.runMutation(internal.proposals.claimEmailSendInternal, {
+      id: args.proposalId,
+    });
+    if (!claim.claimed) {
+      if (claim.reason === "in_flight") {
+        return {
+          success: false,
+          error: "A proposal email is already being sent. Please wait.",
+        };
+      }
+      throw new Error("Proposal email cannot be sent in the current state");
+    }
 
     const invalidTo = args.toEmails.filter((e: string) => !isValidEmail(e));
     const invalidCc = (args.ccEmails ?? []).filter(
@@ -606,6 +652,9 @@ export const emailProposal = action({
     });
 
     if (sendResult.success) {
+      await ctx.runMutation(internal.proposals.finalizeEmailSendInternal, {
+        id: args.proposalId,
+      });
       await ctx.runMutation(internal.proposals.updateInternal, {
         id: args.proposalId,
         status: "sent",
@@ -626,11 +675,17 @@ export const emailProposal = action({
           sent_at: Date.now(),
         });
       }
-    } else if (trackingEmailId) {
-      await ctx.runMutation(internal.emails.updateStatusInternal, {
-        id: trackingEmailId,
-        status: "failed",
+    } else {
+      // Release the claim so the user can retry; never wedge the proposal.
+      await ctx.runMutation(internal.proposals.releaseEmailSendInternal, {
+        id: args.proposalId,
       });
+      if (trackingEmailId) {
+        await ctx.runMutation(internal.emails.updateStatusInternal, {
+          id: trackingEmailId,
+          status: "failed",
+        });
+      }
     }
 
     return sendResult;

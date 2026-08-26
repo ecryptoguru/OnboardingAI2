@@ -9,6 +9,7 @@ import {
   getCurrentUserId,
   isAdmin,
 } from "../lib/auth_utils";
+import { isTransientSendError } from "../lib/sendState";
 
 export type EmailAttachment = {
   name: string;
@@ -159,23 +160,49 @@ export const sendEmail = internalAction({
 /**
  * HITL: Approves a drafted email, sends it via ZeptoMail,
  * updates status to "sent", and resumes the sequence.
+ *
+ * Concurrency-safe: the draft is atomically claimed (`sending`) before any
+ * external call. Concurrent approvals of the same draft can never double-send;
+ * a transient provider failure releases the draft back to `pending_approval`
+ * (with `last_error`) so a human can safely retry instead of the draft being
+ * lost to `failed`.
  */
 export const approveAndSend = action({
   args: { emailId: v.id("emailsSent") },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
     // 1. Fetch the drafted email and verify ownership
-    const email = await ctx.runQuery(internal.emails.getInternal, {
+    const pre = await ctx.runQuery(internal.emails.getInternal, {
       id: args.emailId,
     });
-    if (!email) throw new Error("Email not found");
-    if (email.status !== "pending_approval")
-      throw new Error("Email is not pending approval");
+    if (!pre) return { success: false, error: "Email not found" };
     const userId = await getCurrentUserId(ctx);
     const admin = await isAdmin(ctx);
-    if (!admin && (email.owner_id === undefined || email.owner_id !== userId)) {
-      throw new Error("Forbidden: Not your draft");
+    if (!admin && (pre.owner_id === undefined || pre.owner_id !== userId)) {
+      return { success: false, error: "Forbidden: not your draft" };
     }
+
+    // 2. Atomically claim the draft. Only one concurrent caller wins.
+    const claim = await ctx.runMutation(internal.emails.claimForSendingInternal, {
+      id: args.emailId,
+    });
+    if (!claim.claimed) {
+      if (claim.reason === "already_sent") {
+        return {
+          success: true,
+          idempotent: true,
+          message: "This email was already sent.",
+        };
+      }
+      if (claim.reason === "in_flight") {
+        return {
+          success: false,
+          error: "This email is already being sent. Please wait.",
+        };
+      }
+      return { success: false, error: "Email is not pending approval" };
+    }
+    const email = claim.email!;
 
     // Resolve recipient email: explicit custom address takes priority
     let toAddress = email.recipient_email;
@@ -183,68 +210,116 @@ export const approveAndSend = action({
       const st = await ctx.runQuery(internal.stakeholders.getByIdInternal, {
         id: email.stakeholder_id,
       });
-      if (!st || !st.email) throw new Error("Stakeholder missing email");
+      if (!st || !st.email) {
+        await ctx.runMutation(internal.emails.releaseForRetryInternal, {
+          id: args.emailId,
+          error: "Stakeholder missing email",
+        });
+        return { success: false, error: "Stakeholder missing email" };
+      }
       toAddress = st.email;
     }
-    if (!toAddress) throw new Error("No recipient email for this draft");
+    if (!toAddress) {
+      await ctx.runMutation(internal.emails.releaseForRetryInternal, {
+        id: args.emailId,
+        error: "No recipient email for this draft",
+      });
+      return { success: false, error: "No recipient email for this draft" };
+    }
 
-    // Load and base64-encode any attachments
+    // Load and base64-encode any attachments. Any failure here must release
+    // the claim so the draft is never stuck in `sending`.
     const MAX_ATTACHMENT_BYTES = 12_000_000;
     const emailAttachments = email.attachments ?? [];
     const attachmentPayloads: EmailAttachment[] = [];
     let totalAttachmentSize = 0;
-    for (const a of emailAttachments) {
-      const fileUrl = await ctx.storage.getUrl(a.storage_id);
-      if (!fileUrl) throw new Error(`Attachment not found: ${a.filename}`);
-      const response = await fetch(fileUrl, {
-        signal: AbortSignal.timeout(15000),
-      });
-      if (!response.ok) {
-        throw new Error(`Failed to fetch attachment: ${a.filename}`);
+    try {
+      for (const a of emailAttachments) {
+        const fileUrl = await ctx.storage.getUrl(a.storage_id);
+        if (!fileUrl) throw new Error(`Attachment not found: ${a.filename}`);
+        const response = await fetch(fileUrl, {
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!response.ok) {
+          throw new Error(`Failed to fetch attachment: ${a.filename}`);
+        }
+        const buffer = Buffer.from(await response.arrayBuffer());
+        const content = buffer.toString("base64");
+        totalAttachmentSize += content.length;
+        if (totalAttachmentSize > MAX_ATTACHMENT_BYTES) {
+          throw new Error(
+            `Attachments exceed the ${MAX_ATTACHMENT_BYTES / 1_000_000} MB encoded size limit`,
+          );
+        }
+        attachmentPayloads.push({
+          name: a.filename,
+          mime_type: a.mime_type || "application/octet-stream",
+          content,
+        });
       }
-      const buffer = Buffer.from(await response.arrayBuffer());
-      const content = buffer.toString("base64");
-      totalAttachmentSize += content.length;
-      if (totalAttachmentSize > MAX_ATTACHMENT_BYTES) {
-        throw new Error(
-          `Attachments exceed the ${MAX_ATTACHMENT_BYTES / 1_000_000} MB encoded size limit`,
-        );
-      }
-      attachmentPayloads.push({
-        name: a.filename,
-        mime_type: a.mime_type || "application/octet-stream",
-        content,
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      await ctx.runMutation(internal.emails.releaseForRetryInternal, {
+        id: args.emailId,
+        error: message,
       });
+      return { success: false, error: message };
     }
 
-    // 2. Send via ZeptoMail
+    // 3. Send via ZeptoMail. Any throw here must release the claim so the
+    //    draft is never stuck in `sending`.
     const customMessageId = `<fretbox-${email._id}@reply.fretbox.in>`;
-    const sendResult = await doSendEmail(ctx, {
-      to: toAddress,
-      subject: email.subject,
-      text: email.body,
-      html: email.html_body ?? undefined,
-      attachments:
-        attachmentPayloads.length > 0 ? attachmentPayloads : undefined,
-      messageIdHeader: customMessageId,
-      clientReference: args.emailId,
-    });
+    let sendResult: SendEmailResult;
+    try {
+      sendResult = await doSendEmail(ctx, {
+        to: toAddress,
+        subject: email.subject,
+        text: email.body,
+        html: email.html_body ?? undefined,
+        attachments:
+          attachmentPayloads.length > 0 ? attachmentPayloads : undefined,
+        messageIdHeader: customMessageId,
+        clientReference: args.emailId,
+      });
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      await ctx.runMutation(
+        isTransientSendError(message)
+          ? internal.emails.releaseForRetryInternal
+          : internal.emails.failPermanentlyInternal,
+        { id: args.emailId, error: message },
+      );
+      return {
+        success: false,
+        error: isTransientSendError(message)
+          ? `ZeptoMail is temporarily unavailable (${message}). The draft is back in your approval queue — you can retry.`
+          : `ZeptoMail failed (${message}). The draft was marked as failed.`,
+      };
+    }
 
     if (!sendResult.success) {
-      await ctx.runMutation(internal.emails.updateStatusInternal, {
-        id: args.emailId,
-        status: "failed",
-      });
-      throw new Error(`ZeptoMail failed: ${sendResult.error}`);
+      const error = sendResult.error ?? "Unknown ZeptoMail error";
+      const transient = isTransientSendError(error, sendResult.details);
+      await ctx.runMutation(
+        transient
+          ? internal.emails.releaseForRetryInternal
+          : internal.emails.failPermanentlyInternal,
+        { id: args.emailId, error },
+      );
+      return {
+        success: false,
+        error: transient
+          ? `ZeptoMail is temporarily unavailable (${error}). The draft is back in your approval queue — you can retry.`
+          : `ZeptoMail rejected the email (${error}). The draft was marked as failed.`,
+      };
     }
 
     const now = Date.now();
     // Store the request_id returned by ZeptoMail; webhooks will match on email_reference or client_reference
     const zeptomailMessageId = sendResult.messageId;
-    // 3. Update Email status
-    await ctx.runMutation(internal.emails.updateStatusInternal, {
+    // 4. Finalize the claimed email as sent
+    await ctx.runMutation(internal.emails.finalizeSentInternal, {
       id: args.emailId,
-      status: "sent",
       zeptomail_message_id: zeptomailMessageId,
       sent_at: now,
     });

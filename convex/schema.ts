@@ -260,6 +260,7 @@ export default defineSchema({
     owner_id: v.optional(v.id("users")), // user who created/owns this draft
     status: v.union(
       v.literal("pending_approval"),
+      v.literal("sending"), // transient: claimed by approveAndSend, in flight
       v.literal("queued"),
       v.literal("sent"),
       v.literal("delivered"),
@@ -271,6 +272,8 @@ export default defineSchema({
     drafted_at: v.optional(v.number()), // when the draft was created
     sent_at: v.optional(v.number()),    // when it was actually dispatched
     opened_at: v.optional(v.number()),
+    send_attempts: v.optional(v.number()), // increments per claim
+    last_error: v.optional(v.string()),    // last send failure message (retry UI)
   })
     .index("by_sequence", ["sequence_id"])
     .index("by_university", ["university_id"])
@@ -321,10 +324,19 @@ export default defineSchema({
     calendar_event_status: v.optional(
       v.union(
         v.literal("pending"),
+        v.literal("creating"), // transient: claimed by confirmMeeting, in flight
         v.literal("confirmed"),
         v.literal("cancelled"),
       ),
     ),
+    calendar_claim_started_at: v.optional(v.number()), // stale-claim guard
+    email_send_state: v.optional(
+      v.union(
+        v.literal("sending"), // transient: proposal email in flight
+        v.literal("sent"),    // informational; does not block deliberate resends
+      ),
+    ),
+    email_send_started_at: v.optional(v.number()), // stale-claim guard
     created_at: v.number(),
     updated_at: v.number(),
   }).index("by_university", ["university_id"]).index("by_created_at", ["created_at"]),

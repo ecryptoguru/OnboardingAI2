@@ -66,14 +66,36 @@ export default function ApprovalsPage() {
   };
 
   const handleSave = async (id: Id<"emailsSent">) => {
-    await updateDraft({ id, subject: editSubject, body: editBody });
-    setEditingId(null);
+    addLoading(id);
+    try {
+      await updateDraft({ id, subject: editSubject, body: editBody });
+      setEditingId(null);
+      show("Draft updated", "success");
+    } catch (e) {
+      console.error(e);
+      show(
+        e instanceof Error ? e.message : "Failed to save draft",
+        "error",
+      );
+      // Keep the editor open so the edit is not lost.
+    } finally {
+      removeLoading(id);
+    }
   };
 
   const handleApprove = async (id: Id<"emailsSent">) => {
     addLoading(id);
     try {
-      await approveAndSend({ emailId: id });
+      const result = (await approveAndSend({ emailId: id })) as {
+        success?: boolean;
+        error?: string;
+        message?: string;
+      };
+      if (result.success) {
+        show(result.message ?? "Email sent", "success");
+      } else {
+        show(result.error ?? "Failed to approve and send email", "error");
+      }
     } catch (e) {
       console.error(e);
       show("Failed to approve and send email", "error");
@@ -92,6 +114,7 @@ export default function ApprovalsPage() {
     addLoading(id);
     try {
       await rejectDraft({ id });
+      show("Draft rejected", "success");
     } catch (e) {
       console.error(e);
       show("Failed to reject draft", "error");
@@ -108,14 +131,29 @@ export default function ApprovalsPage() {
     )
       return;
     setBulkApproving(true);
+    const results = { sent: 0, failed: 0, skipped: 0 };
     for (const email of pendingEmails) {
+      // Skip anything another tab already claimed (now in flight or sent).
+      if (email.status !== "pending_approval") {
+        results.skipped++;
+        continue;
+      }
       try {
-        await approveAndSend({ emailId: email._id });
+        const result = (await approveAndSend({ emailId: email._id })) as {
+          success?: boolean;
+        };
+        if (result.success) results.sent++;
+        else results.failed++;
       } catch (e) {
         console.error("Failed to approve email", email._id, e);
+        results.failed++;
       }
     }
     setBulkApproving(false);
+    show(
+      `Bulk send finished — sent ${results.sent}, failed ${results.failed}, skipped ${results.skipped}. Failed drafts are still in the queue.`,
+      results.failed > 0 ? "error" : "success",
+    );
   };
 
   return (
@@ -174,6 +212,7 @@ export default function ApprovalsPage() {
             {pendingEmails.map((email) => {
               const isEditing = editingId === email._id;
               const isLoading = loadingIds.has(email._id);
+              const isSending = email.status === "sending";
 
               return (
                 <div
@@ -192,8 +231,10 @@ export default function ApprovalsPage() {
                         </div>
                         <div>
                           <p className="text-[10px] text-muted-foreground uppercase tracking-wider font-semibold">
-                            {STEP_LABELS[email.step_number] ??
-                              `Step ${email.step_number}`}
+                            {isSending
+                              ? "Sending…"
+                              : (STEP_LABELS[email.step_number] ??
+                                `Step ${email.step_number}`)}
                           </p>
                         </div>
                       </div>
@@ -207,41 +248,59 @@ export default function ApprovalsPage() {
                           To: {email.stakeholder_name ?? "—"} ·{" "}
                           {email.stakeholder_email ?? email.recipient_email ?? "No email"}
                         </p>
+                        {email.last_error &&
+                          email.status === "pending_approval" && (
+                            <p
+                              className="text-[10px] text-red-400/90 truncate mt-0.5"
+                              title={email.last_error}
+                            >
+                              Last attempt failed: {email.last_error}
+                            </p>
+                          )}
                       </div>
                     </div>
 
                     {/* Actions */}
                     <div className="flex items-center gap-2 shrink-0">
-                      {!isEditing && (
-                        <button
-                          type="button"
-                          onClick={() => handleEdit(email)}
-                          disabled={isLoading}
-                          className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors disabled:opacity-50"
-                          title="Edit Draft"
-                          aria-label="Edit Draft"
-                        >
-                          <PencilIcon className="h-4 w-4" />
-                        </button>
+                      {isSending ? (
+                        <span className="flex items-center gap-2 px-3 py-1.5 text-sm font-semibold text-sky-400 bg-sky-500/10 border border-sky-500/25 rounded-lg">
+                          <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse" />
+                          Sending…
+                        </span>
+                      ) : (
+                        <>
+                          {!isEditing && (
+                            <button
+                              type="button"
+                              onClick={() => handleEdit(email)}
+                              disabled={isLoading}
+                              className="p-2 text-muted-foreground hover:text-foreground hover:bg-muted rounded-lg transition-colors disabled:opacity-50"
+                              title="Edit Draft"
+                              aria-label="Edit Draft"
+                            >
+                              <PencilIcon className="h-4 w-4" />
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => handleReject(email._id)}
+                            disabled={isLoading}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-400 hover:text-white hover:bg-red-500/15 rounded-lg transition-colors disabled:opacity-50 border border-transparent hover:border-red-500/25"
+                          >
+                            <XCircleIcon className="h-4 w-4" />
+                            Reject
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleApprove(email._id)}
+                            disabled={isLoading || isEditing}
+                            className="flex items-center gap-1.5 px-4 py-1.5 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg shadow-sm transition-all duration-200 disabled:opacity-50"
+                          >
+                            <CheckCircleIcon className="h-4 w-4" />
+                            {isLoading ? "Sending..." : "Approve & Send →"}
+                          </button>
+                        </>
                       )}
-                      <button
-                        type="button"
-                        onClick={() => handleReject(email._id)}
-                        disabled={isLoading}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-red-400 hover:text-white hover:bg-red-500/15 rounded-lg transition-colors disabled:opacity-50 border border-transparent hover:border-red-500/25"
-                      >
-                        <XCircleIcon className="h-4 w-4" />
-                        Reject
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleApprove(email._id)}
-                        disabled={isLoading || isEditing}
-                        className="flex items-center gap-1.5 px-4 py-1.5 text-sm font-semibold text-white bg-emerald-600 hover:bg-emerald-500 rounded-lg shadow-sm transition-all duration-200 disabled:opacity-50"
-                      >
-                        <CheckCircleIcon className="h-4 w-4" />
-                        {isLoading ? "Sending..." : "Approve & Send →"}
-                      </button>
                     </div>
                   </div>
 

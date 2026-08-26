@@ -6,6 +6,10 @@ import {
 } from "./_generated/server";
 import { v } from "convex/values";
 import { validateAuth } from "./lib/auth_utils";
+import {
+  claimMeetingStatus,
+  claimProposalEmailState,
+} from "./lib/sendState";
 
 export const listAll = query({
   args: {},
@@ -79,6 +83,96 @@ export const update = mutation({
   },
 });
 
+/**
+ * Atomically claim a proposal for an email send. Concurrent sends of the same
+ * proposal can never both proceed; stale claims (crashed action) expire after
+ * a few minutes so the proposal is not wedged forever.
+ */
+export const claimEmailSendInternal = internalMutation({
+  args: { id: v.id("proposals") },
+  handler: async (ctx, args) => {
+    const proposal = await ctx.db.get(args.id);
+    if (!proposal) return { claimed: false as const, reason: "not_pending", proposal: null };
+    const decision = claimProposalEmailState(
+      proposal.email_send_state,
+      proposal.email_send_started_at,
+      Date.now(),
+    );
+    if (!decision.allowed) {
+      return { claimed: false as const, reason: decision.reason, proposal };
+    }
+    await ctx.db.patch(args.id, {
+      email_send_state: "sending",
+      email_send_started_at: Date.now(),
+      updated_at: Date.now(),
+    });
+    return { claimed: true as const, reason: "ok", proposal };
+  },
+});
+
+/** Mark a claimed proposal email as sent (does not block deliberate resends). */
+export const finalizeEmailSendInternal = internalMutation({
+  args: { id: v.id("proposals") },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, {
+      email_send_state: "sent",
+      email_send_started_at: undefined,
+      updated_at: Date.now(),
+    });
+  },
+});
+
+/** Release a claimed proposal email back to a retryable state. */
+export const releaseEmailSendInternal = internalMutation({
+  args: { id: v.id("proposals") },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, {
+      email_send_state: undefined,
+      email_send_started_at: undefined,
+      updated_at: Date.now(),
+    });
+  },
+});
+
+/**
+ * Atomically claim a proposal for calendar event creation. Concurrent
+ * confirms can never create duplicate events; stale claims expire.
+ */
+export const claimMeetingInternal = internalMutation({
+  args: { id: v.id("proposals") },
+  handler: async (ctx, args) => {
+    const proposal = await ctx.db.get(args.id);
+    if (!proposal) return { claimed: false as const, reason: "not_pending", proposal: null };
+    const decision = claimMeetingStatus(
+      proposal.calendar_event_status,
+      proposal.calendar_claim_started_at,
+      Date.now(),
+    );
+    if (!decision.allowed) {
+      return { claimed: false as const, reason: decision.reason, proposal };
+    }
+    await ctx.db.patch(args.id, {
+      calendar_event_status: "creating",
+      calendar_claim_started_at: Date.now(),
+      updated_at: Date.now(),
+    });
+    return { claimed: true as const, reason: "ok", proposal };
+  },
+});
+
+/** Release a claimed meeting back to `pending` (retryable) on provider failure. */
+export const releaseMeetingClaimInternal = internalMutation({
+  args: { id: v.id("proposals"), meeting_date: v.number() },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, {
+      calendar_event_status: "pending",
+      calendar_claim_started_at: undefined,
+      meeting_date: args.meeting_date,
+      updated_at: Date.now(),
+    });
+  },
+});
+
 export const getInternal = internalQuery({
   args: { id: v.id("proposals") },
   handler: async (ctx, args) => ctx.db.get(args.id),
@@ -129,11 +223,20 @@ export const updateInternal = internalMutation({
     calendar_event_status: v.optional(
       v.union(
         v.literal("pending"),
+        v.literal("creating"),
         v.literal("confirmed"),
         v.literal("cancelled"),
       ),
     ),
     meeting_date: v.optional(v.number()),
+    calendar_claim_started_at: v.optional(v.number()),
+    email_send_state: v.optional(
+      v.union(
+        v.literal("sending"),
+        v.literal("sent"),
+      ),
+    ),
+    email_send_started_at: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const { id, ...fields } = args;

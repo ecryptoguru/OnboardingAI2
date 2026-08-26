@@ -3,6 +3,7 @@ import {
   query,
   internalMutation,
   internalQuery,
+  QueryCtx,
 } from "./_generated/server";
 import { v } from "convex/values";
 import {
@@ -10,6 +11,7 @@ import {
   getCurrentUserId,
   isAdmin,
 } from "./lib/auth_utils";
+import { claimEmailStatus } from "./lib/sendState";
 import { Id } from "./_generated/dataModel";
 
 const MAX_ANALYTICS_ROWS = 5000;
@@ -188,6 +190,7 @@ export const updateStatus = mutation({
     id: v.id("emailsSent"),
     status: v.union(
       v.literal("pending_approval"),
+      v.literal("sending"),
       v.literal("queued"),
       v.literal("sent"),
       v.literal("delivered"),
@@ -323,6 +326,7 @@ export const insertInternal = internalMutation({
     ),
     status: v.union(
       v.literal("pending_approval"),
+      v.literal("sending"),
       v.literal("queued"),
       v.literal("sent"),
       v.literal("delivered"),
@@ -338,6 +342,8 @@ export const insertInternal = internalMutation({
     step_number: v.number(),
     drafted_at: v.optional(v.number()),
     sent_at: v.optional(v.number()),
+    send_attempts: v.optional(v.number()),
+    last_error: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     return await ctx.db.insert("emailsSent", args);
@@ -366,6 +372,7 @@ export const updateStatusInternal = internalMutation({
     id: v.id("emailsSent"),
     status: v.union(
       v.literal("pending_approval"),
+      v.literal("sending"),
       v.literal("queued"),
       v.literal("sent"),
       v.literal("delivered"),
@@ -383,7 +390,108 @@ export const updateStatusInternal = internalMutation({
   },
 });
 
+/**
+ * Atomically claim a `pending_approval` draft for sending.
+ * Only one concurrent caller can win; terminal statuses are never re-sent.
+ * Returns the full email document to the caller so the action can proceed
+ * without a second read.
+ */
+export const claimForSendingInternal = internalMutation({
+  args: { id: v.id("emailsSent") },
+  handler: async (ctx, args) => {
+    const email = await ctx.db.get(args.id);
+    if (!email) return { claimed: false as const, reason: "not_pending", email: null };
+    const decision = claimEmailStatus(email.status);
+    if (!decision.allowed) {
+      return { claimed: false as const, reason: decision.reason, email };
+    }
+    await ctx.db.patch(args.id, {
+      status: "sending",
+      send_attempts: (email.send_attempts ?? 0) + 1,
+      last_error: undefined,
+    });
+    return { claimed: true as const, reason: "ok", email };
+  },
+});
+
+/** Finalize a claimed email as successfully sent. */
+export const finalizeSentInternal = internalMutation({
+  args: {
+    id: v.id("emailsSent"),
+    zeptomail_message_id: v.optional(v.string()),
+    sent_at: v.number(),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, {
+      status: "sent",
+      zeptomail_message_id: args.zeptomail_message_id,
+      sent_at: args.sent_at,
+    });
+  },
+});
+
+/** Release a claimed email back to the approval queue after a transient failure. */
+export const releaseForRetryInternal = internalMutation({
+  args: { id: v.id("emailsSent"), error: v.string() },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, {
+      status: "pending_approval",
+      last_error: args.error,
+    });
+  },
+});
+
+/** Mark a claimed email as permanently failed (no silent queue loss). */
+export const failPermanentlyInternal = internalMutation({
+  args: { id: v.id("emailsSent"), error: v.string() },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.id, {
+      status: "failed",
+      last_error: args.error,
+    });
+  },
+});
+
 // HITL Approval Queue Endpoints
+//
+// The queue surfaces `pending_approval` AND transient `sending` records so a
+// claimed draft stays visible with a "Sending…" state instead of vanishing
+// mid-flight (and so concurrent tabs see it is already in flight).
+
+async function listQueueEmails(
+  ctx: QueryCtx,
+  admin: boolean,
+  userId: Id<"users">,
+) {
+  if (admin) {
+    const [pending, sending] = await Promise.all([
+      ctx.db
+        .query("emailsSent")
+        .withIndex("by_status", (q) => q.eq("status", "pending_approval"))
+        .take(MAX_ANALYTICS_ROWS),
+      ctx.db
+        .query("emailsSent")
+        .withIndex("by_status", (q) => q.eq("status", "sending"))
+        .take(MAX_ANALYTICS_ROWS),
+    ]);
+    return [...sending, ...pending];
+  }
+  const [pending, sending] = await Promise.all([
+    ctx.db
+      .query("emailsSent")
+      .withIndex("by_owner_status", (q) =>
+        q.eq("owner_id", userId).eq("status", "pending_approval"),
+      )
+      .take(MAX_ANALYTICS_ROWS),
+    ctx.db
+      .query("emailsSent")
+      .withIndex("by_owner_status", (q) =>
+        q.eq("owner_id", userId).eq("status", "sending"),
+      )
+      .take(MAX_ANALYTICS_ROWS),
+  ]);
+  return [...sending, ...pending];
+}
 
 export const pendingCount = query({
   args: {},
@@ -391,18 +499,8 @@ export const pendingCount = query({
     await validateAuth(ctx);
     const admin = await isAdmin(ctx);
     const userId = await getCurrentUserId(ctx);
-    const pendingEmails = admin
-      ? await ctx.db
-          .query("emailsSent")
-          .withIndex("by_status", (q) => q.eq("status", "pending_approval"))
-          .take(MAX_ANALYTICS_ROWS)
-      : await ctx.db
-          .query("emailsSent")
-          .withIndex("by_owner_status", (q) =>
-            q.eq("owner_id", userId).eq("status", "pending_approval"),
-          )
-          .take(MAX_ANALYTICS_ROWS);
-    return pendingEmails.length;
+    const queue = await listQueueEmails(ctx, admin, userId);
+    return queue.length;
   },
 });
 
@@ -412,19 +510,9 @@ export const listPending = query({
     await validateAuth(ctx);
     const admin = await isAdmin(ctx);
     const userId = await getCurrentUserId(ctx);
-    const pendingEmails = admin
-      ? await ctx.db
-          .query("emailsSent")
-          .withIndex("by_status", (q) => q.eq("status", "pending_approval"))
-          .take(MAX_ANALYTICS_ROWS)
-      : await ctx.db
-          .query("emailsSent")
-          .withIndex("by_owner_status", (q) =>
-            q.eq("owner_id", userId).eq("status", "pending_approval"),
-          )
-          .take(MAX_ANALYTICS_ROWS);
+    const queue = await listQueueEmails(ctx, admin, userId);
     return await Promise.all(
-      pendingEmails.map(async (email) => {
+      queue.map(async (email) => {
         const uni = await ctx.db.get(email.university_id);
         const st = email.stakeholder_id
           ? await ctx.db.get(email.stakeholder_id)

@@ -64,6 +64,7 @@ import type * as lib_proposalPdf from "../lib/proposalPdf.js";
 import type * as lib_roleRegistry from "../lib/roleRegistry.js";
 import type * as lib_scoring from "../lib/scoring.js";
 import type * as lib_scrapers from "../lib/scrapers.js";
+import type * as lib_sendState from "../lib/sendState.js";
 import type * as lib_serperBudget from "../lib/serperBudget.js";
 import type * as lib_stakeholderQuality from "../lib/stakeholderQuality.js";
 import type * as lib_universityUtils from "../lib/universityUtils.js";
@@ -150,6 +151,7 @@ declare const fullApi: ApiFromModules<{
   "lib/roleRegistry": typeof lib_roleRegistry;
   "lib/scoring": typeof lib_scoring;
   "lib/scrapers": typeof lib_scrapers;
+  "lib/sendState": typeof lib_sendState;
   "lib/serperBudget": typeof lib_serperBudget;
   "lib/stakeholderQuality": typeof lib_stakeholderQuality;
   "lib/universityUtils": typeof lib_universityUtils;

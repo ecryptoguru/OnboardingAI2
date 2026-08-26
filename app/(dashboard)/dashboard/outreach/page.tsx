@@ -53,6 +53,9 @@ const CLASSIFICATION_STYLES: Record<string, string> = {
 };
 
 const EMAIL_STATUS_ICON: Record<string, React.ReactNode> = {
+  sending: (
+    <span className="w-2 h-2 rounded-full bg-sky-400 animate-pulse inline-block" />
+  ),
   sent: <span className="w-2 h-2 rounded-full bg-blue-400 inline-block" />,
   delivered: <span className="w-2 h-2 rounded-full bg-sky-400 inline-block" />,
   opened: <EnvelopeOpenIcon className="w-3 h-3 text-emerald-400" />,
@@ -645,11 +648,13 @@ function UniversityTimelineDrawer({
                                 ? "bg-emerald-500/10 text-emerald-400 border-emerald-500/20"
                                 : status === "sent" || status === "delivered"
                                   ? "bg-blue-500/10 text-blue-400 border-blue-500/20"
-                                  : status === "pending_approval"
-                                    ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
-                                    : status === "bounced"
-                                      ? "bg-red-500/10 text-red-400 border-red-500/20"
-                                      : "bg-muted text-muted-foreground border-card-border"
+                                  : status === "sending"
+                                    ? "bg-sky-500/10 text-sky-400 border-sky-500/20"
+                                    : status === "pending_approval"
+                                      ? "bg-amber-500/10 text-amber-400 border-amber-500/20"
+                                      : status === "bounced"
+                                        ? "bg-red-500/10 text-red-400 border-red-500/20"
+                                        : "bg-muted text-muted-foreground border-card-border"
                             }`}
                           >
                             {status}
