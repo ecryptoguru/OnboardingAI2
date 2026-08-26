@@ -108,3 +108,46 @@ Audit score (code + live evidence): **95/100** — deducted: LLM-budget OCC soft
 ---
 
 *Generated 2026-08-16 by the production-readiness verification run. Companion docs: `docs/runbook.md` (ops), `docs/CLIENT_ONBOARDING.md` (client setup), `README.md` (overview).*
+
+---
+
+## 10. Handover release update (2026-08-26)
+
+**Scope:** stabilization-first release `handover/2026-08-26` (commits 208761d → eebcfeb) — no admin or Settings behavior changed.
+
+### Code changes
+
+- **Concurrency-safe outbound side effects**: `emailsSent` gains a transient `sending` status plus `send_attempts`/`last_error`; `approveAndSend` atomically claims drafts before dispatch and settles via finalize/release/fail. Proposals gain `email_send_state` and `calendar_event_status: "creating"` with stale-claim expiry so proposal emails and calendar events cannot be duplicated by concurrent requests. Pure state machine in `convex/lib/sendState.ts` (18 unit tests).
+- **Bounded uploads and batches**: shared limits in `convex/lib/limits.ts` (10 MB body doc, 10 MB attachments, max 5 files, 200 recipients, 200-char subject, 50k-char body, CSV ≤ 10k rows / 5 MB, vector search ≤ 50) enforced on client and server; CSV ingestion now calls an internal mutation with fetch timeouts.
+- **Accessibility**: accessible `Modal` (focus trap, Escape, focus restore), skip link, visible focus, reduced-motion fallbacks, light-mode contrast corrections, form autocomplete semantics, linked labels.
+- **E2E**: real authenticated journeys (sign-in per test, axe scans, controlled Document Mailer → HITL send to the approved test inbox, `[E2E]`-only test data), replacing the previous placeholder suite.
+- **Scale/CI**: fail-fast `NEXT_PUBLIC_CONVEX_URL` (no hardcoded prod fallback), full-list consumers bounded at 5000 rows (prod now holds 1,357 universities), GitHub Actions CI (typecheck/lint/unit/build/audit).
+- **UX fix**: Document Mailer success toast now surfaces via the parent page (previously unmounted with the modal); Approve All reports sent/failed/skipped; drafts show retryable failure messages.
+
+### Verification (2026-08-26, prod Convex + local Next against prod)
+
+| Check | Result |
+| --- | --- |
+| `npx tsc --noEmit` | ✅ PASS |
+| `npm run lint` | ✅ PASS |
+| `npm run test:unit` | ✅ 562 pass / 1 skip |
+| `npm run build` (next build --webpack) | ✅ PASS (16 routes) |
+| `npm audit --audit-level=high` | ✅ 0 vulnerabilities |
+| `npx convex codegen` | ✅ clean |
+| `python3 .devin/scripts/checklist.py .` | ✅ 6/6 (scanner exclusions added) |
+| Playwright E2E vs prod Convex | ✅ 56 passed / 1 flaky (retry-passed, cold-start auth) / 1 skipped (no pending drafts at run start) |
+| Axe (serious/critical) on landing, auth, dashboard, approvals, proposals | ✅ 0 violations |
+| Controlled send (Document Mailer → HITL approve → ZeptoMail) | ✅ delivered to approved inbox; draft left the queue as `sent` |
+| CSV ingestion → search → detail (E2E record) | ✅ |
+| Convex deploy | ✅ additive schema only, no indexes deleted |
+
+### Production data
+
+- Universities 100 → **1,357** and stakeholders → 740 since the 2026-08-16 report; the 500-row caps were raised to bounded 5,000 for full-list consumers.
+- Prod snapshot taken 2026-08-26: `/tmp/fretbox-handover/backup-2026-08-26.zip` (table counts recorded in the baseline file). Snapshot will be deleted after certification per PII hygiene.
+
+### Remaining (post-handover backlog)
+
+- Webhook/calendar configuration (delivery tracking + inbound replies via ZeptoMail, Google Calendar service account) — the code paths are ready and secret-gated.
+- Access-control hardening (operator/admin allowlists, pending-approval boundary) — owner decision: assign admins later.
+- Dashboard responsive redesign, real pagination, large-module decomposition, AES-GCM secret encryption, nonce-based CSP.

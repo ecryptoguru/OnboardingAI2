@@ -42,6 +42,9 @@ Set these in your Convex dashboard or with `npx convex env set <NAME> <VALUE>`:
 | `SKIP_RATE_LIMITS` | Optional | Set `true` **only** for local testing; must be unset in production |
 | `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` | Optional | Sentry server/client error tracking DSN |
 | `CONVEX_DEPLOYMENT` | Optional | Deployment name used by `npx convex dev` (e.g., `dev:your-project`) |
+| `E2E_EMAIL` / `E2E_PASSWORD` | Test only | Operator credentials for the authenticated Playwright suite |
+| `E2E_RECIPIENT` | Test only | Approved test inbox for the controlled send journey (default `ankit@fusionwaveai.com`) |
+| `E2E_SEND_ALLOWED` | Test only | Set `1` to enable the single controlled email send in the E2E suite |
 
 ## Dashboard Settings
 
@@ -89,7 +92,7 @@ API keys and sender details are managed in **Settings → API Keys**. Values are
 - **Scheduled Long-Running Enrichment**: Public enqueue action schedules internal orchestration via the Convex scheduler and returns immediately, avoiding the ~5-minute CLI client wait. Deep enrichment and finish phases run as separate scheduled actions; sequential batches chain via the scheduler so Firecrawl/Serper are never hit concurrently. See "Running enrichment in production" below.
 - **API Provider Alert Modal**: When Gemini / Firecrawl / Serper hit quota exhaustion or an error during any background activity, the backend records an alert in the `apiAlerts` table (deduplicated for 6 hours). The frontend `<ApiAlertModal />` (mounted in `app/(dashboard)/layout.tsx`) surfaces these to the user with Dismiss / Got-it actions.
 - **Outreach Orchestrator**: Multi-step, personalized email sequences with Gemini.
-- **HITL Approval**: Outreach emails are drafted with `status: "pending_approval"`. A human must approve each draft via the dashboard before it is sent.
+- **HITL Approval**: Outreach emails are drafted with `status: "pending_approval"`. A human must approve each draft via the dashboard before it is sent. Sending is **concurrency-safe**: a draft is atomically claimed (`sending`) before dispatch, so double-clicks, multiple tabs, or retries can never send the same email twice. Transient provider failures return the draft to the queue (with `last_error`) for a safe retry; permanent rejections are marked `failed` without losing the draft.
 - **Document Mailer**: Upload a `.docx` on the Outreach page, extract its text as the email body, optionally attach the original and additional files, choose a stakeholder or enter a custom email per university, and send via the HITL approvals queue.
 - **Reply Classification**: Inbound replies are classified and high-confidence auto-replies are sent via `actions/autoReply.ts`.
 - **Proposal Automation**: Calendar bookings trigger AI-generated rich HTML proposals with Google Meet links. The `pdf_storage_id` schema field is legacy and unused.
@@ -115,7 +118,7 @@ Webhook endpoints are disabled until their specific secret is configured; unconf
 - **Rate Limits**: Per-destination rate limits (e.g., three emails per minute to a single address). Use `SKIP_RATE_LIMITS` only for local testing.
 - **LLM Budget**: `LLM_DAILY_BUDGET_USD` acts as a daily soft cap for LLM spend.
 - **Monitoring**: Sentry error tracking and performance profiling.
-- **Resilience**: Exponential backoff with `withRetry` for external API calls. `ConvexClientProvider` falls back to the production Convex URL when `NEXT_PUBLIC_CONVEX_URL` is not set, so the app works on any host without extra env configuration.
+- **Resilience**: Exponential backoff with `withRetry` for external API calls. `ConvexClientProvider` fails fast when `NEXT_PUBLIC_CONVEX_URL` is missing, so local/preview builds can never accidentally connect to a hardcoded production deployment.
 - **Intelligence**: Centralized prompt library in `convex/lib/prompts.ts` for unified AI governance.
 - **Optimization**: Batch mutations for high-frequency signal ingestion; `getFunnelStats` uses full counts for accurate analytics.
 
@@ -124,12 +127,26 @@ Webhook endpoints are disabled until their specific secret is configured; unconf
 ```bash
 npx tsc --noEmit          # Type check
 npm run lint              # Lint
-npm run test:unit         # Unit tests (~496 tests, hermetic — no API keys required)
-npm test                  # E2E tests (Playwright, baseURL http://localhost:3000)
-python3 .devin/scripts/checklist.py .  # Full master checklist
+npm run test:unit         # Unit tests (hermetic — no API keys required)
 npm run build             # Production build (next build --webpack)
 npm audit --audit-level=high  # Security audit
+python3 .devin/scripts/checklist.py .  # Full master checklist
+npm test                  # E2E tests (Playwright, baseURL http://localhost:3000)
 ```
+
+The E2E suite includes axe accessibility scans and authenticated journeys.
+Authenticated tests need operator credentials and a dedicated test policy:
+
+```bash
+E2E_EMAIL=<operator email> E2E_PASSWORD=<password> \
+E2E_RECIPIENT=<approved test inbox> E2E_SEND_ALLOWED=1 \
+npm test
+```
+
+`E2E_SEND_ALLOWED=1` enables exactly one controlled email send (Document
+Mailer → HITL approve) to `E2E_RECIPIENT`; the journey only ever touches
+records named `[E2E] …`. Without credentials, authenticated tests skip and
+the unauthenticated smoke suite still runs.
 
 ## Running enrichment in production
 

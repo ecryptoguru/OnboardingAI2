@@ -70,7 +70,7 @@ The entire backend ecosystem (queries, mutations, actions, HTTP routes, crons).
   - `signals.ts`: Signal ingestion, vector search, semantic retrieval
   - `proposals.ts`: Proposal CRUD, rich HTML proposal generation, Calendar event linking
   - `sequences.ts`: Outreach sequence state machine (`active` / `paused` / `pending_approval` / `completed` / `opted_out`)
-  - `emails.ts`: Email log CRUD, delivery status tracking, HITL approval queue (`pendingCount`, `listPending`, `updateDraft`, `rejectDraft`, `updateStatusByZeptomailIdInternal`)
+  - `emails.ts`: Email log CRUD, delivery status tracking, HITL approval queue (`pendingCount`, `listPending`, `updateDraft`, `rejectDraft`, `updateStatusByZeptomailIdInternal`). Sending is concurrency-safe: `claimForSendingInternal` atomically claims a `pending_approval` draft (`status: "sending"`), and `finalizeSentInternal` / `releaseForRetryInternal` / `failPermanentlyInternal` settle it. The queue surfaces both `pending_approval` and in-flight `sending` records.
   - `replies.ts`: Reply log management, classification review
   - `priorityScores.ts`: Lead scoring storage (deterministic + AI + final composite)
   - `apiAlerts.ts`: Provider quota/error alert store. `recordInternal` (internalMutation) deduplicates identical unacknowledged alerts for 6 hours. `list` / `acknowledge` / `acknowledgeAll` are public + `validateAuth`-gated. Surfaced in the frontend by `components/ApiAlertModal.tsx`.
@@ -163,8 +163,8 @@ Shared React UI components:
 - `ApiKeyModal.tsx`: API key input modal
 - `ApiAlertModal.tsx`: Global modal surfaced when a provider (Gemini / Firecrawl / Serper) hits quota exhaustion or an error during any background activity. Subscribes to `api.apiAlerts.list`, shows the latest unacknowledged alert, and offers Dismiss (session-only) / Got-it (persists `acknowledged_at`). Mounted in `app/(dashboard)/layout.tsx`.
 - `AuthGuard.tsx`: Client-side auth guard. Uses `useConvexAuth` + `next/navigation` `useRouter` to redirect unauthenticated users to `/sign-in`. Shows a loading spinner while auth state resolves. Wraps the dashboard layout. Replaces the deleted edge middleware (`proxy.ts`).
-- `ConvexClientProvider.tsx`: Convex client context provider. Falls back to the production Convex URL (`https://energetic-raven-535.convex.cloud`) when `NEXT_PUBLIC_CONVEX_URL` is not set, so the app works on any host without extra env configuration.
-- `DocumentMailerModal.tsx`: Upload a `.docx`, optionally attach extra files, choose a stakeholder or custom email per university, and draft to the HITL queue.
+- `ConvexClientProvider.tsx`: Convex client context provider. Fails fast when `NEXT_PUBLIC_CONVEX_URL` is not set (no hardcoded production fallback).
+- `DocumentMailerModal.tsx`: Upload a `.docx`, optionally attach extra files, choose a stakeholder or custom email per university, and draft to the HITL queue. Client and server enforce shared limits (`convex/lib/limits.ts`): 10 MB body doc, 10 MB total attachments, max 5 attachments, max 200 recipients, 200-char subject, 50k-char body.
 - `Sidebar.tsx`: Dashboard navigation sidebar with badge counts (approvals + unclassified replies)
 - `ErrorBoundary.tsx`: React error boundary
 - `RedirectIfAuthenticated.tsx`: Redirects authenticated users away from auth pages.
@@ -304,10 +304,12 @@ Sequences follow a HITL-aware state machine: **Draft** (`pending_approval`) → 
 
 `actions/outreach.ts` drafts each email with `status: "pending_approval"` and pauses the sequence. When `approveAndSend` runs it:
 
-1. Verifies the email is `pending_approval`
+1. Atomically claims the draft via `emails.claimForSendingInternal` (`status: "sending"`) — concurrent approvals can never double-send
 2. Sends via the internal `doSendEmail` helper in `actions/email.ts` (ZeptoMail)
-3. Updates `emailsSent` to `sent` and persists `zeptomail_message_id`
+3. Finalizes to `sent` (`finalizeSentInternal`) with `zeptomail_message_id`; transient failures release the draft back to the queue (`releaseForRetryInternal` + `last_error`), permanent rejections mark it `failed` (`failPermanentlyInternal`)
 4. Resumes the sequence and computes `next_send_at` from `convex/lib/cadence.ts`
+
+The claim decisions live in the pure, unit-tested `convex/lib/sendState.ts`.
 
 Auto-replies (step `99`) and proposal emails (step `100`) are sent through the same `email.sendEmail` path but do not advance the standard sequence step counter.
 
