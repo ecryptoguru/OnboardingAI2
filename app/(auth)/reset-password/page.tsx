@@ -98,6 +98,8 @@ function ResetPasswordForm() {
           name="email"
           type="email"
           required
+          autoComplete="email"
+          spellCheck={false}
           suppressHydrationWarning
           value={email}
           onChange={(e) => setEmail(e.target.value)}
@@ -115,6 +117,8 @@ function ResetPasswordForm() {
           name="code"
           type="text"
           required
+          autoComplete="one-time-code"
+          spellCheck={false}
           suppressHydrationWarning
           value={code}
           onChange={(e) => setCode(e.target.value)}
@@ -133,6 +137,7 @@ function ResetPasswordForm() {
           type="password"
           required
           minLength={8}
+          autoComplete="new-password"
           suppressHydrationWarning
           value={password}
           onChange={(e) => setPassword(e.target.value)}
@@ -154,6 +159,7 @@ function ResetPasswordForm() {
           type="password"
           required
           minLength={8}
+          autoComplete="new-password"
           suppressHydrationWarning
           value={confirmPassword}
           onChange={(e) => setConfirmPassword(e.target.value)}
@@ -190,7 +196,7 @@ export default function ResetPasswordPage() {
   return (
     <>
       <RedirectIfAuthenticated />
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <div id="main-content" role="main" className="min-h-screen bg-background flex items-center justify-center p-4">
         <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="text-4xl mb-3">🎸</div>

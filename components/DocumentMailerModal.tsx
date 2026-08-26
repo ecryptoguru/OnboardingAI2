@@ -5,6 +5,7 @@ import { useMutation, useAction, useQuery } from "convex/react";
 import { api } from "../convex/_generated/api";
 import { Doc, Id } from "../convex/_generated/dataModel";
 import { useToast } from "./Toast";
+import { Modal } from "./Modal";
 import {
   MAX_ATTACHMENT_BYTES_TOTAL,
   MAX_BODY_DOCUMENT_BYTES,
@@ -420,12 +421,13 @@ export function DocumentMailerModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div
-        className="fixed inset-0 bg-black/60 backdrop-blur-sm"
-        onClick={onClose}
-      />
-      <div className="relative z-10 w-full max-w-3xl max-h-[90vh] overflow-y-auto bg-card border border-card-border rounded-2xl shadow-2xl flex flex-col">
+    <>
+    <Modal
+      open
+      onClose={onClose}
+      label="Document Mailer"
+      panelClassName="w-full max-w-3xl flex flex-col"
+    >
         {/* Header */}
         <div className="sticky top-0 z-20 flex items-center justify-between px-6 py-4 border-b border-card-border bg-card/95 backdrop-blur-md">
           <div className="flex items-center gap-2">
@@ -500,6 +502,7 @@ export function DocumentMailerModal({
                       setAttachBodyDoc(true);
                     }}
                     className="p-1.5 text-muted-foreground hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors"
+                    aria-label="Remove body document"
                   >
                     <TrashIcon className="h-4 w-4" />
                   </button>
@@ -575,6 +578,7 @@ export function DocumentMailerModal({
                       type="button"
                       onClick={() => removeAttachment(i)}
                       className="p-1.5 text-muted-foreground hover:text-red-400 hover:bg-red-500/10 rounded-lg transition-colors shrink-0"
+                      aria-label={`Remove attachment ${file.filename}`}
                     >
                       <TrashIcon className="h-4 w-4" />
                     </button>
@@ -758,8 +762,8 @@ export function DocumentMailerModal({
             </button>
           </div>
         </div>
-      </div>
+      </Modal>
       {toastElement}
-    </div>
+    </>
   );
 }

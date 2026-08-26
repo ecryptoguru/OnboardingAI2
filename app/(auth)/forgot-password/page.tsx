@@ -57,7 +57,7 @@ export default function ForgotPasswordPage() {
   return (
     <>
       <RedirectIfAuthenticated />
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <div id="main-content" role="main" className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="text-4xl mb-3">🎸</div>
@@ -93,6 +93,8 @@ export default function ForgotPasswordPage() {
                 name="email"
                 type="email"
                 required
+                autoComplete="email"
+                spellCheck={false}
                 suppressHydrationWarning
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}

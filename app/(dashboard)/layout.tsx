@@ -12,7 +12,7 @@ export default function DashboardLayout({
     <AuthGuard>
       <div className="flex min-h-screen bg-background" suppressHydrationWarning>
         <Sidebar />
-        <main className="flex-1 overflow-auto">
+        <main id="main-content" tabIndex={-1} className="flex-1 overflow-auto focus:outline-none">
           <ErrorBoundary>{children}</ErrorBoundary>
         </main>
         {/* Global provider (Gemini/Firecrawl/Serper) error & quota modal */}

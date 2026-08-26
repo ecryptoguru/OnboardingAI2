@@ -43,7 +43,7 @@ export default function SignInPage() {
   return (
     <>
       <RedirectIfAuthenticated />
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+      <div id="main-content" role="main" className="min-h-screen bg-background flex items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
           <div className="text-4xl mb-3">🎸</div>
@@ -61,6 +61,8 @@ export default function SignInPage() {
               name="email"
               type="email"
               required
+              autoComplete="email"
+              spellCheck={false}
               suppressHydrationWarning
               value={email}
               onChange={(e) => setEmail(e.target.value)}
@@ -78,6 +80,7 @@ export default function SignInPage() {
               name="password"
               type="password"
               required
+              autoComplete="current-password"
               suppressHydrationWarning
               className="w-full bg-card border border-card-border rounded-lg px-3.5 py-2.5 text-foreground text-sm placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
               placeholder="••••••••"

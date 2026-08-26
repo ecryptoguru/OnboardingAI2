@@ -8,7 +8,7 @@ export default function Home() {
   return (
     <>
       <RedirectIfAuthenticated />
-      <main className="flex min-h-screen flex-col items-center justify-center p-8 bg-background text-foreground overflow-hidden relative">
+      <main id="main-content" tabIndex={-1} className="flex min-h-screen flex-col items-center justify-center p-8 bg-background text-foreground overflow-hidden relative focus:outline-none">
       {/* Decorative background elements */}
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-500/10 blur-[120px] rounded-full pointer-events-none" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-emerald-500/10 blur-[120px] rounded-full pointer-events-none" />
@@ -22,7 +22,7 @@ export default function Home() {
           Next-Gen AI Outreach
         </div>
 
-        <h1 className="text-5xl md:text-7xl font-bold tracking-tight mb-6 bg-clip-text text-transparent bg-gradient-to-b from-white to-zinc-500">
+        <h1 className="text-5xl md:text-7xl font-bold tracking-tight mb-6 bg-clip-text text-transparent bg-gradient-to-b from-foreground to-muted-foreground">
           Fretbox Outreach <span className="text-indigo-400">AI</span>
         </h1>
 
