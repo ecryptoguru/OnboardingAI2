@@ -73,7 +73,7 @@ const PIPELINE_COLUMNS = [
 ];
 
 export default function DemoPage() {
-  const universities = useQuery(api.universities.list, {});
+  const universities = useQuery(api.universities.list, { limit: 5000 });
   const funnel = useQuery(api.universities.getFunnelStats);
   const replies = useQuery(api.replies.list, {});
   const [isPresenting, setIsPresenting] = useState(false);

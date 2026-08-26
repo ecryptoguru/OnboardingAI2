@@ -39,7 +39,7 @@ export default function ProposalsPage() {
   const proposals = useQuery(api.proposals.listAll);
 
   // Expose all universities (or limit to enriched/meeting_booked if desired, but user wants all)
-  const allUnis = useQuery(api.universities.list, {});
+  const allUnis = useQuery(api.universities.list, { limit: 5000 });
   const generateProposal = useAction(api.actions.proposals.generateProposal);
   const createProposal = useMutation(api.proposals.create);
 

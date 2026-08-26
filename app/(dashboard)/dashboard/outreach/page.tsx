@@ -67,7 +67,9 @@ const EMAIL_STATUS_ICON: Record<string, React.ReactNode> = {
 
 export default function OutreachPage() {
   const { show, toastElement } = useToast();
-  const universities = useQuery(api.universities.list, {});
+  // The kanban groups ALL universities by stage, so the list must not be
+  // silently truncated by the default 500-row cap.
+  const universities = useQuery(api.universities.list, { limit: 5000 });
   const replies = useQuery(api.replies.list, {});
   // const funnel = useQuery(api.universities.getFunnelStats);
   const [showSkipModal, setShowSkipModal] = useState(false);

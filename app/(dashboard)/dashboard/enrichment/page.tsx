@@ -55,13 +55,20 @@ export default function EnrichmentPage() {
     return () => clearInterval(interval);
   }, []);
 
-  // Custom filter if needed, but we can use the existing list with stage param
-  const rawNewUniversities = useQuery(api.universities.list, { stage: "new" });
+  // Custom filter if needed, but we can use the existing list with stage param.
+  // Stage buckets can exceed the 500-row default cap (1357 universities live
+  // in prod), so request the full bounded set.
+  const rawNewUniversities = useQuery(api.universities.list, {
+    stage: "new",
+    limit: 5000,
+  });
   const rawEnrichingUniversities = useQuery(api.universities.list, {
     stage: "enriching",
+    limit: 5000,
   });
   const rawEnrichedUniversities = useQuery(api.universities.list, {
     stage: "enriched",
+    limit: 5000,
   });
 
   const newUniversities = useMemo(
