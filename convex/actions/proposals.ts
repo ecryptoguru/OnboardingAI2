@@ -206,30 +206,8 @@ export const confirmMeeting = action({
       return { success: false, error: "Meeting already confirmed for a different time" };
     }
 
-    // Atomically claim the proposal so concurrent confirms cannot create
-    // duplicate calendar events.
-    const claim = await ctx.runMutation(internal.proposals.claimMeetingInternal, {
-      id: args.proposalId,
-    });
-    if (!claim.claimed) {
-      if (claim.reason === "already_sent" && claim.proposal) {
-        const p = claim.proposal;
-        return {
-          success: true,
-          eventId: p.calendar_event_id ?? undefined,
-          meetLink: p.meet_link ?? undefined,
-          meetingDate: p.meeting_date ?? undefined,
-        };
-      }
-      if (claim.reason === "in_flight") {
-        return {
-          success: false,
-          error: "A meeting is already being created for this proposal. Please wait.",
-        };
-      }
-      return { success: false, error: "Meeting cannot be created in the current state" };
-    }
-
+    // Resolve all dependencies BEFORE claiming so a missing university or
+    // stakeholder releases nothing and the proposal stays retryable.
     const university = await ctx.runQuery(internal.universities.getInternal, {
       universityId: proposal.university_id,
     });
@@ -265,47 +243,81 @@ export const confirmMeeting = action({
       "- Q&A and rollout next steps",
     ].filter(Boolean);
 
-    const meeting = await createMeetingEvent({
-      summary,
-      description: descriptionLines.join("\n"),
-      startTime: start,
-      endTime: end,
-      attendeeEmail: stakeholder?.email,
-      serviceAccountJson: serviceAccountJson ?? undefined,
-      calendarId: calendarId ?? undefined,
+    // Atomically claim the proposal so concurrent confirms cannot create
+    // duplicate calendar events.
+    const claim = await ctx.runMutation(internal.proposals.claimMeetingInternal, {
+      id: args.proposalId,
     });
+    if (!claim.claimed) {
+      if (claim.reason === "already_sent" && claim.proposal) {
+        const p = claim.proposal;
+        return {
+          success: true,
+          eventId: p.calendar_event_id ?? undefined,
+          meetLink: p.meet_link ?? undefined,
+          meetingDate: p.meeting_date ?? undefined,
+        };
+      }
+      if (claim.reason === "in_flight") {
+        return {
+          success: false,
+          error: "A meeting is already being created for this proposal. Please wait.",
+        };
+      }
+      return { success: false, error: "Meeting cannot be created in the current state" };
+    }
 
-    if (!meeting.success) {
-      // Release the claim back to a retryable `pending` state.
+    try {
+      const meeting = await createMeetingEvent({
+        summary,
+        description: descriptionLines.join("\n"),
+        startTime: start,
+        endTime: end,
+        attendeeEmail: stakeholder?.email,
+        serviceAccountJson: serviceAccountJson ?? undefined,
+        calendarId: calendarId ?? undefined,
+      });
+
+      if (!meeting.success) {
+        // Release the claim back to a retryable `pending` state.
+        await ctx.runMutation(internal.proposals.releaseMeetingClaimInternal, {
+          id: args.proposalId,
+          meeting_date: startTimeMs,
+        });
+        return {
+          success: false,
+          error:
+            meeting.error === "GOOGLE_CALENDAR_NOT_CONFIGURED"
+              ? "Google Calendar is not configured. Add calendar credentials in Settings."
+              : meeting.error || "Failed to create calendar event",
+        };
+      }
+
+      await ctx.runMutation(internal.proposals.updateInternal, {
+        id: args.proposalId,
+        meeting_date: startTimeMs,
+        calendar_event_id: meeting.eventId,
+        meet_link: meeting.meetLink,
+        calendar_event_status: "confirmed",
+        status: "meeting_confirmed",
+        calendar_claim_started_at: undefined,
+      });
+
+      return {
+        success: true,
+        eventId: meeting.eventId,
+        meetLink: meeting.meetLink,
+        meetingDate: startTimeMs,
+      };
+    } catch (e) {
+      // Any unexpected throw after the claim must release it so the proposal
+      // is not wedged in `creating`.
       await ctx.runMutation(internal.proposals.releaseMeetingClaimInternal, {
         id: args.proposalId,
         meeting_date: startTimeMs,
       });
-      return {
-        success: false,
-        error:
-          meeting.error === "GOOGLE_CALENDAR_NOT_CONFIGURED"
-            ? "Google Calendar is not configured. Add calendar credentials in Settings."
-            : meeting.error || "Failed to create calendar event",
-      };
+      throw e;
     }
-
-    await ctx.runMutation(internal.proposals.updateInternal, {
-      id: args.proposalId,
-      meeting_date: startTimeMs,
-      calendar_event_id: meeting.eventId,
-      meet_link: meeting.meetLink,
-      calendar_event_status: "confirmed",
-      status: "meeting_confirmed",
-      calendar_claim_started_at: undefined,
-    });
-
-    return {
-      success: true,
-      eventId: meeting.eventId,
-      meetLink: meeting.meetLink,
-      meetingDate: startTimeMs,
-    };
   },
 });
 
@@ -385,11 +397,13 @@ export const emailProposal = action({
   ): Promise<{ success: boolean; messageId?: string; error?: string }> => {
     await validateAuth(ctx);
     const owner_id = await getCurrentUserId(ctx);
+
     const proposal = await ctx.runQuery(internal.proposals.getInternal, {
       id: args.proposalId,
     });
-    if (!proposal || !proposal.proposal_json)
+    if (!proposal || !proposal.proposal_json) {
       throw new Error("Proposal content not found");
+    }
 
     if (!args.toEmails || args.toEmails.length === 0) {
       throw new Error("At least one recipient is required");
@@ -401,20 +415,6 @@ export const emailProposal = action({
       throw new Error(
         `Too many recipients (max ${MAX_PROPOSAL_RECIPIENTS} per list)`,
       );
-    }
-
-    // Atomically claim the proposal so concurrent sends cannot duplicate.
-    const claim = await ctx.runMutation(internal.proposals.claimEmailSendInternal, {
-      id: args.proposalId,
-    });
-    if (!claim.claimed) {
-      if (claim.reason === "in_flight") {
-        return {
-          success: false,
-          error: "A proposal email is already being sent. Please wait.",
-        };
-      }
-      throw new Error("Proposal email cannot be sent in the current state");
     }
 
     const invalidTo = args.toEmails.filter((e: string) => !isValidEmail(e));
@@ -624,76 +624,105 @@ export const emailProposal = action({
         })
       )?._id;
 
-    let trackingEmailId: Id<"emailsSent"> | undefined;
-    if (emailStakeholderId) {
-      trackingEmailId = await ctx.runMutation(internal.emails.insertInternal, {
-        sequence_id: undefined,
-        university_id: proposal.university_id,
-        stakeholder_id: emailStakeholderId,
-        subject: `Fretbox Partnership Proposal — ${uni.university_name}`,
-        body: plainText,
-        html_body: html,
-        status: "queued",
-        step_number: 100,
-        owner_id,
-        drafted_at: Date.now(),
-      });
-    } else {
-      console.warn(
-        `[emailProposal] No stakeholder_id for proposal ${args.proposalId}; skipping email tracking record.`,
-      );
+    // Atomically claim the proposal so concurrent sends cannot duplicate.
+    const claim = await ctx.runMutation(internal.proposals.claimEmailSendInternal, {
+      id: args.proposalId,
+    });
+    if (!claim.claimed) {
+      if (claim.reason === "in_flight") {
+        return {
+          success: false,
+          error: "A proposal email is already being sent. Please wait.",
+        };
+      }
+      throw new Error("Proposal email cannot be sent in the current state");
     }
 
-    const sendResult: {
-      success: boolean;
-      messageId?: string;
-      error?: string;
-    } = await ctx.runAction(internal.actions.email.sendEmail, {
-      to: args.toEmails,
-      cc: args.ccEmails && args.ccEmails.length > 0 ? args.ccEmails : undefined,
-      subject: `Fretbox Partnership Proposal — ${uni.university_name}`,
-      text: plainText,
-      html,
-      clientReference: trackingEmailId,
-    });
-
-    if (sendResult.success) {
-      await ctx.runMutation(internal.proposals.finalizeEmailSendInternal, {
-        id: args.proposalId,
-      });
-      await ctx.runMutation(internal.proposals.updateInternal, {
-        id: args.proposalId,
-        status: "sent",
-      });
-
-      // Advance university outreach stage to proposal_sent
-      await ctx.runMutation(internal.universities.updateOutreachStageInternal, {
-        universityId: proposal.university_id,
-        stage: "proposal_sent",
-      });
-
-      // Update tracking record with zeptomail_message_id and sent status
-      if (trackingEmailId) {
-        await ctx.runMutation(internal.emails.updateStatusInternal, {
-          id: trackingEmailId,
-          status: "sent",
-          zeptomail_message_id: sendResult.messageId,
-          sent_at: Date.now(),
+    let trackingEmailId: Id<"emailsSent"> | undefined;
+    let sendResult: { success: boolean; messageId?: string; error?: string } | undefined;
+    try {
+      if (emailStakeholderId) {
+        trackingEmailId = await ctx.runMutation(internal.emails.insertInternal, {
+          sequence_id: undefined,
+          university_id: proposal.university_id,
+          stakeholder_id: emailStakeholderId,
+          subject: `Fretbox Partnership Proposal — ${uni.university_name}`,
+          body: plainText,
+          html_body: html,
+          status: "queued",
+          step_number: 100,
+          owner_id,
+          drafted_at: Date.now(),
         });
+      } else {
+        console.warn(
+          `[emailProposal] No stakeholder_id for proposal ${args.proposalId}; skipping email tracking record.`,
+        );
       }
-    } else {
-      // Release the claim so the user can retry; never wedge the proposal.
+
+      sendResult = await ctx.runAction(internal.actions.email.sendEmail, {
+        to: args.toEmails,
+        cc: args.ccEmails && args.ccEmails.length > 0 ? args.ccEmails : undefined,
+        subject: `Fretbox Partnership Proposal — ${uni.university_name}`,
+        text: plainText,
+        html,
+        clientReference: trackingEmailId,
+      });
+
+      if (sendResult.success) {
+        await ctx.runMutation(internal.proposals.finalizeEmailSendInternal, {
+          id: args.proposalId,
+        });
+        await ctx.runMutation(internal.proposals.updateInternal, {
+          id: args.proposalId,
+          status: "sent",
+        });
+
+        // Advance university outreach stage to proposal_sent
+        await ctx.runMutation(internal.universities.updateOutreachStageInternal, {
+          universityId: proposal.university_id,
+          stage: "proposal_sent",
+        });
+
+        // Update tracking record with zeptomail_message_id and sent status
+        if (trackingEmailId) {
+          await ctx.runMutation(internal.emails.updateStatusInternal, {
+            id: trackingEmailId,
+            status: "sent",
+            zeptomail_message_id: sendResult.messageId,
+            sent_at: Date.now(),
+          });
+        }
+      } else {
+        // Release the claim so the user can retry; never wedge the proposal.
+        await ctx.runMutation(internal.proposals.releaseEmailSendInternal, {
+          id: args.proposalId,
+        });
+        if (trackingEmailId) {
+          await ctx.runMutation(internal.emails.updateStatusInternal, {
+            id: trackingEmailId,
+            status: "failed",
+            last_error: sendResult.error ?? "Unknown send error",
+          });
+        }
+      }
+
+      return sendResult;
+    } catch (e) {
+      // Any unexpected throw after the claim must release it and mark the
+      // tracking record failed (unless the send itself succeeded).
+      const message = e instanceof Error ? e.message : String(e);
       await ctx.runMutation(internal.proposals.releaseEmailSendInternal, {
         id: args.proposalId,
       });
-      if (trackingEmailId) {
+      if (trackingEmailId && (!sendResult || !sendResult.success)) {
         await ctx.runMutation(internal.emails.updateStatusInternal, {
           id: trackingEmailId,
           status: "failed",
+          last_error: message,
         });
       }
+      throw e;
     }
-
-    return sendResult;
   },
 });

@@ -10,6 +10,7 @@ import {
   isAdmin,
 } from "../lib/auth_utils";
 import { isTransientSendError } from "../lib/sendState";
+import { MAX_ATTACHMENT_BYTES_TOTAL } from "../lib/limits";
 
 export type EmailAttachment = {
   name: string;
@@ -229,10 +230,9 @@ export const approveAndSend = action({
 
     // Load and base64-encode any attachments. Any failure here must release
     // the claim so the draft is never stuck in `sending`.
-    const MAX_ATTACHMENT_BYTES = 12_000_000;
     const emailAttachments = email.attachments ?? [];
     const attachmentPayloads: EmailAttachment[] = [];
-    let totalAttachmentSize = 0;
+    let totalAttachmentBytes = 0;
     try {
       for (const a of emailAttachments) {
         const fileUrl = await ctx.storage.getUrl(a.storage_id);
@@ -244,13 +244,13 @@ export const approveAndSend = action({
           throw new Error(`Failed to fetch attachment: ${a.filename}`);
         }
         const buffer = Buffer.from(await response.arrayBuffer());
-        const content = buffer.toString("base64");
-        totalAttachmentSize += content.length;
-        if (totalAttachmentSize > MAX_ATTACHMENT_BYTES) {
+        totalAttachmentBytes += buffer.length;
+        if (totalAttachmentBytes > MAX_ATTACHMENT_BYTES_TOTAL) {
           throw new Error(
-            `Attachments exceed the ${MAX_ATTACHMENT_BYTES / 1_000_000} MB encoded size limit`,
+            `Attachments exceed the ${Math.floor(MAX_ATTACHMENT_BYTES_TOTAL / (1024 * 1024))} MB total size limit`,
           );
         }
+        const content = buffer.toString("base64");
         attachmentPayloads.push({
           name: a.filename,
           mime_type: a.mime_type || "application/octet-stream",

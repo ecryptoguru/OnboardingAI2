@@ -41,7 +41,7 @@ export function useRequireGeminiKey() {
           </div>
           <h3 className="font-semibold text-lg text-foreground tracking-tight">API Key Required</h3>
         </div>
-        <button 
+        <button
           onClick={() => setIsOpen(false)}
           className="text-muted-foreground hover:text-foreground transition-colors p-1 rounded-lg"
           aria-label="Close"
@@ -60,7 +60,7 @@ export function useRequireGeminiKey() {
           >
             Cancel
           </button>
-          <Link 
+          <Link
             href="/dashboard/settings"
             onClick={() => setIsOpen(false)}
             className="px-4 py-2.5 text-sm font-bold text-white bg-blue-600 hover:bg-blue-500 rounded-xl transition-colors shadow-sm flex items-center"

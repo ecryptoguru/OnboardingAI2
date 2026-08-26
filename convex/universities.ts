@@ -12,6 +12,7 @@ import { paginationOptsValidator } from "convex/server";
 import { validateAdmin, validateAuth } from "./lib/auth_utils";
 import { validateWebsiteField } from "./lib/urlSafety";
 import { namesMatch, normalizeState } from "./lib/universityUtils";
+import { BULK_LIST_LIMIT } from "./lib/limits";
 
 function isDuplicateOfExisting(
   row: { university_name: string; state?: string | null },
@@ -918,7 +919,7 @@ export const updateLeadTierInternal = internalMutation({
 export const listAllInternal = internalQuery({
   args: {},
   handler: async (ctx) => {
-    return await ctx.db.query("universities").collect();
+    return await ctx.db.query("universities").take(BULK_LIST_LIMIT);
   },
 });
 

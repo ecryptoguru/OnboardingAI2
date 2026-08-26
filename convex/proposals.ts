@@ -114,6 +114,8 @@ export const claimEmailSendInternal = internalMutation({
 export const finalizeEmailSendInternal = internalMutation({
   args: { id: v.id("proposals") },
   handler: async (ctx, args) => {
+    const proposal = await ctx.db.get(args.id);
+    if (!proposal || proposal.email_send_state !== "sending") return;
     await ctx.db.patch(args.id, {
       email_send_state: "sent",
       email_send_started_at: undefined,
@@ -126,6 +128,8 @@ export const finalizeEmailSendInternal = internalMutation({
 export const releaseEmailSendInternal = internalMutation({
   args: { id: v.id("proposals") },
   handler: async (ctx, args) => {
+    const proposal = await ctx.db.get(args.id);
+    if (!proposal || proposal.email_send_state !== "sending") return;
     await ctx.db.patch(args.id, {
       email_send_state: undefined,
       email_send_started_at: undefined,
@@ -164,6 +168,8 @@ export const claimMeetingInternal = internalMutation({
 export const releaseMeetingClaimInternal = internalMutation({
   args: { id: v.id("proposals"), meeting_date: v.number() },
   handler: async (ctx, args) => {
+    const proposal = await ctx.db.get(args.id);
+    if (!proposal || proposal.calendar_event_status !== "creating") return;
     await ctx.db.patch(args.id, {
       calendar_event_status: "pending",
       calendar_claim_started_at: undefined,

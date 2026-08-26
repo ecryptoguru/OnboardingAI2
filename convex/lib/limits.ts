@@ -38,6 +38,9 @@ export const MAX_BULK_INSERT_ROWS = 10_000;
 /** Maximum result count for vector search. */
 export const MAX_VECTOR_SEARCH_LIMIT = 50;
 
+/** Maximum rows returned by an unbounded "all" internal list query. */
+export const BULK_LIST_LIMIT = 5_000;
+
 /** Maximum recipients for proposal emails (per TO/CC list). */
 export const MAX_PROPOSAL_RECIPIENTS = 50;
 

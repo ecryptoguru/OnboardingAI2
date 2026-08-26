@@ -7,7 +7,7 @@ interface ModalProps {
   onClose: () => void;
   /** Accessible name for the dialog (required). */
   label: string;
-  /** Optional longer description id referenced by aria-describedby. */
+  /** Optional id of the element that labels the dialog (aria-labelledby). */
   labelledBy?: string;
   children: ReactNode;
   /** Optional className for the panel (width/max-height control). */

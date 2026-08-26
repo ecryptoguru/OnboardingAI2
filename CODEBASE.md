@@ -368,7 +368,7 @@ ZeptoMail response `request_id` is stored in `emailsSent.zeptomail_message_id` a
 - `@convex-dev/auth` `^0.0.95` with Password provider (`convex/auth.ts`). Password reset uses a custom `reset` email provider that generates a 32-character code and sends it through `internal.actions.email.sendEmail`.
 - Password reset flow: `/forgot-password` submits email → reset code is stored in `authVerificationCodes` and emailed → `/reset-password` verifies code and sets a new password.
 - **Client-side auth guard**: `components/AuthGuard.tsx` replaces the deleted edge middleware (`proxy.ts`). It uses `useConvexAuth` + `next/navigation` `useRouter` to redirect unauthenticated users from `/dashboard` to `/sign-in`. The dashboard layout (`app/(dashboard)/layout.tsx`) wraps its content in `<AuthGuard>`. The landing page (`app/page.tsx`) renders instantly without a blocking spinner and uses `<RedirectIfAuthenticated />` to redirect authenticated users to `/dashboard`. `/forgot-password` and `/reset-password` are public.
-- `ConvexClientProvider.tsx` falls back to the production Convex URL (`https://energetic-raven-535.convex.cloud`) when `NEXT_PUBLIC_CONVEX_URL` is not set, so the app works on any host without additional env configuration.
+- `ConvexClientProvider.tsx` now fails fast when `NEXT_PUBLIC_CONVEX_URL` is not set, so a build or dev server can never accidentally talk to a hardcoded production deployment.
 
 ### 11. Design System
 

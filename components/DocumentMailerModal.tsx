@@ -469,7 +469,7 @@ export function DocumentMailerModal({
               onChange={(e) => setSubject(e.target.value)}
               maxLength={MAX_SUBJECT_LENGTH}
               placeholder="e.g. Partnership proposal for Fretbox hostel management"
-              className="w-full px-3 py-2 bg-background border border-card-border rounded-lg text-sm text-foreground placeholder:text-zinc-600 focus:outline-none focus:border-blue-500 transition-colors"
+              className="w-full px-3 py-2 bg-background border border-card-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-blue-500 transition-colors"
             />
             <p className="text-[10px] text-muted-foreground mt-1">
               Max {MAX_SUBJECT_LENGTH} characters
@@ -543,7 +543,7 @@ export function DocumentMailerModal({
                   value={bodyText}
                   onChange={(e) => setBodyText(e.target.value)}
                   rows={8}
-                  className="w-full px-3 py-2 bg-background border border-card-border rounded-lg text-sm text-foreground placeholder:text-zinc-600 focus:outline-none focus:border-blue-500 transition-colors resize-none"
+                  className="w-full px-3 py-2 bg-background border border-card-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-blue-500 transition-colors resize-none"
                 />
               </div>
             )}
@@ -628,7 +628,7 @@ export function DocumentMailerModal({
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Search universities…"
-                className="w-full pl-9 pr-3 py-2 bg-background border border-card-border rounded-lg text-sm text-foreground placeholder:text-zinc-600 focus:outline-none focus:border-blue-500 transition-colors"
+                className="w-full pl-9 pr-3 py-2 bg-background border border-card-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-blue-500 transition-colors"
               />
             </div>
 
@@ -729,7 +729,7 @@ export function DocumentMailerModal({
                                 setCustomEmail(uniId, e.target.value)
                               }
                               placeholder="recipient@university.edu"
-                              className="w-full pl-9 pr-3 py-2 bg-muted border border-card-border rounded-lg text-sm text-foreground placeholder:text-zinc-600 focus:outline-none focus:border-blue-500"
+                              className="w-full pl-9 pr-3 py-2 bg-muted border border-card-border rounded-lg text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-blue-500"
                             />
                           </div>
                         ) : (

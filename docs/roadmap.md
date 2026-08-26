@@ -344,7 +344,7 @@ This section records the production-reliability work completed after the initial
 - The edge middleware (`proxy.ts` / `middleware.ts`) was removed because it was incompatible with the Netlify edge runtime and caused deployment failures.
 - Dashboard route protection is now client-side via `components/AuthGuard.tsx`, which uses `useConvexAuth` + `next/navigation` `useRouter` to redirect unauthenticated users to `/sign-in`.
 - The landing page (`app/page.tsx`) was refactored to render marketing content instantly without a blocking loading spinner. Authenticated users are redirected to `/dashboard` via `<RedirectIfAuthenticated />`.
-- `ConvexClientProvider.tsx` now falls back to the production Convex URL (`https://energetic-raven-535.convex.cloud`) when `NEXT_PUBLIC_CONVEX_URL` is not set, ensuring the app works on Netlify without additional env configuration.
+- `ConvexClientProvider.tsx` now fails fast when `NEXT_PUBLIC_CONVEX_URL` is not set, ensuring a build or dev server cannot accidentally connect to a hardcoded production deployment.
 - E2E navigation tests updated to wait for client-side `AuthGuard` redirect (`waitForURL`). Responsive tests now target the landing page and auth pages instead of the dashboard (which requires authentication).
 
 ### 5.14 Honest limits

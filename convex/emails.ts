@@ -383,6 +383,7 @@ export const updateStatusInternal = internalMutation({
     ),
     zeptomail_message_id: v.optional(v.string()),
     sent_at: v.optional(v.number()),
+    last_error: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
     const { id, ...fields } = args;
@@ -422,6 +423,8 @@ export const finalizeSentInternal = internalMutation({
     sent_at: v.number(),
   },
   handler: async (ctx, args) => {
+    const email = await ctx.db.get(args.id);
+    if (!email || email.status !== "sending") return;
     await ctx.db.patch(args.id, {
       status: "sent",
       zeptomail_message_id: args.zeptomail_message_id,
@@ -434,6 +437,8 @@ export const finalizeSentInternal = internalMutation({
 export const releaseForRetryInternal = internalMutation({
   args: { id: v.id("emailsSent"), error: v.string() },
   handler: async (ctx, args) => {
+    const email = await ctx.db.get(args.id);
+    if (!email || email.status !== "sending") return;
     await ctx.db.patch(args.id, {
       status: "pending_approval",
       last_error: args.error,
@@ -445,6 +450,8 @@ export const releaseForRetryInternal = internalMutation({
 export const failPermanentlyInternal = internalMutation({
   args: { id: v.id("emailsSent"), error: v.string() },
   handler: async (ctx, args) => {
+    const email = await ctx.db.get(args.id);
+    if (!email || email.status !== "sending") return;
     await ctx.db.patch(args.id, {
       status: "failed",
       last_error: args.error,
