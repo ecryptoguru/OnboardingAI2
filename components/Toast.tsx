@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 
 export type ToastType = "success" | "error" | "info";
 
@@ -48,7 +48,10 @@ export function useToast() {
     setToast({ message, type });
   };
 
-  const hide = () => setToast(null);
+  // Stable identity: a new callback every render would reset the Toast's
+  // auto-dismiss timer on every parent re-render (e.g. Convex query updates),
+  // leaving toasts on screen indefinitely.
+  const hide = useCallback(() => setToast(null), []);
 
   const toastElement = toast ? (
     <Toast message={toast.message} type={toast.type} onClose={hide} />

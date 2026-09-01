@@ -3,6 +3,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert";
 import {
+  BULK_LIST_LIMIT,
   MAX_ATTACHMENT_BYTES_TOTAL,
   MAX_ATTACHMENT_COUNT,
   MAX_BODY_LENGTH,
@@ -73,9 +74,23 @@ describe("validateAttachmentLimits", () => {
     assert.ok(validateAttachmentLimits(MAX_ATTACHMENT_COUNT + 1, 100));
   });
 
+  it("accepts exactly the attachment count limit", () => {
+    assert.strictEqual(
+      validateAttachmentLimits(MAX_ATTACHMENT_COUNT, 100),
+      null,
+    );
+  });
+
   it("rejects oversized attachment totals", () => {
     assert.ok(
       validateAttachmentLimits(1, MAX_ATTACHMENT_BYTES_TOTAL + 1),
+    );
+  });
+
+  it("accepts totals exactly at the byte limit", () => {
+    assert.strictEqual(
+      validateAttachmentLimits(1, MAX_ATTACHMENT_BYTES_TOTAL),
+      null,
     );
   });
 
@@ -110,5 +125,15 @@ describe("MAX_PROPOSAL_RECIPIENTS", () => {
   it("is a sane bounded constant", () => {
     assert.ok(MAX_PROPOSAL_RECIPIENTS > 0);
     assert.ok(MAX_PROPOSAL_RECIPIENTS <= MAX_RECIPIENTS_PER_BATCH);
+  });
+});
+
+describe("BULK_LIST_LIMIT", () => {
+  it("is a sane bounded constant", () => {
+    assert.ok(BULK_LIST_LIMIT > 0);
+    // Must stay comfortably below Convex query result limits while covering
+    // the current production dataset (1,357 universities) with headroom.
+    assert.ok(BULK_LIST_LIMIT >= 1_000);
+    assert.ok(BULK_LIST_LIMIT <= 10_000);
   });
 });

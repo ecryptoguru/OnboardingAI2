@@ -2,6 +2,7 @@
 
 import { useAuthActions } from "@convex-dev/auth/react";
 import { RedirectIfAuthenticated } from "@/components/RedirectIfAuthenticated";
+import { withTimeout } from "../authSubmit";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState, useEffect, Suspense } from "react";
@@ -54,12 +55,14 @@ function ResetPasswordForm() {
     }
 
     try {
-      await signIn("password", {
-        flow: "reset-verification",
-        email: email.trim().toLowerCase(),
-        code: code.trim(),
-        newPassword: password,
-      });
+      await withTimeout(
+        signIn("password", {
+          flow: "reset-verification",
+          email: email.trim().toLowerCase(),
+          code: code.trim(),
+          newPassword: password,
+        }),
+      );
       setSuccess(true);
       window.location.href = "/dashboard";
     } catch (err: unknown) {

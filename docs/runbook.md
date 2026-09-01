@@ -38,7 +38,7 @@ npx vercel deploy --prebuilt --prod --yes --scope fusionwaveai
 | `JWT_PRIVATE_KEY` | ✅ set | Auth token signing |
 | `JWKS` | ✅ set | Auth public keys |
 | `SETTINGS_OBFUSCATION_SECRET` | ✅ set | XOR-obfuscation of API keys in `systemSettings` (≥32 chars) |
-| `SITE_URL` | ✅ set | Password-reset callback URL |
+| `SITE_URL` | ✅ set | Auth base URL used by `@convex-dev/auth` (redirect validation) |
 | `SERPER_API_KEY` | ✅ set (legacy; key also in Settings) | Serper discovery |
 | `ADMIN_EMAILS` | ⚠️ **NOT SET** | **Set it.** With it empty, ANY signed-up user passes `validateAdmin` and can wipe all data / read all users. Comma-separated admin emails. |
 | `EMAIL_WEBHOOK_SECRET` | ⚠️ **NOT SET** | Inbound-reply webhook (`/webhooks/email-reply`). Without it, replies are rejected 401 — reply classification never fires. |
@@ -106,6 +106,24 @@ npx convex import backup-<date>.zip --replace --prod
 **Recommended schedule (RPO = 1 day):** a daily `npx convex export` in CI (GitHub Actions) or cron, stored in durable storage the team controls (S3/GCS/Backblaze), retention ≥ 30 days. Convex's platform backups (dashboard → Settings → Snapshot exports) are a second copy. **A backup that has never been restored is a hope, not a backup** — re-run the drill quarterly.
 
 Hygiene: snapshot files contain real PII — never commit them to git; delete local copies after uploading to durable storage.
+
+**Handover snapshot (2026-08-26):** taken before the stabilization release and stored locally at `/tmp/fretbox-handover/backup-2026-08-26.zip` (plus `baseline-2026-08-26.md` row counts and `env-matrix-2026-08-26.md`). Upload it to the team's durable storage and delete the local copy — it contains real PII. Rollback for the release: redeploy the previous Vercel deployment (dashboard → Deployments → Promote) and `npx convex deploy` from the previous commit (`1689f36`); the Convex schema changes in this release are additive only, so the old code runs against the new schema unchanged.
+
+---
+
+## 5.1 E2E test data cleanup
+
+The authenticated E2E suite (`tests/e2e/journeys.spec.ts`) creates exactly two
+kinds of records on the target deployment and does **not** clean them up
+automatically:
+
+- one university named exactly `[E2E] Handover University`
+- emails whose subject starts with `[E2E] Handover test`
+
+After running the suite against a shared/production deployment, delete them
+(via the dashboard, or a scoped internal cleanup query). Nothing else is
+touched by the suite. The controlled send goes only to `E2E_RECIPIENT`
+(default `ankit@fusionwaveai.com`) and only when `E2E_SEND_ALLOWED=1`.
 
 ---
 

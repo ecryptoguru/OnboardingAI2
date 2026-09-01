@@ -82,6 +82,43 @@ export function claimMeetingStatus(
   return { allowed: true, reason: "ok" };
 }
 
+// ─── Finalize / release guards ───────────────────────────────────────────────
+//
+// The Convex mutations in `emails.ts` / `proposals.ts` apply these predicates
+// before patching, so a stale action finalizing after a newer state change
+// (or a duplicate release after a successful send) can never overwrite
+// terminal state.
+
+/** A claimed draft may be finalized as sent only while still `sending`. */
+export function canFinalizeEmailSend(status: string | undefined): boolean {
+  return status === "sending";
+}
+
+/** A claimed draft may be released back to the queue only while `sending`. */
+export function canReleaseEmailSend(status: string | undefined): boolean {
+  return status === "sending";
+}
+
+/** A claimed draft may be marked permanently failed only while `sending`. */
+export function canFailEmailSend(status: string | undefined): boolean {
+  return status === "sending";
+}
+
+/** A proposal email claim may be finalized only while still `sending`. */
+export function canFinalizeProposalEmail(state: string | undefined): boolean {
+  return state === "sending";
+}
+
+/** A proposal email claim may be released only while still `sending`. */
+export function canReleaseProposalEmail(state: string | undefined): boolean {
+  return state === "sending";
+}
+
+/** A meeting claim may be released only while still `creating`. */
+export function canReleaseMeetingClaim(status: string | undefined): boolean {
+  return status === "creating";
+}
+
 const TRANSIENT_PATTERN =
   /\b(rate_limit|429|timeout|etimedout|econnrefused|econnreset|socket hang up|fetch failed|network error|aborted|50[0-3])\b/i;
 

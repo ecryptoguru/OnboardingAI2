@@ -356,7 +356,7 @@ export default function EnrichmentPage() {
 
   return (
     <div
-      className="p-8 h-screen max-h-screen overflow-hidden flex flex-col relative text-zinc-200"
+      className="p-8 h-screen max-h-screen overflow-hidden flex flex-col relative text-foreground"
       suppressHydrationWarning
     >
       <div className="flex items-start justify-between mb-8 flex-shrink-0">

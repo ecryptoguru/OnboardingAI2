@@ -29,8 +29,8 @@ Set these in your Convex dashboard or with `npx convex env set <NAME> <VALUE>`:
 | Variable | Required | Description |
 | --- | --- | --- |
 | `NEXT_PUBLIC_CONVEX_URL` | Yes | Convex API URL for the frontend (`https://<project>.convex.cloud`) |
-| `NEXT_PUBLIC_CONVEX_SITE_URL` | Yes | Convex **site** URL for HTTP actions and webhooks (`https://<project>.convex.site`) |
-| `SITE_URL` | Yes | Public frontend URL for password-reset callbacks (e.g., `http://localhost:3000`) |
+| `NEXT_PUBLIC_CONVEX_SITE_URL` | No | Reference only — webhooks run on the deployment's built-in `*.convex.site` URL; not read by code |
+| `SITE_URL` | Yes | Auth base URL used by `@convex-dev/auth` for redirect validation (e.g., `http://localhost:3000`) |
 | `SETTINGS_OBFUSCATION_SECRET` | Yes | XOR-obfuscation secret for API keys stored in DB (≥ 32 characters) |
 | `GOOGLE_CALENDAR_WEBHOOK_TOKEN` | Recommended | Verify Google Calendar push notification `x-goog-channel-token` |
 | `LLM_DAILY_BUDGET_USD` | Recommended | Daily LLM spend soft cap (default `$50`) |

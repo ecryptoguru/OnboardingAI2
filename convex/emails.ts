@@ -11,7 +11,11 @@ import {
   getCurrentUserId,
   isAdmin,
 } from "./lib/auth_utils";
-import { claimEmailStatus } from "./lib/sendState";
+import { claimEmailStatus, canFinalizeEmailSend, canReleaseEmailSend, canFailEmailSend } from "./lib/sendState";
+import {
+  validateBodyLength,
+  validateSubjectLength,
+} from "./lib/limits";
 import { Id } from "./_generated/dataModel";
 
 const MAX_ANALYTICS_ROWS = 5000;
@@ -176,6 +180,12 @@ export const create = mutation({
   },
   handler: async (ctx, args) => {
     await validateAuth(ctx);
+    // Enforce the same operational limits the UI applies (defense in depth
+    // against oversized client payloads).
+    const subjectError = validateSubjectLength(args.subject);
+    if (subjectError) throw new Error(subjectError);
+    const bodyError = validateBodyLength(args.body);
+    if (bodyError) throw new Error(bodyError);
     const owner_id = await getCurrentUserId(ctx);
     return await ctx.db.insert("emailsSent", {
       ...args,
@@ -424,7 +434,7 @@ export const finalizeSentInternal = internalMutation({
   },
   handler: async (ctx, args) => {
     const email = await ctx.db.get(args.id);
-    if (!email || email.status !== "sending") return;
+    if (!email || !canFinalizeEmailSend(email.status)) return;
     await ctx.db.patch(args.id, {
       status: "sent",
       zeptomail_message_id: args.zeptomail_message_id,
@@ -438,7 +448,7 @@ export const releaseForRetryInternal = internalMutation({
   args: { id: v.id("emailsSent"), error: v.string() },
   handler: async (ctx, args) => {
     const email = await ctx.db.get(args.id);
-    if (!email || email.status !== "sending") return;
+    if (!email || !canReleaseEmailSend(email.status)) return;
     await ctx.db.patch(args.id, {
       status: "pending_approval",
       last_error: args.error,
@@ -451,7 +461,7 @@ export const failPermanentlyInternal = internalMutation({
   args: { id: v.id("emailsSent"), error: v.string() },
   handler: async (ctx, args) => {
     const email = await ctx.db.get(args.id);
-    if (!email || email.status !== "sending") return;
+    if (!email || !canFailEmailSend(email.status)) return;
     await ctx.db.patch(args.id, {
       status: "failed",
       last_error: args.error,
@@ -544,6 +554,10 @@ export const updateDraft = mutation({
   handler: async (ctx, args) => {
     await validateAuth(ctx);
     const { id, subject, body } = args;
+    const subjectError = validateSubjectLength(subject);
+    if (subjectError) throw new Error(subjectError);
+    const bodyError = validateBodyLength(body);
+    if (bodyError) throw new Error(bodyError);
     const email = await ctx.db.get(id);
     if (!email) throw new Error("Email not found");
     const userId = await getCurrentUserId(ctx);

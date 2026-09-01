@@ -79,8 +79,8 @@ These environment variables are read inside `convex/` functions:
 | Variable | Used by | Purpose |
 | --- | --- | --- |
 | `NEXT_PUBLIC_CONVEX_URL` | Auth, client actions | Convex API URL |
-| `NEXT_PUBLIC_CONVEX_SITE_URL` | Webhooks | Site URL for HTTP actions |
-| `SITE_URL` | `convex/auth.config.ts` | Password-reset callback URL |
+| `NEXT_PUBLIC_CONVEX_SITE_URL` | Docs reference only | Not read by code — webhooks run on the deployment's built-in `*.convex.site` URL |
+| `SITE_URL` | `@convex-dev/auth` library | Auth base URL (redirect validation); required by the auth library setup |
 | `SETTINGS_OBFUSCATION_SECRET` | `settings.ts` | XOR obfuscation of stored API keys (≥ 32 chars) |
 | `LLM_DAILY_BUDGET_USD` | `llmBudget.ts`, `lib/llm.ts` | Daily LLM spend soft cap (default `$50`) |
 | `GOOGLE_CALENDAR_WEBHOOK_TOKEN` | `http.ts` | Google Calendar channel token verification |

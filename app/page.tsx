@@ -44,6 +44,7 @@ export default function Home() {
           <Link
             href="https://github.com/ecryptoguru/OnboardingAI2"
             target="_blank"
+            rel="noopener noreferrer"
             className="inline-flex items-center justify-center px-8 py-3.5 rounded-full border border-card-border text-foreground font-medium hover:bg-card transition-colors"
           >
             View Documentation

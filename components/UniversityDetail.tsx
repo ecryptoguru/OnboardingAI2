@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback } from "react";
+import React, { useCallback, useEffect, useRef } from "react";
 import { useQuery, useAction } from "convex/react";
 import { api } from "../convex/_generated/api";
 import { Doc, Id } from "../convex/_generated/dataModel";
@@ -82,6 +82,13 @@ export function UniversityDetail({
   );
   const isDeepEnriching = university?.outreach_stage === "enriching";
   const [enrichStep, setEnrichStep] = useState<string | null>(null);
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const { withKeyCheck, keyModal } = useRequireGeminiKey();
 
@@ -90,12 +97,18 @@ export function UniversityDetail({
     setEnrichStep("Enrichment queued — running in background…");
     try {
       await runEnrichmentChain({ universityId });
+      if (!isMountedRef.current) return;
       setEnrichStep("Queued");
-      setTimeout(() => setEnrichStep(null), 2000);
+      setTimeout(() => {
+        if (isMountedRef.current) setEnrichStep(null);
+      }, 2000);
     } catch (e) {
       console.error(e);
+      if (!isMountedRef.current) return;
       setEnrichStep("Error — check console");
-      setTimeout(() => setEnrichStep(null), 3000);
+      setTimeout(() => {
+        if (isMountedRef.current) setEnrichStep(null);
+      }, 3000);
     }
   }, [universityId, runEnrichmentChain]);
 

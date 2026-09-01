@@ -111,7 +111,7 @@ The following security and maintainability improvements are implemented and in p
 1. **Forgot Password Flow** — Added `/forgot-password` and `/reset-password` pages using Convex Auth's Password provider `reset` email configuration.
 2. **Reset Code Delivery** — Generates a 32-character code, stores it in `authVerificationCodes`, and sends it via ZeptoMail through the existing `actions/email.sendEmail` internal action.
 3. **UI Integration** — "Forgot password?" link on `/sign-in`, email pre-fill via query params on `/reset-password`, and 8-character minimum password validation.
-4. **Env Configuration** — Requires `SITE_URL` (Convex env) for reset-callback URL construction and a valid `zeptomailApiKey` in Dashboard → Settings for email delivery.
+4. **Env Configuration** — Requires `SITE_URL` (Convex env, auth base URL) and a valid `zeptomailApiKey` in Dashboard → Settings for email delivery. The reset email delivers a bare code; no callback URL is embedded.
 
 ---
 

@@ -41,6 +41,7 @@ import {
   extractContactsWithContext,
   matchPhonesToStakeholders,
 } from "../lib/scrapers";
+import { assertPublicTarget } from "../lib/urlSafetyNode";
 import * as Sentry from "@sentry/node";
 
 interface SerperResult {
@@ -92,6 +93,9 @@ function isConcatenatedOrOverlongRole(role?: string | null): boolean {
 }
 
 async function fetchJinaText(targetUrl: string, timeoutMs = 20000) {
+  // Guard before handing the URL to the external reader service: never let a
+  // private/loopback/metadata or non-http target through, even via Jina.
+  await assertPublicTarget(targetUrl);
   const response = await fetch(`https://r.jina.ai/${encodeURIComponent(targetUrl)}`, {
     headers: {
       Accept: "text/plain",
@@ -250,7 +254,17 @@ async function discoverOfficialAdminPages(
       }
       const result = searchResult.value!;
       for (const row of result.organic || []) {
-        if (!row.link || !row.link.includes(domain)) continue;
+        if (!row.link) continue;
+        // Hostname must actually belong to the university domain — a plain
+        // substring check would let "https://attacker.com/?x=university.ac.in"
+        // through and poison the enrichment pipeline.
+        let host: string;
+        try {
+          host = new URL(row.link).hostname.toLowerCase();
+        } catch {
+          continue;
+        }
+        if (host !== domain && !host.endsWith(`.${domain}`)) continue;
         const haystack =
           `${row.link} ${row.title || ""} ${row.snippet || ""}`.toLowerCase();
         let score = 0;

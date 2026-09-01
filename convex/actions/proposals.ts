@@ -510,8 +510,8 @@ export const emailProposal = action({
     <!-- Header -->
     <div style="background:linear-gradient(135deg,#1e40af 0%,#3b82f6 100%);padding:32px 40px;">
       <p style="margin:0 0 4px;color:#bfdbfe;font-size:12px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;">Partnership Proposal</p>
-      <h1 style="margin:0;color:#ffffff;font-size:26px;font-weight:700;line-height:1.2;">${uni.university_name}</h1>
-      <p style="margin:8px 0 0;color:#93c5fd;font-size:14px;">Prepared for ${stakeholderName}</p>
+      <h1 style="margin:0;color:#ffffff;font-size:26px;font-weight:700;line-height:1.2;">${escapeHtml(uni.university_name)}</h1>
+      <p style="margin:8px 0 0;color:#93c5fd;font-size:14px;">Prepared for ${escapeHtml(stakeholderName)}</p>
     </div>
 
     <div style="padding:32px 40px;">
@@ -551,7 +551,7 @@ export const emailProposal = action({
         benefitsList
           ? `
       <div style="background:#f0fdf4;border-radius:8px;padding:20px 24px;margin-bottom:24px;">
-        <p style="margin:0 0 12px;font-size:11px;font-weight:700;color:#15803d;letter-spacing:1px;text-transform:uppercase;">Key Benefits for ${uni.university_name}</p>
+        <p style="margin:0 0 12px;font-size:11px;font-weight:700;color:#15803d;letter-spacing:1px;text-transform:uppercase;">Key Benefits for ${escapeHtml(uni.university_name)}</p>
         <ul style="margin:0;padding-left:20px;">${benefitsList}</ul>
       </div>`
           : ""

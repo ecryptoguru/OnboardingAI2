@@ -9,6 +9,9 @@ import { validateAuth } from "./lib/auth_utils";
 import {
   claimMeetingStatus,
   claimProposalEmailState,
+  canFinalizeProposalEmail,
+  canReleaseProposalEmail,
+  canReleaseMeetingClaim,
 } from "./lib/sendState";
 
 export const listAll = query({
@@ -115,7 +118,7 @@ export const finalizeEmailSendInternal = internalMutation({
   args: { id: v.id("proposals") },
   handler: async (ctx, args) => {
     const proposal = await ctx.db.get(args.id);
-    if (!proposal || proposal.email_send_state !== "sending") return;
+    if (!proposal || !canFinalizeProposalEmail(proposal.email_send_state)) return;
     await ctx.db.patch(args.id, {
       email_send_state: "sent",
       email_send_started_at: undefined,
@@ -129,7 +132,7 @@ export const releaseEmailSendInternal = internalMutation({
   args: { id: v.id("proposals") },
   handler: async (ctx, args) => {
     const proposal = await ctx.db.get(args.id);
-    if (!proposal || proposal.email_send_state !== "sending") return;
+    if (!proposal || !canReleaseProposalEmail(proposal.email_send_state)) return;
     await ctx.db.patch(args.id, {
       email_send_state: undefined,
       email_send_started_at: undefined,
@@ -169,7 +172,7 @@ export const releaseMeetingClaimInternal = internalMutation({
   args: { id: v.id("proposals"), meeting_date: v.number() },
   handler: async (ctx, args) => {
     const proposal = await ctx.db.get(args.id);
-    if (!proposal || proposal.calendar_event_status !== "creating") return;
+    if (!proposal || !canReleaseMeetingClaim(proposal.calendar_event_status)) return;
     await ctx.db.patch(args.id, {
       calendar_event_status: "pending",
       calendar_claim_started_at: undefined,

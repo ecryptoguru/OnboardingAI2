@@ -16,7 +16,10 @@ import {
  *  - The send journey runs only with E2E_SEND_ALLOWED=1.
  *  - The only email recipient is E2E_RECIPIENT (approved test inbox).
  *  - The only university record created is named "[E2E] Handover University".
- *  - Cleanup is scoped to that exact record name; nothing else is touched.
+ *
+ * Cleanup is NOT automatic. After a run against a shared deployment, remove
+ * the "[E2E] Handover University" record and any "[E2E] Handover test" emails
+ * manually (see docs/runbook.md — "E2E test data cleanup").
  */
 
 const E2E_UNIVERSITY = "[E2E] Handover University";

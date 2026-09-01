@@ -58,6 +58,15 @@ const htmlWrap = (content: string) => `<!DOCTYPE html>
 const p = (text: string, style = "") =>
   `<p style="margin:0 0 16px 0;${style}">${text}</p>`;
 
+/** Escapes user/LLM-provided values before they are interpolated into HTML. */
+const esc = (text: string) =>
+  text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+
 const strong = (text: string) =>
   `<strong style="color:#111827;">${text}</strong>`;
 
@@ -78,7 +87,11 @@ const divider = () =>
 
 export const TEMPLATES = {
   // 1. Initial Outreach
-  STEP_1: (name: string, uniName: string, personalizedOpener: string) => ({
+  STEP_1: (name: string, uniName: string, personalizedOpener: string) => {
+    const eName = esc(name);
+    const eUni = esc(uniName);
+    const eOpener = esc(personalizedOpener);
+    return {
     subject: `Partnership Inquiry: Fretbox x ${uniName}`,
     body: `
 Dear ${name},
@@ -100,9 +113,9 @@ Ashish Gupta
 Founder, Fretbox
     `.trim(),
     html: htmlWrap(`
-      ${p(`Dear ${strong(name)},`)}
-      ${p(personalizedOpener)}
-      ${p(`I'm reaching out from <strong style="color:#111827;">Fretbox</strong> — a campus management and student engagement platform built specifically for leading Indian universities like ${strong(uniName)}.`)}
+      ${p(`Dear ${strong(eName)},`)}
+      ${p(eOpener)}
+      ${p(`I'm reaching out from <strong style="color:#111827;">Fretbox</strong> — a campus management and student engagement platform built specifically for leading Indian universities like ${strong(eUni)}.`)}
       ${p("Our platform helps institutions:")}
       ${bullet([
         "Automate administrative workflows and reduce manual overhead",
@@ -110,16 +123,20 @@ Founder, Fretbox
         "Improve real-time communication between campus stakeholders",
         "Drive better student outcomes through data-driven insights",
       ])}
-      ${p("I'd love to show you how Fretbox can create real value for " + strong(uniName) + '. Would you have <strong style="color:#111827;">10 minutes</strong> for a quick introductory call this week?')}
+      ${p("I'd love to show you how Fretbox can create real value for " + strong(eUni) + '. Would you have <strong style="color:#111827;">10 minutes</strong> for a quick introductory call this week?')}
       ${ctaButton("https://calendly.com/fretbox-demo", "Book a 10-min Call")}
       ${divider()}
       ${p("Best regards,", "margin-bottom:4px;")}
       ${p(`${strong("Ashish Gupta")}<br/><span style="color:#6b7280;font-size:13px;">Founder, Fretbox</span>`)}
     `),
-  }),
+    };
+  },
 
   // 2. Follow-up 1 (4 days later)
-  STEP_2: (name: string, uniName: string) => ({
+  STEP_2: (name: string, uniName: string) => {
+    const eName = esc(name);
+    const eUni = esc(uniName);
+    return {
     subject: `Following up: Transforming ${uniName}'s campus experience`,
     body: `
 Hi ${name},
@@ -136,22 +153,26 @@ Ashish Gupta
 Founder, Fretbox
     `.trim(),
     html: htmlWrap(`
-      ${p(`Hi ${strong(name)},`)}
-      ${p(`I wanted to follow up on my earlier email. I know your schedule is demanding, but I genuinely believe Fretbox's digital-first approach to campus operations could make a meaningful difference for ${strong(uniName)}.`)}
+      ${p(`Hi ${strong(eName)},`)}
+      ${p(`I wanted to follow up on my earlier email. I know your schedule is demanding, but I genuinely believe Fretbox's digital-first approach to campus operations could make a meaningful difference for ${strong(eUni)}.`)}
       <div style="background:#f0fdf4;border-left:3px solid #22c55e;border-radius:4px;padding:14px 18px;margin:0 0 20px 0;">
         <p style="margin:0;font-size:14px;color:#15803d;font-weight:600;">📊 Results from similar institutions:</p>
         <p style="margin:6px 0 0;font-size:14px;color:#166534;">Up to <strong>30% reduction</strong> in administrative overhead within the first semester.</p>
       </div>
-      ${p(`Would you be open to a <strong style="color:#111827;">15-minute demo</strong> next Tuesday or Wednesday? I can walk you through exactly how Fretbox would work for ${uniName}.`)}
+      ${p(`Would you be open to a <strong style="color:#111827;">15-minute demo</strong> next Tuesday or Wednesday? I can walk you through exactly how Fretbox would work for ${eUni}.`)}
       ${ctaButton("https://calendly.com/fretbox-demo", "Pick a Time")}
       ${divider()}
       ${p("Best,", "margin-bottom:4px;")}
       ${p(`${strong("Ashish Gupta")}<br/><span style="color:#6b7280;font-size:13px;">Founder, Fretbox</span>`)}
     `),
-  }),
+    };
+  },
 
   // 3. Follow-up 2 (Value Add - 7 days later)
-  STEP_3: (name: string, newsSignal: string) => ({
+  STEP_3: (name: string, newsSignal: string) => {
+    const eName = esc(name);
+    const eNews = esc(newsSignal);
+    return {
     subject: `Digital transformation at your fingertips`,
     body: `
 Hi ${name},
@@ -168,8 +189,8 @@ Ashish Gupta
 Founder, Fretbox
     `.trim(),
     html: htmlWrap(`
-      ${p(`Hi ${strong(name)},`)}
-      ${p(`I saw that <em style="color:#374151;">${newsSignal}</em> — that's a great milestone!`)}
+      ${p(`Hi ${strong(eName)},`)}
+      ${p(`I saw that <em style="color:#374151;">${eNews}</em> — that's a great milestone!`)}
       ${p("As institutions grow, the right digital backbone becomes critical to student success. Fretbox is built to scale with you:")}
       ${bullet([
         '<strong style="color:#111827;">Hostel &amp; Facility Management</strong> — real-time occupancy, maintenance, and communication',
@@ -183,10 +204,13 @@ Founder, Fretbox
       ${p("Cheers,", "margin-bottom:4px;")}
       ${p(`${strong("Ashish Gupta")}<br/><span style="color:#6b7280;font-size:13px;">Founder, Fretbox</span>`)}
     `),
-  }),
+    };
+  },
 
   // 4. Break-up / Final Follow-up (10 days later)
-  STEP_4: (name: string) => ({
+  STEP_4: (name: string) => {
+    const eName = esc(name);
+    return {
     subject: `One last check-in`,
     body: `
 Hi ${name},
@@ -201,7 +225,7 @@ Ashish Gupta
 Founder, Fretbox
     `.trim(),
     html: htmlWrap(`
-      ${p(`Hi ${strong(name)},`)}
+      ${p(`Hi ${strong(eName)},`)}
       ${p("This will be my last email — I completely understand if the timing isn't right for exploring a new platform.")}
       ${p("Whenever the time is right to digitize your campus operations, Fretbox will be here. We're building this specifically for forward-thinking Indian institutions.")}
       <div style="background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px;margin:0 0 20px 0;">
@@ -215,15 +239,19 @@ Founder, Fretbox
       ${p("Warmly,", "margin-bottom:4px;")}
       ${p(`${strong("Ashish Gupta")}<br/><span style="color:#6b7280;font-size:13px;">Founder, Fretbox</span>`)}
     `),
-  }),
+    };
+  },
 
   // 5. Auto-Reply: Positive Interest / More Info
   POSITIVE_INTEREST: (name: string, uniName: string, meetLink?: string) => {
+    const eName = esc(name);
+    const eUni = esc(uniName);
+    const eMeetLink = meetLink ? esc(meetLink) : undefined;
     const ctaText = meetLink
       ? `You can join the meeting here: ${meetLink}`
       : "Would you like to schedule a 15-minute demo to see the platform in action? Simply reply to this email with a few times that work for you.";
     const ctaLabel = meetLink ? "Join Google Meet →" : "Book a 15-min Demo";
-    const ctaHref = meetLink ?? "https://fretbox.in/book";
+    const ctaHref = eMeetLink ?? "https://fretbox.in/book";
     return {
       subject: `Deep dive: Fretbox x ${uniName}`,
       body: `
@@ -241,19 +269,19 @@ Ashish Gupta
 Founder, Fretbox
     `.trim(),
       html: htmlWrap(`
-      ${p(`Hi ${strong(name)},`)}
-      ${p(`Glad to hear you're interested! Here's a quick overview of what Fretbox can do for ${strong(uniName)}:`)}
+      ${p(`Hi ${strong(eName)},`)}
+      ${p(`Glad to hear you're interested! Here's a quick overview of what Fretbox can do for ${strong(eUni)}:`)}
       ${bullet([
         '<strong style="color:#111827;">Hostel Management</strong> — room allocation, visitor tracking, warden dashboards',
         '<strong style="color:#111827;">Facility Operations</strong> — maintenance requests, asset tracking, vendor management',
         '<strong style="color:#111827;">Student Engagement</strong> — digital notice boards, event management, feedback loops',
         '<strong style="color:#111827;">Admin Automation</strong> — fee management, attendance, compliance reporting',
       ])}
-      ${p(`I'd love to walk you through a <strong style="color:#111827;">live demo</strong> customized specifically for ${strong(uniName)}.`)}
+      ${p(`I'd love to walk you through a <strong style="color:#111827;">live demo</strong> customized specifically for ${strong(eUni)}.`)}
       ${
-        meetLink
+        eMeetLink
           ? p(
-              `Join the call here: <a href="${meetLink}" style="color:#3b82f6;text-decoration:none;font-weight:600;">${meetLink}</a>`,
+              `Join the call here: <a href="${eMeetLink}" style="color:#3b82f6;text-decoration:none;font-weight:600;">${eMeetLink}</a>`,
             )
           : p(
               "Simply reply to this email with a few times that work for you and I will send over a calendar invite.",
@@ -269,11 +297,17 @@ Founder, Fretbox
 
   // 6. Auto-Reply: Meeting Request Acknowledgement
   MEETING_REQUEST_ACK: (name: string, uniName: string, meetLink?: string) => {
+    const eName = esc(name);
+    const eUni = esc(uniName);
+    const eMeetLink = meetLink ? esc(meetLink) : undefined;
     const ctaText = meetLink
       ? `Your meeting is confirmed. Join here: ${meetLink}`
       : "To make our time most productive, feel free to book a specific slot that works for you.";
+    const eCtaText = eMeetLink
+      ? `Your meeting is confirmed. Join here: ${eMeetLink}`
+      : "To make our time most productive, feel free to book a specific slot that works for you.";
     const ctaLabel = meetLink ? "Join Google Meet →" : "Confirm Your Slot →";
-    const ctaHref = meetLink ?? "https://fretbox.in/book";
+    const ctaHref = eMeetLink ?? "https://fretbox.in/book";
     return {
       subject: `Let's connect: Fretbox x ${uniName}`,
       body: `
@@ -291,21 +325,21 @@ Ashish Gupta
 Founder, Fretbox
     `.trim(),
       html: htmlWrap(`
-      ${p(`Hi ${strong(name)},`)}
+      ${p(`Hi ${strong(eName)},`)}
       <div style="background:#ecfdf5;border-left:3px solid #10b981;border-radius:4px;padding:14px 18px;margin:0 0 24px 0;">
         <p style="margin:0;font-size:15px;color:#065f46;font-weight:600;">🎉 Meeting request received!</p>
-        <p style="margin:6px 0 0;font-size:14px;color:#047857;">I'm excited to connect with you and the ${uniName} team.</p>
+        <p style="margin:6px 0 0;font-size:14px;color:#047857;">I'm excited to connect with you and the ${eUni} team.</p>
       </div>
-      ${p(ctaText)}
+      ${p(eCtaText)}
       ${
-        meetLink
+        eMeetLink
           ? p(
-              `<a href="${meetLink}" style="color:#3b82f6;text-decoration:none;font-weight:600;">${meetLink}</a>`,
+              `<a href="${eMeetLink}" style="color:#3b82f6;text-decoration:none;font-weight:600;">${eMeetLink}</a>`,
             )
           : ""
       }
       ${ctaButton(ctaHref, ctaLabel)}
-      ${p('Before our call, I\'ll prepare a <strong style="color:#111827;">custom walkthrough</strong> tailored specifically to the needs and scale of ' + strong(uniName) + " — so we can make the most of every minute.")}
+      ${p('Before our call, I\'ll prepare a <strong style="color:#111827;">custom walkthrough</strong> tailored specifically to the needs and scale of ' + strong(eUni) + " — so we can make the most of every minute.")}
       ${divider()}
       ${p("See you soon,", "margin-bottom:4px;")}
       ${p(`${strong("Ashish Gupta")}<br/><span style="color:#6b7280;font-size:13px;">Founder, Fretbox</span>`)}

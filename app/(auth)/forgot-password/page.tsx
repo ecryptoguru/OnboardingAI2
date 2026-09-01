@@ -2,6 +2,7 @@
 
 import { useAuthActions } from "@convex-dev/auth/react";
 import { RedirectIfAuthenticated } from "@/components/RedirectIfAuthenticated";
+import { withTimeout } from "../authSubmit";
 import Link from "next/link";
 import { useState } from "react";
 
@@ -32,7 +33,9 @@ export default function ForgotPasswordPage() {
     }
 
     try {
-      await signIn("password", { flow: "reset", email: emailValue });
+      await withTimeout(
+        signIn("password", { flow: "reset", email: emailValue }),
+      );
       setSent(true);
     } catch (err: unknown) {
       console.error(err);
