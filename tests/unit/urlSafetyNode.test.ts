@@ -67,19 +67,48 @@ test("downloadPdfBuffer rejects private URLs before fetching", async () => {
 });
 
 test("fetchPublicUrl revalidates redirects before following them", async () => {
-  let calls = 0;
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = (async () => {
-    calls += 1;
+  const addresses: string[] = [];
+  const resolve = async (hostname: string) =>
+    hostname === "public.example" ? ["93.184.216.34"] : ["10.0.0.5"];
+  const request = async (_target: URL, address: string) => {
+    addresses.push(address);
     return new Response(null, {
       status: 302,
-      headers: { location: "http://169.254.169.254/latest/meta-data/" },
+      headers: { location: "http://private.example/latest/meta-data/" },
     });
-  }) as typeof fetch;
-  try {
-    await assert.rejects(fetchPublicUrl("https://93.184.216.34/file.pdf"), /private/);
-    assert.equal(calls, 1);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  };
+
+  await assert.rejects(
+    fetchPublicUrl("https://public.example/file.pdf", {}, 5, resolve, request),
+    /non-public address/,
+  );
+  assert.deepEqual(addresses, ["93.184.216.34"]);
+});
+
+test("fetchPublicUrl pins each request to its validated address", async () => {
+  const seen: Array<{ hostname: string; address: string }> = [];
+  const resolve = async (hostname: string) =>
+    hostname === "first.example" ? ["93.184.216.34"] : ["142.250.72.14"];
+  const request = async (target: URL, address: string) => {
+    seen.push({ hostname: target.hostname, address });
+    return seen.length === 1
+      ? new Response(null, {
+          status: 302,
+          headers: { location: "https://second.example/result" },
+        })
+      : new Response("ok");
+  };
+
+  const response = await fetchPublicUrl(
+    "https://first.example/start",
+    {},
+    5,
+    resolve,
+    request,
+  );
+  assert.equal(await response.text(), "ok");
+  assert.deepEqual(seen, [
+    { hostname: "first.example", address: "93.184.216.34" },
+    { hostname: "second.example", address: "142.250.72.14" },
+  ]);
 });
