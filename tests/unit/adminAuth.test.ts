@@ -2,6 +2,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert";
+import { validateAuth } from "../../convex/lib/auth_utils";
 
 /**
  * Mirror of validateAdmin from convex/lib/auth_utils.ts
@@ -21,8 +22,7 @@ function extractEmail(identity: Identity): string {
 
 function isAdmin(identity: Identity, adminEmails: string[]): boolean {
   const clean = extractEmail(identity);
-  if (adminEmails.length === 0) return true;
-  return adminEmails.includes(clean);
+  return adminEmails.length > 0 && adminEmails.includes(clean);
 }
 
 describe("Admin Auth - Email Extraction", () => {
@@ -76,11 +76,55 @@ describe("Admin Auth - Permission Check", () => {
     );
   });
 
-  it("allows anyone when admin list is empty (dev mode)", () => {
-    assert.strictEqual(isAdmin({ email: "anyone@test.com" }, []), true);
+  it("fails closed when the admin list is empty", () => {
+    assert.strictEqual(isAdmin({ email: "anyone@test.com" }, []), false);
   });
 
   it("rejects empty email even when admin list is set", () => {
     assert.strictEqual(isAdmin({}, admins), false);
+  });
+});
+
+describe("Application access gate", () => {
+  it("allows only configured operator identities", async () => {
+    const previous = process.env.ADMIN_EMAILS;
+    process.env.ADMIN_EMAILS = "operator@example.com";
+    try {
+      await assert.doesNotReject(
+        validateAuth({
+          auth: {
+            getUserIdentity: async () => ({ email: "Operator@Example.com" }),
+          },
+        }),
+      );
+      await assert.rejects(
+        validateAuth({
+          auth: {
+            getUserIdentity: async () => ({ email: "other@example.com" }),
+          },
+        }),
+        /Forbidden/,
+      );
+    } finally {
+      if (previous === undefined) delete process.env.ADMIN_EMAILS;
+      else process.env.ADMIN_EMAILS = previous;
+    }
+  });
+
+  it("fails closed without an operator allowlist", async () => {
+    const previous = process.env.ADMIN_EMAILS;
+    delete process.env.ADMIN_EMAILS;
+    try {
+      await assert.rejects(
+        validateAuth({
+          auth: {
+            getUserIdentity: async () => ({ email: "operator@example.com" }),
+          },
+        }),
+        /Forbidden/,
+      );
+    } finally {
+      if (previous !== undefined) process.env.ADMIN_EMAILS = previous;
+    }
   });
 });

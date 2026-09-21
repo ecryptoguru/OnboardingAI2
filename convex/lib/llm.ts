@@ -1005,7 +1005,9 @@ export async function embed(
     );
     return result;
   } catch (e) {
-    console.warn("[LLM:Embed] Embedding API failed — returning zero vector:", e instanceof Error ? e.message : String(e));
+    console.warn("[LLM:Embed] Embedding API failed — returning zero vector", {
+      errorType: e instanceof Error ? e.name : "UnknownError",
+    });
     return new Array(768).fill(0);
   }
 }

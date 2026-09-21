@@ -2,7 +2,9 @@ import { mutation, query, action, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { v } from "convex/values";
 import { GoogleGenAI } from "@google/genai";
-import { validateAuth } from "./lib/auth_utils";
+// Every public operation in this module reads, tests, changes, or removes
+// deployment-wide provider credentials. Authentication alone is insufficient.
+import { validateAdmin as validateAuth } from "./lib/auth_utils";
 import { getRequiredEnv, getOptionalEnv } from "./lib/env";
 import { MODELS } from "./lib/models";
 
@@ -1113,4 +1115,3 @@ export const removeZeptomailFromName = mutation({
     return { success: true };
   },
 });
-

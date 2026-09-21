@@ -38,7 +38,7 @@ Set these in your Convex dashboard or with `npx convex env set <NAME> <VALUE>`:
 | `TEST_WEBHOOK_SECRET` | Recommended | Bearer token required for HTTP test endpoints |
 | `ZEPTOMAIL_WEBHOOK_SECRET` | Recommended | HMAC secret for `/webhooks/zeptomail` |
 | `EMAIL_WEBHOOK_SECRET` | Recommended | Bearer token for `/webhooks/email-reply` |
-| `ADMIN_EMAILS` | Optional | Comma-separated admin emails for `validateAdmin` (leave empty in dev to allow all authenticated users) |
+| `ADMIN_EMAILS` | Required | Comma-separated operator emails allowed to access application data; missing configuration fails closed |
 | `SKIP_RATE_LIMITS` | Optional | Set `true` **only** for local testing; must be unset in production |
 | `SENTRY_DSN` / `NEXT_PUBLIC_SENTRY_DSN` | Optional | Sentry server/client error tracking DSN |
 | `CONVEX_DEPLOYMENT` | Optional | Deployment name used by `npx convex dev` (e.g., `dev:your-project`) |
@@ -63,7 +63,7 @@ API keys and sender details are managed in **Settings → API Keys**. Values are
 - **Email / Password Auth**: Convex Auth Password provider (`convex/auth.ts` and `convex/auth.config.ts`).
 - **Forgot Password**: Request a reset code at `/forgot-password` and set a new password on `/reset-password`. Reset codes are sent through ZeptoMail and expire in one hour.
 - **Client-Side Auth Guard**: Dashboard routes are protected by `components/AuthGuard.tsx`, which uses `useConvexAuth` + `next/navigation` to redirect unauthenticated users to `/sign-in`. The landing page (`/`) renders instantly without a blocking loading spinner and redirects authenticated users via `RedirectIfAuthenticated`.
-- **Admin gating**: Use `ADMIN_EMAILS` to restrict access to admin-only routes; leave empty in local dev to allow all authenticated users.
+- **Operator gating**: Set `ADMIN_EMAILS` to the accounts allowed to access application data. Missing configuration fails closed.
 
 ## Tech Stack
 

@@ -573,7 +573,9 @@ export const enrichGovernmentData = internalAction({
               if (score > 0) allUrls.push({ url: r.link, score });
             }
           } catch (e) {
-            console.warn(`[GovData] Serper query failed: "${q}"`, e instanceof Error ? e.message : String(e));
+            console.warn("[GovData] Serper query failed", {
+              errorType: e instanceof Error ? e.name : "UnknownError",
+            });
           }
         }
       }

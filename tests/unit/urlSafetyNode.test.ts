@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { assertPublicTarget } from "../../convex/lib/urlSafetyNode";
+import {
+  assertPublicTarget,
+  fetchPublicUrl,
+} from "../../convex/lib/urlSafetyNode";
 import { downloadPdfBuffer } from "../../convex/lib/scrapers";
 
 test("assertPublicTarget rejects private IP literals without DNS", async () => {
@@ -61,4 +64,51 @@ test("downloadPdfBuffer rejects private URLs before fetching", async () => {
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("fetchPublicUrl revalidates redirects before following them", async () => {
+  const addresses: string[] = [];
+  const resolve = async (hostname: string) =>
+    hostname === "public.example" ? ["93.184.216.34"] : ["10.0.0.5"];
+  const request = async (_target: URL, address: string) => {
+    addresses.push(address);
+    return new Response(null, {
+      status: 302,
+      headers: { location: "http://private.example/latest/meta-data/" },
+    });
+  };
+
+  await assert.rejects(
+    fetchPublicUrl("https://public.example/file.pdf", {}, 5, resolve, request),
+    /non-public address/,
+  );
+  assert.deepEqual(addresses, ["93.184.216.34"]);
+});
+
+test("fetchPublicUrl pins each request to its validated address", async () => {
+  const seen: Array<{ hostname: string; address: string }> = [];
+  const resolve = async (hostname: string) =>
+    hostname === "first.example" ? ["93.184.216.34"] : ["142.250.72.14"];
+  const request = async (target: URL, address: string) => {
+    seen.push({ hostname: target.hostname, address });
+    return seen.length === 1
+      ? new Response(null, {
+          status: 302,
+          headers: { location: "https://second.example/result" },
+        })
+      : new Response("ok");
+  };
+
+  const response = await fetchPublicUrl(
+    "https://first.example/start",
+    {},
+    5,
+    resolve,
+    request,
+  );
+  assert.equal(await response.text(), "ok");
+  assert.deepEqual(seen, [
+    { hostname: "first.example", address: "93.184.216.34" },
+    { hostname: "second.example", address: "142.250.72.14" },
+  ]);
 });
