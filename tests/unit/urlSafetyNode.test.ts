@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { assertPublicTarget } from "../../convex/lib/urlSafetyNode";
+import {
+  assertPublicTarget,
+  fetchPublicUrl,
+} from "../../convex/lib/urlSafetyNode";
 import { downloadPdfBuffer } from "../../convex/lib/scrapers";
 
 test("assertPublicTarget rejects private IP literals without DNS", async () => {
@@ -58,6 +61,24 @@ test("downloadPdfBuffer rejects private URLs before fetching", async () => {
       /private/,
     );
     assert.equal(fetched, false);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("fetchPublicUrl revalidates redirects before following them", async () => {
+  let calls = 0;
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    calls += 1;
+    return new Response(null, {
+      status: 302,
+      headers: { location: "http://169.254.169.254/latest/meta-data/" },
+    });
+  }) as typeof fetch;
+  try {
+    await assert.rejects(fetchPublicUrl("https://93.184.216.34/file.pdf"), /private/);
+    assert.equal(calls, 1);
   } finally {
     globalThis.fetch = originalFetch;
   }

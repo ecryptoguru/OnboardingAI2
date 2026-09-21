@@ -171,7 +171,9 @@ export function DocumentMailerModal({
       setBodyFile(uploaded);
       setBodyText(result.text);
       if (result.messages.length > 0) {
-        console.warn("docx parse warnings:", result.messages);
+        console.warn("docx parse completed with warnings", {
+          warningCount: result.messages.length,
+        });
       }
     } catch (err) {
       console.error(err);

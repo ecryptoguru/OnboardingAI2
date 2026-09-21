@@ -4,7 +4,7 @@ import { extractText, extractTextItems } from "unpdf";
 
 import { normalizeIndianPhone, withRetry } from "./utils";
 import { normalizeRoleText, normalizeStakeholderRole } from "./roleRegistry";
-import { assertPublicTarget } from "./urlSafetyNode";
+import { fetchPublicUrl } from "./urlSafetyNode";
 
 // ─── Firecrawl API Client ──────────────────────────────────────────────────
 // Provides synchronous Map (sitemap discovery) and Scrape (single-page) calls.
@@ -280,12 +280,11 @@ export function filterPdfUrls(
  * Centralises fetch logic so extractPdfText + extractPdfTables can share one download.
  */
 export async function downloadPdfBuffer(url: string): Promise<Buffer> {
-  // SSRF guard: only fetch public http(s) targets (DNS rebinding defense).
-  // Runs before the retry loop so unsafe URLs fail fast without retries.
-  await assertPublicTarget(url);
   return withRetry(
     async () => {
-      const response = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      const response = await fetchPublicUrl(url, {
+        signal: AbortSignal.timeout(15000),
+      });
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}`);
       }

@@ -9,7 +9,7 @@ import {
   looksLikeOwnedDomain,
   rankWebsiteCandidates,
 } from "../lib/discoveryCandidates";
-import { assertPublicTarget } from "../lib/urlSafetyNode";
+import { assertPublicTarget, fetchPublicUrl } from "../lib/urlSafetyNode";
 import { withRetry } from "../lib/utils";
 import { createSerperBudget, runWithSerperBudget } from "../lib/serperBudget";
 
@@ -200,7 +200,7 @@ export const validateWebsite = internalAction({
       method: "HEAD" | "GET",
     ): Promise<boolean> {
       try {
-        const response = await fetch(targetUrl, {
+        const response = await fetchPublicUrl(targetUrl, {
           method,
           signal: AbortSignal.timeout(8000),
         });
